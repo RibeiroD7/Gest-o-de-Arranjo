@@ -1,8 +1,10 @@
 """
 Geração do PDF da Lista de Oradores Públicos (envio ao superintendente).
 
-Implementado em reportlab (sem depender de Excel/LibreOffice), para produzir
-resultado idêntico em Windows, Linux, macOS e celular.
+Implementado em reportlab (sem depender de Excel/LibreOffice), reproduzindo o
+layout do modelo oficial: título à esquerda e congregação à direita, bloco de
+cabeçalho em duas colunas e tabela Oradores / Contato / Esboços / Notas.
+Resultado idêntico em Windows, Linux, macOS e celular.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
@@ -23,10 +25,14 @@ from database import get_connection
 TITULO = "Lista de Oradores Públicos"
 
 COR_TEXTO = colors.HexColor("#1a1a1a")
-COR_LABEL = colors.HexColor("#555555")
-COR_CABECALHO_TABELA = colors.HexColor("#e8e8e8")
-COR_LINHA = colors.HexColor("#bbbbbb")
-COR_ZEBRA = colors.HexColor("#f6f6f6")
+COR_CABECALHO_TABELA = colors.HexColor("#d9d9d9")
+COR_LINHA = colors.HexColor("#8a8a8a")
+
+# Larguras da tabela (soma ≈ 18 cm, dentro das margens de 1,5 cm do A4)
+COL_ORADORES = 6.6 * cm
+COL_CONTATO = 3.4 * cm
+COL_ESBOCOS = 4.6 * cm
+COL_NOTAS = 3.4 * cm
 
 
 def _formatar_esbocos(temas: str, observacoes: str) -> str:
@@ -130,8 +136,31 @@ def _nome_arquivo_pdf() -> str:
     return f"Lista_Oradores_Envio_{datetime.now().strftime('%Y-%m')}.pdf"
 
 
+def _linha_titulo(config: dict) -> Table:
+    """Título à esquerda e congregação - cidade à direita (como no modelo)."""
+    nome = config.get("nome_congregacao") or "Minha congregação"
+    cidade = (config.get("cidade") or "").strip()
+    direita = f"{nome} - {cidade}" if cidade else nome
+
+    est = ParagraphStyle("titEsq", fontName="Helvetica-Bold", fontSize=16,
+                         textColor=COR_TEXTO, leading=19)
+    est_dir = ParagraphStyle("titDir", parent=est, alignment=TA_RIGHT)
+
+    tabela = Table([[Paragraph(TITULO, est), Paragraph(direita, est_dir)]],
+                   colWidths=[9 * cm, 9 * cm])
+    tabela.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LINEBELOW", (0, 0), (-1, -1), 1, COR_TEXTO),
+    ]))
+    return tabela
+
+
 def _bloco_cabecalho(config: dict) -> Table:
-    """Bloco superior com dados da congregação (esquerda) e coordenador (direita)."""
+    """Congregação/endereço/reunião à esquerda; coordenador à direita."""
     nome = config.get("nome_congregacao") or "Minha congregação"
     circuito = (config.get("circuito") or "").strip()
     cidade = (config.get("cidade") or "").strip()
@@ -144,29 +173,27 @@ def _bloco_cabecalho(config: dict) -> Table:
     )
     endereco1, endereco2 = _linhas_endereco(config.get("endereco", ""))
 
-    est_forte = ParagraphStyle("forte", fontName="Helvetica-Bold", fontSize=11,
-                               textColor=COR_TEXTO, leading=14)
-    est_normal = ParagraphStyle("normal", fontName="Helvetica", fontSize=9.5,
-                                textColor=COR_TEXTO, leading=13)
-    est_label = ParagraphStyle("label", fontName="Helvetica", fontSize=8.5,
-                               textColor=COR_LABEL, leading=12)
+    forte = ParagraphStyle("forte", fontName="Helvetica-Bold", fontSize=12,
+                           textColor=COR_TEXTO, leading=16)
+    normal = ParagraphStyle("normal", fontName="Helvetica", fontSize=10,
+                            textColor=COR_TEXTO, leading=14)
 
-    esquerda = [Paragraph(f"{nome}" + (f" ({circuito})" if circuito else ""), est_forte)]
+    esquerda = [Paragraph(f"{nome}" + (f" ({circuito})" if circuito else ""), forte)]
     for texto in (endereco1, endereco2, cidade, cep):
         if texto:
-            esquerda.append(Paragraph(texto, est_normal))
+            esquerda.append(Paragraph(texto, normal))
     if reuniao:
-        esquerda.append(Spacer(1, 4))
-        esquerda.append(Paragraph("Reunião de fim de semana", est_label))
-        esquerda.append(Paragraph(reuniao, est_normal))
+        esquerda.append(Spacer(1, 6))
+        esquerda.append(Paragraph("Reunião de fim de semana", forte))
+        esquerda.append(Paragraph(reuniao, normal))
 
-    direita = [Paragraph("Coordenador de discursos públicos", est_label)]
+    direita = [Paragraph("Coordenador de discursos públicos", forte)]
     if coordenador:
-        direita.append(Paragraph(coordenador, est_normal))
+        direita.append(Paragraph(coordenador, normal))
     if telefone:
-        direita.append(Paragraph(f"Tel {telefone}", est_normal))
+        direita.append(Paragraph(f"Tel {telefone}", normal))
 
-    tabela = Table([[esquerda, direita]], colWidths=[11 * cm, 7 * cm])
+    tabela = Table([[esquerda, direita]], colWidths=[10.5 * cm, 7.5 * cm])
     tabela.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -180,10 +207,10 @@ def _bloco_cabecalho(config: dict) -> Table:
 def _tabela_oradores(oradores: list[dict]) -> Table:
     est_cel = ParagraphStyle("cel", fontName="Helvetica", fontSize=9,
                              textColor=COR_TEXTO, leading=11)
-    est_cel_nome = ParagraphStyle("celnome", fontName="Helvetica-Bold", fontSize=9,
-                                  textColor=COR_TEXTO, leading=11)
-    est_cab = ParagraphStyle("cab", fontName="Helvetica-Bold", fontSize=9,
-                             textColor=COR_TEXTO, leading=11, alignment=TA_LEFT)
+    est_nome = ParagraphStyle("celnome", fontName="Helvetica-Bold", fontSize=9,
+                              textColor=COR_TEXTO, leading=11)
+    est_cab = ParagraphStyle("cab", fontName="Helvetica-Bold", fontSize=10,
+                             textColor=COR_TEXTO, leading=12, alignment=TA_LEFT)
 
     linhas = [[
         Paragraph("Oradores", est_cab),
@@ -193,26 +220,26 @@ def _tabela_oradores(oradores: list[dict]) -> Table:
     ]]
     for orador in oradores:
         linhas.append([
-            Paragraph(_formatar_nome_orador(orador["nome"], orador.get("categoria", "")), est_cel_nome),
+            Paragraph(_formatar_nome_orador(orador["nome"], orador.get("categoria", "")), est_nome),
             Paragraph(orador.get("telefone") or "", est_cel),
             Paragraph(_formatar_esbocos(orador.get("temas", ""), orador.get("observacoes", "")), est_cel),
             Paragraph(orador.get("observacoes") or "", est_cel),
         ])
 
-    tabela = Table(linhas, colWidths=[6.4 * cm, 3.2 * cm, 4.6 * cm, 3.8 * cm], repeatRows=1)
-    estilo = [
+    tabela = Table(
+        linhas,
+        colWidths=[COL_ORADORES, COL_CONTATO, COL_ESBOCOS, COL_NOTAS],
+        repeatRows=1,
+    )
+    tabela.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), COR_CABECALHO_TABELA),
-        ("GRID", (0, 0), (-1, -1), 0.5, COR_LINHA),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-    ]
-    for i in range(1, len(linhas)):
-        if i % 2 == 0:
-            estilo.append(("BACKGROUND", (0, i), (-1, i), COR_ZEBRA))
-    tabela.setStyle(TableStyle(estilo))
+        ("GRID", (0, 0), (-1, -1), 0.75, COR_LINHA),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+    ]))
     return tabela
 
 
@@ -239,12 +266,11 @@ def gerar_pdf_envio(oradores_selecionados: list[int]) -> tuple[str | None, str |
             bottomMargin=1.5 * cm,
             title=TITULO,
         )
-        est_titulo = ParagraphStyle("titulo", fontName="Helvetica-Bold", fontSize=15,
-                                    textColor=COR_TEXTO, alignment=TA_CENTER, spaceAfter=12)
         elementos = [
-            Paragraph(TITULO, est_titulo),
+            _linha_titulo(config),
+            Spacer(1, 10),
             _bloco_cabecalho(config),
-            Spacer(1, 14),
+            Spacer(1, 16),
             _tabela_oradores(oradores),
         ]
         doc.build(elementos)
