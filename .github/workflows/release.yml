@@ -31,8 +31,13 @@ jobs:
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
 
       - name: Compilar
+        # UTF-8 evita o UnicodeEncodeError do console cp1252 do Windows;
+        # --no-rich-output desliga o indicador de progresso com caracteres especiais.
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: >
-          flet build windows --yes
+          flet build windows --yes --no-rich-output
           --project GestaoArranjo
           --product "Gestão de Arranjo"
           --company "Gestão de Arranjo"
