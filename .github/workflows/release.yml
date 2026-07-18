@@ -116,17 +116,11 @@ jobs:
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
 
       - name: Compilar
-        run: >
-          flet build apk
-          --project GestaoArranjo
-          --product "Gestão de Arranjo"
-          --company "Gestão de Arranjo"
-          --org br.com.iontech
-          --build-version ${{ env.VERSAO }}
-          --verbose
+        working-directory: mobile
+        run: flet build apk --build-version ${{ env.VERSAO }} --verbose
 
       - name: Renomear APK
-        run: cp build/apk/*.apk GestaoArranjo-${{ env.VERSAO }}-android.apk
+        run: cp mobile/build/apk/*.apk GestaoArranjo-${{ env.VERSAO }}-android.apk
 
       - uses: actions/upload-artifact@v4
         with:
