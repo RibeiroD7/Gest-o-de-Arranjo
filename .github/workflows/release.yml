@@ -32,7 +32,7 @@ jobs:
 
       - name: Compilar
         run: >
-          flet build windows
+          flet build windows --yes
           --project GestaoArranjo
           --product "Gestão de Arranjo"
           --company "Gestão de Arranjo"
@@ -75,7 +75,7 @@ jobs:
 
       - name: Compilar
         run: >
-          flet build linux
+          flet build linux --yes
           --project GestaoArranjo
           --product "Gestão de Arranjo"
           --company "Gestão de Arranjo"
@@ -117,7 +117,7 @@ jobs:
 
       - name: Compilar
         working-directory: mobile
-        run: flet build apk --build-version ${{ env.VERSAO }} --verbose
+        run: flet build apk --yes --build-version ${{ env.VERSAO }} --verbose
 
       - name: Renomear APK
         run: cp mobile/build/apk/*.apk GestaoArranjo-${{ env.VERSAO }}-android.apk
