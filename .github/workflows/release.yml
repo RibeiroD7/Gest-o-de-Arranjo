@@ -1,0 +1,164 @@
+name: Gerar instaladores
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Instalar Flet
+        run: pip install "flet[all]>=0.85.3"
+
+      - name: Definir versão
+        shell: bash
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+
+      - name: Compilar
+        run: >
+          flet build windows
+          --project GestaoArranjo
+          --product "Gestão de Arranjo"
+          --company "Gestão de Arranjo"
+          --org br.com.iontech
+          --build-version ${{ env.VERSAO }}
+          --verbose
+
+      - name: Compactar
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/* -DestinationPath GestaoArranjo-${{ env.VERSAO }}-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: GestaoArranjo-*-windows.zip
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Dependências de sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev libmpv-dev
+
+      - name: Instalar Flet
+        run: pip install "flet[all]>=0.85.3"
+
+      - name: Definir versão
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+
+      - name: Compilar
+        run: >
+          flet build linux
+          --project GestaoArranjo
+          --product "Gestão de Arranjo"
+          --company "Gestão de Arranjo"
+          --org br.com.iontech
+          --build-version ${{ env.VERSAO }}
+          --verbose
+
+      - name: Compactar
+        run: tar -czf GestaoArranjo-${{ env.VERSAO }}-linux.tar.gz -C build/linux .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: GestaoArranjo-*-linux.tar.gz
+
+  android:
+    name: Android (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar Flet
+        run: pip install "flet[all]>=0.85.3"
+
+      - name: Definir versão
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+
+      - name: Compilar
+        run: >
+          flet build apk
+          --project GestaoArranjo
+          --product "Gestão de Arranjo"
+          --company "Gestão de Arranjo"
+          --org br.com.iontech
+          --build-version ${{ env.VERSAO }}
+          --verbose
+
+      - name: Renomear APK
+        run: cp build/apk/*.apk GestaoArranjo-${{ env.VERSAO }}-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: GestaoArranjo-*-android.apk
+
+  release:
+    name: Publicar release
+    needs: [windows, linux, android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefatos
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Gestão de Arranjo ${{ github.ref_name }}
+          files: artefatos/*
+          body: |
+            ## Downloads
+
+            | Sistema | Arquivo |
+            |---|---|
+            | Windows | `GestaoArranjo-*-windows.zip` — descompacte e execute `GestaoArranjo.exe` |
+            | Linux | `GestaoArranjo-*-linux.tar.gz` — descompacte e execute `GestaoArranjo` |
+            | Android | `GestaoArranjo-*-android.apk` — instale o APK (permita fontes desconhecidas) |
+
+            O app inicia vazio: preencha **Ajustes → Minha congregação** e cadastre
+            congregações, oradores e temas — ou importe tudo de uma planilha na tela
+            de Programação.

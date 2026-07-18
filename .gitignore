@@ -1,0 +1,16 @@
+venv/
+venv-linux/
+__pycache__/
+*.pyc
+.claude/
+terminals/
+backups/
+
+# Dados pessoais (nomes/telefones) ficam fora do repositório
+data/gestao_arranjo.db
+exports/
+
+# Saída do flet build
+build/
+dist/
+.flet/
