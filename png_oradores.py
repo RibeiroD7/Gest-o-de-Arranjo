@@ -14,6 +14,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from armazenamento import ASSETS_DIR
+
 EXPORTS_DIR = Path("exports")
 ESCALA = 3
 DPI = 300
@@ -107,12 +109,28 @@ def _carminhos_fonte_sistema(negrito: bool) -> list[str]:
     ]
 
 
+def _fonte_embutida(negrito: bool) -> str | None:
+    """Fonte Liberation Sans embutida nos assets (usada em todas as plataformas)."""
+    nome = "LiberationSans-Bold.ttf" if negrito else "LiberationSans-Regular.ttf"
+    for base in (ASSETS_DIR / "fonts", Path("assets") / "fonts"):
+        caminho = base / nome
+        if caminho.exists():
+            return str(caminho)
+    return None
+
+
 def _carregar_fonte(tamanho: int, negrito: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     tamanho_px = _px(tamanho)
+    embutida = _fonte_embutida(negrito)
+    if embutida:
+        return ImageFont.truetype(embutida, tamanho_px)
     for caminho in _carminhos_fonte_sistema(negrito):
         if os.path.exists(caminho):
             return ImageFont.truetype(caminho, tamanho_px)
-    return ImageFont.load_default()
+    try:
+        return ImageFont.load_default(size=tamanho_px)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _largura_texto(draw: ImageDraw.ImageDraw, texto: str, fonte) -> float:
