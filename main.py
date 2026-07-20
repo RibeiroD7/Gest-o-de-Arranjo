@@ -280,8 +280,8 @@ def garantir_tabelas() -> None:
     try:
         create_tables(conn)
         garantir_configuracao_inicial(conn)
-        if not listar_anos_colunas():
-            importar_temas_planilha(conn)
+        # O app é distribuído vazio: os temas são preenchidos pelo próprio
+        # usuário (Temas → Importar S-99/S-99a). Não semeamos nada aqui.
     finally:
         conn.close()
 
