@@ -45,14 +45,18 @@ jobs:
           --build-version ${{ env.VERSAO }}
           --verbose
 
-      - name: Compactar
+      - name: Instalar Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Gerar instalador
         shell: pwsh
-        run: Compress-Archive -Path build/windows/* -DestinationPath GestaoArranjo-${{ env.VERSAO }}-windows.zip
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ env.VERSAO }} installer.iss
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: GestaoArranjo-*-windows.zip
+          path: GestaoArranjo-*-windows-instalador.exe
 
   linux:
     name: Linux
@@ -122,15 +126,27 @@ jobs:
 
       - name: Compilar
         working-directory: mobile
-        run: flet build apk --yes --build-version ${{ env.VERSAO }} --verbose
+        # --split-per-abi gera um APK por arquitetura (bem menor que o
+        # universal, que embute todas). Sem perda de funcionalidade.
+        run: flet build apk --yes --split-per-abi --build-version ${{ env.VERSAO }} --verbose
 
-      - name: Renomear APK
-        run: cp mobile/build/apk/*.apk GestaoArranjo-${{ env.VERSAO }}-android.apk
+      - name: Renomear APKs
+        run: |
+          echo "APKs gerados:"
+          ls -la mobile/build/apk/
+          # Principal: arm64-v8a (praticamente todos os celulares atuais).
+          APK_ARM64=$(ls mobile/build/apk/*arm64-v8a*.apk 2>/dev/null | head -1)
+          if [ -z "$APK_ARM64" ]; then APK_ARM64=$(ls mobile/build/apk/*.apk | head -1); fi
+          cp "$APK_ARM64" GestaoArranjo-${{ env.VERSAO }}-android.apk
+          # Reserva para aparelhos antigos de 32 bits, se existir.
+          if ls mobile/build/apk/*armeabi-v7a*.apk >/dev/null 2>&1; then
+            cp mobile/build/apk/*armeabi-v7a*.apk GestaoArranjo-${{ env.VERSAO }}-android-32bits.apk
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: GestaoArranjo-*-android.apk
+          path: GestaoArranjo-*-android*.apk
 
   release:
     name: Publicar release
@@ -154,9 +170,9 @@ jobs:
 
             | Sistema | Arquivo |
             |---|---|
-            | Windows | `GestaoArranjo-*-windows.zip` — descompacte e execute `GestaoArranjo.exe` |
+            | Windows | `GestaoArranjo-*-windows-instalador.exe` — execute e siga o instalador |
             | Linux | `GestaoArranjo-*-linux.tar.gz` — descompacte e execute `GestaoArranjo` |
-            | Android | `GestaoArranjo-*-android.apk` — instale o APK (permita fontes desconhecidas) |
+            | Android | `GestaoArranjo-*-android.apk` — instale (celulares atuais). Aparelho antigo de 32 bits? Use `GestaoArranjo-*-android-32bits.apk` |
 
             O app inicia vazio: preencha **Ajustes → Minha congregação** e cadastre
             congregações, oradores e temas — ou importe tudo de uma planilha na tela

@@ -15,9 +15,9 @@ Baixe a versão mais recente na página de
 
 | Sistema | Arquivo | Como usar |
 | --- | --- | --- |
-| Windows | `GestaoArranjo-*-windows.zip` | Descompacte e execute `GestaoArranjo.exe` |
+| Windows | `GestaoArranjo-*-windows-instalador.exe` | Execute e siga o instalador (não pede administrador) |
 | Linux | `GestaoArranjo-*-linux.tar.gz` | Descompacte e execute `GestaoArranjo` |
-| Android | `GestaoArranjo-*-android.apk` | Instale o APK (permita apps de fontes desconhecidas) |
+| Android | `GestaoArranjo-*-android.apk` | Instale (celulares atuais). Aparelho antigo de 32 bits? Use `GestaoArranjo-*-android-32bits.apk` |
 
 O app começa vazio: preencha **Ajustes → Minha congregação** com os dados da
 sua congregação e cadastre congregações, oradores e temas — ou importe tudo de
