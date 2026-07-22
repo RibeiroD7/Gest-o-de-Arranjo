@@ -88,6 +88,9 @@ from png_oradores import (
 LARGURA_BARRA_LATERAL = 192
 ICON_SIZE_MENU = 18
 
+# Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
+VERSAO_APP = "1.0.8"
+
 # Identidade visual — "Meia-noite teal": azul profundo com acento verde-água
 COR_DESTAQUE = "#14B8A6"
 COR_DESTAQUE_CLARA = "#2DD4BF"
@@ -6239,11 +6242,18 @@ def criar_barra_lateral(
     itens_menu_ref.clear()
     itens_coluna: list[ft.Control] = [
         ft.Container(
-            content=ft.Text(
-                "GESTÃO DE ARRANJO",
-                size=11,
-                weight=ft.FontWeight.W_600,
-                color=TEXTO_SECUNDARIO,
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "GESTÃO DE ARRANJO",
+                        size=11,
+                        weight=ft.FontWeight.W_600,
+                        color=TEXTO_SECUNDARIO,
+                    ),
+                    ft.Text(f"v{VERSAO_APP}", size=10, color=TEXTO_SECUNDARIO),
+                ],
+                spacing=2,
+                tight=True,
             ),
             padding=ft.Padding.only(left=14, bottom=10),
         )
