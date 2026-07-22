@@ -9,6 +9,7 @@ Resultado idêntico em Windows, Linux, macOS e celular.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +42,13 @@ def _formatar_esbocos(temas: str, observacoes: str) -> str:
     if temas and str(temas).strip():
         return str(temas).strip()
     return ""
+
+
+def _formatar_notas(observacoes: str) -> str:
+    """Notas da tabela sem o marcador 'qualquer tema' (já vai na coluna Esboços)."""
+    texto = re.sub(r"\bqualquer\s+tema\b", "", observacoes or "", flags=re.IGNORECASE)
+    texto = re.sub(r"\s{2,}", " ", texto)
+    return texto.strip(" •·-|,;\n\t")
 
 
 def _formatar_nome_orador(nome: str, categoria: str) -> str:
@@ -223,7 +231,7 @@ def _tabela_oradores(oradores: list[dict]) -> Table:
             Paragraph(_formatar_nome_orador(orador["nome"], orador.get("categoria", "")), est_nome),
             Paragraph(orador.get("telefone") or "", est_cel),
             Paragraph(_formatar_esbocos(orador.get("temas", ""), orador.get("observacoes", "")), est_cel),
-            Paragraph(orador.get("observacoes") or "", est_cel),
+            Paragraph(_formatar_notas(orador.get("observacoes", "")), est_cel),
         ])
 
     tabela = Table(

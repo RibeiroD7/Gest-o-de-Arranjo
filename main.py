@@ -6,6 +6,7 @@ Execute com: python main.py
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from calendar import monthrange
 from datetime import date, datetime, timedelta
@@ -943,9 +944,29 @@ def _rotulo_coluna(nome: str, config: dict | None = None) -> str:
     return ROTULOS_COLUNAS.get(nome, str(nome))
 
 
+def obs_tem_qualquer_tema(observacoes: str) -> bool:
+    """True se as observações marcam que o orador pode fazer qualquer tema."""
+    return bool(observacoes and "qualquer tema" in observacoes.lower())
+
+
+def obs_sem_qualquer_tema(observacoes: str) -> str:
+    """Devolve as observações sem o marcador 'qualquer tema' (mantém o resto)."""
+    texto = re.sub(r"\bqualquer\s+tema\b", "", observacoes or "", flags=re.IGNORECASE)
+    texto = re.sub(r"\s{2,}", " ", texto)
+    return texto.strip(" •·-|,;\n\t")
+
+
+def obs_definir_qualquer_tema(observacoes: str, marcado: bool) -> str:
+    """Aplica ou remove o marcador 'qualquer tema' nas observações."""
+    base = obs_sem_qualquer_tema(observacoes)
+    if not marcado:
+        return base
+    return f"{base} • Qualquer tema" if base else "Qualquer tema"
+
+
 def formatar_temas_orador(temas: str, observacoes: str) -> str:
     """Formata a coluna de temas para exibição legível."""
-    if observacoes and "qualquer tema" in observacoes.lower():
+    if obs_tem_qualquer_tema(observacoes):
         return "Qualquer tema"
     if temas and str(temas).strip():
         return str(temas).strip()
@@ -1274,9 +1295,13 @@ def abrir_dialog_orador(
         options=carregar_congregacoes_opcoes(),
         expand=True,
     )
+    obs_inicial = dados["observacoes"] if dados else ""
+    faz_qualquer_tema = obs_tem_qualquer_tema(obs_inicial)
     campo_observacoes = ft.TextField(
         label="Observações",
-        value=dados["observacoes"] if dados else "",
+        # Mostra as observações sem o marcador "qualquer tema" — quem controla
+        # isso agora é o checkbox abaixo (o marcador é reescrito ao salvar).
+        value=obs_sem_qualquer_tema(obs_inicial),
         multiline=True,
         min_lines=2,
         max_lines=4,
@@ -1288,6 +1313,17 @@ def abrir_dialog_orador(
     df_temas = carregar_dados("SELECT nr, titulo FROM temas ORDER BY nr")
     lista_temas = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=220)
     texto_contagem_temas = ft.Text(size=12, color=TEXTO_SECUNDARIO)
+    texto_qualquer_tema = ft.Text(
+        "Este orador pode fazer qualquer tema — não é preciso selecionar temas.",
+        size=12,
+        italic=True,
+        color=TEXTO_SECUNDARIO,
+        visible=faz_qualquer_tema,
+    )
+    campo_qualquer_tema = ft.Checkbox(
+        label="Pode fazer qualquer tema",
+        value=faz_qualquer_tema,
+    )
 
     def atualizar_contagem_temas() -> None:
         texto_contagem_temas.value = f"{len(temas_selecionados)} tema(s) selecionado(s)"
@@ -1304,7 +1340,13 @@ def abrir_dialog_orador(
         filtro = filtro.strip().lower()
         linhas = []
         for row in df_temas.itertuples():
-            rotulo = row.titulo
+            # Mostra o número do esboço antes do título (a não ser que o título
+            # já comece pelo número), para identificar o tema na lista.
+            rotulo = (
+                row.titulo
+                if str(row.titulo).startswith(str(row.nr))
+                else f"{row.nr} - {row.titulo}"
+            )
             if filtro and filtro not in rotulo.lower():
                 continue
             linhas.append(
@@ -1324,6 +1366,19 @@ def abrir_dialog_orador(
     )
     construir_lista_temas()
 
+    def alternar_qualquer_tema(_=None) -> None:
+        # Quando o orador faz qualquer tema, a lista de temas fica irrelevante:
+        # desabilita a seleção e mostra o aviso.
+        ativo = bool(campo_qualquer_tema.value)
+        campo_busca_temas.disabled = ativo
+        lista_temas.disabled = ativo
+        texto_qualquer_tema.visible = ativo
+        page.update()
+
+    campo_qualquer_tema.on_change = alternar_qualquer_tema
+    campo_busca_temas.disabled = faz_qualquer_tema
+    lista_temas.disabled = faz_qualquer_tema
+
     def fechar(_=None):
         page.pop_dialog()
 
@@ -1336,12 +1391,15 @@ def abrir_dialog_orador(
             return
 
         congregacao_id = int(campo_congregacao.value) if campo_congregacao.value else None
+        observacoes_final = obs_definir_qualquer_tema(
+            campo_observacoes.value.strip(), campo_qualquer_tema.value
+        )
         salvar_orador(
             nome,
             campo_telefone.value.strip(),
             campo_categoria.value,
             congregacao_id,
-            campo_observacoes.value.strip(),
+            observacoes_final,
             temas_selecionados,
             orador_id=orador_id if editando else None,
         )
@@ -1361,7 +1419,9 @@ def abrir_dialog_orador(
                     campo_observacoes,
                     texto_erro,
                     ft.Container(height=4),
+                    campo_qualquer_tema,
                     ft.Text("Temas que pode fazer", weight=ft.FontWeight.W_600, size=13),
+                    texto_qualquer_tema,
                     campo_busca_temas,
                     lista_temas,
                     texto_contagem_temas,
