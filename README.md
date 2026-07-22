@@ -80,11 +80,42 @@ venv-linux/bin/pip install -r requirements.txt
 No primeiro uso, o banco de dados é criado em `data/` e os temas são
 importados de `data/Temas.xlsx`.
 
-## Gerar os instaladores
+## Publicar uma nova versão (gerar os instaladores)
 
 Os instaladores das Releases são gerados automaticamente pelo GitHub Actions
-([.github/workflows/release.yml](.github/workflows/release.yml)) sempre que uma
-tag `v*` é publicada. Para compilar localmente, use o
+([.github/workflows/release.yml](.github/workflows/release.yml)). **O gatilho é
+a publicação de uma tag `vX.Y.Z`** — um `git push` de commits para o `main`,
+sozinho, **não** gera instaladores. A versão dos arquivos vem do nome da tag
+(`v1.0.7` → `1.0.7`).
+
+Fluxo recomendado, com o script [`release.sh`](release.sh) (rode no Git Bash):
+
+```bash
+# 1) Commite normalmente as suas alterações e faça o push do main.
+# 2) Publique a versão (cria e envia a tag que dispara a compilação):
+./release.sh 1.0.8     # grava a versão no pyproject, commita e envia a tag
+# ou, se a versão em mobile/pyproject.toml já for a desejada:
+./release.sh           # usa a versão atual do pyproject e só cria/envia a tag
+```
+
+O script recusa versões repetidas (tag já existente) e exige a árvore limpa
+antes de publicar. Depois é só acompanhar em **Actions → Gerar instaladores**;
+ao terminar, os arquivos aparecem na **Release** correspondente:
+
+| Sistema | Arquivo |
+| --- | --- |
+| Windows | `GestaoArranjo-<versão>-windows.zip` |
+| Linux | `GestaoArranjo-<versão>-linux.tar.gz` |
+| Android | `GestaoArranjo-<versão>-android.apk` |
+
+Para publicar sem o script, faça o mesmo à mão:
+
+```bash
+git tag -a v1.0.8 -m "v1.0.8"
+git push origin v1.0.8
+```
+
+Para compilar localmente (sem publicar), use o
 [`flet build`](https://flet.dev/docs/publish/):
 
 ```bash
