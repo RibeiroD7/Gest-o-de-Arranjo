@@ -80,6 +80,13 @@ venv-linux/bin/pip install -r requirements.txt
 No primeiro uso, o banco de dados é criado em `data/` e os temas são
 importados de `data/Temas.xlsx`.
 
+### Testar o layout de celular no computador
+
+Para ver a interface **de celular** rodando no PC (sem gerar o APK), dê dois
+cliques em [`preview-mobile.bat`](preview-mobile.bat) — ele prepara o ambiente
+na primeira vez e abre o app já no layout mobile (basta estreitar a janela). O
+mesmo efeito pode ser obtido definindo `GA_FORCAR_MOBILE=1` antes de executar.
+
 ## Publicar uma nova versão (gerar os instaladores)
 
 Os instaladores das Releases são gerados automaticamente pelo GitHub Actions
