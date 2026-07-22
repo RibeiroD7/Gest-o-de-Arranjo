@@ -89,7 +89,7 @@ LARGURA_BARRA_LATERAL = 192
 ICON_SIZE_MENU = 18
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.0.12"
+VERSAO_APP = "1.0.13"
 
 # Identidade visual — "Meia-noite teal": azul profundo com acento verde-água
 COR_DESTAQUE = "#14B8A6"
