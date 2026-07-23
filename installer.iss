@@ -24,6 +24,8 @@ OutputBaseFilename=GestaoArranjo-{#MyAppVersion}-windows-instalador
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Icone do proprio instalador (setup.exe). Os atalhos usam o icone embutido no exe.
+SetupIconFile=assets\icon_windows.ico
 ; Instalacao por usuario (sem pedir admin): pasta gravavel, sem UAC.
 PrivilegesRequired=lowest
 
