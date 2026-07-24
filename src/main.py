@@ -240,7 +240,10 @@ ROTULOS_COLUNAS = {
 
 CONFIG_TABELA_TEMAS = {
     "coluna_id": "nr",
-    "colunas_ocultas": ["data_limite_uso", "restrito", "tem_observacao", "ultimo_uso_chave"],
+    # `prioritario` não vira coluna: aparece como estrela ao lado do título.
+    "colunas_ocultas": [
+        "data_limite_uso", "restrito", "tem_observacao", "ultimo_uso_chave", "prioritario",
+    ],
     "colunas_acoes_separadas": True,
     "rotulos_colunas": {
         "nr": "Nº",
@@ -1048,18 +1051,33 @@ def criar_tabela(
             else:
                 texto = formatar_valor(valor)
                 max_linhas = 2
-            celulas.append(
-                ft.DataCell(
-                    ft.Text(
-                        texto,
-                        size=12,
-                        color=TEXTO_PRIMARIO,
-                        text_align=alinhamento_celula(nome),
-                        max_lines=max_linhas,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    )
-                )
+            controle_celula: ft.Control = ft.Text(
+                texto,
+                size=12,
+                color=TEXTO_PRIMARIO,
+                text_align=alinhamento_celula(nome),
+                max_lines=max_linhas,
+                overflow=ft.TextOverflow.ELLIPSIS,
+                expand=nome == "titulo",
             )
+            # Tema prioritário para a minha congregação: estrela junto do título
+            # (em vez de expor a coluna 0/1 na tabela).
+            if nome == "titulo" and int(mapa.get("prioritario", 0) or 0) == 1:
+                controle_celula = ft.Row(
+                    [
+                        ft.Icon(
+                            ft.Icons.STAR,
+                            size=14,
+                            color=COR_AVISO,
+                            tooltip="Tema prioritário para a minha congregação",
+                        ),
+                        controle_celula,
+                    ],
+                    spacing=6,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            celulas.append(ft.DataCell(controle_celula))
         if registro_id is not None:
             if acoes_separadas:
                 if on_editar:
