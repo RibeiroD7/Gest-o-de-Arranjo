@@ -161,9 +161,13 @@ SECOES = [
     {"nome": "Congregações", "icone": ft.Icons.LOCATION_CITY},
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
     {"nome": "Quadro de Anúncios", "icone": ft.Icons.CAMPAIGN},
-    {"nome": "Ajustes", "icone": ft.Icons.SETTINGS},
     {"nome": "Calendário", "icone": ft.Icons.CALENDAR_TODAY},
+    {"nome": "Ajustes", "icone": ft.Icons.SETTINGS},
 ]
+
+# Índices de navegação usados em botões/atalhos (mantidos junto de SECOES
+# para não quebrarem quando a ordem das abas mudar).
+INDICE_AJUSTES = 7
 
 SQL_ORADORES = """
     SELECT o.id,
@@ -2699,7 +2703,7 @@ def tela_inicio(
                             "em Ajustes ou restaurando um backup.",
                             size=13, color=TEXTO_PRIMARIO, expand=True,
                         ),
-                        ft.TextButton("Abrir Ajustes", on_click=lambda _: ir_para(6)),
+                        ft.TextButton("Abrir Ajustes", on_click=lambda _: ir_para(INDICE_AJUSTES)),
                     ],
                     spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
@@ -2747,10 +2751,15 @@ def tela_inicio(
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
     else:
+        # As colunas ficam da mesma altura e o card da agenda estica para
+        # preencher — sem faixa vazia entre a agenda e as sugestões quando a
+        # coluna lateral (pendências + ações) é mais alta.
+        card_agenda.expand = True
+        coluna_principal.tight = False
         secao_colunas = ft.Row(
             [coluna_principal, coluna_lateral],
             spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
     blocos += [
         kpis,
@@ -7628,7 +7637,7 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
 
     def ir_ajustes(_=None):
         page.pop_dialog()
-        navegar(6)  # Ajustes → Minha Congregação
+        navegar(INDICE_AJUSTES)  # Ajustes → Minha Congregação
 
     passos = [
         ("1. Sua congregação", "Preencha os dados em Ajustes → Minha Congregação."),
@@ -7858,8 +7867,8 @@ def main(page: ft.Page):
         mostrar_congregacoes,
         mostrar_temas,
         mostrar_quadro_anuncios,
-        mostrar_ajustes,
         mostrar_calendario,
+        mostrar_ajustes,
     ]
 
     def navegar(indice: int):
