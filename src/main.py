@@ -70,6 +70,7 @@ from database import (
     salvar_tema,
     ultima_data_discurso_por_orador,
 )
+from log_app import configurar_log, logger
 from pdf_quadro import (
     PARES_MESES as PARES_MESES_QUADRO,
 )
@@ -7471,7 +7472,7 @@ def _auto_backup_diario() -> None:
             return
         exportar_backup()
     except Exception:  # noqa: BLE001 — backup automático nunca deve quebrar o app
-        pass
+        logger.exception("Falha no backup automático diário")
 
 
 def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
@@ -7727,6 +7728,8 @@ def _verificar_atualizacao(page: ft.Page) -> None:
 
 def main(page: ft.Page):
     """Configura a janela e monta o layout principal."""
+    configurar_log()
+    logger.info("Aplicativo iniciado (v%s)", VERSAO_APP)
     garantir_tabelas()
     _auto_backup_diario()
 
