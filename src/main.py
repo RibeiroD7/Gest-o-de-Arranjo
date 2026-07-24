@@ -65,6 +65,7 @@ from database import (
     salvar_presidente,
     salvar_presidente_cadastro,
     salvar_tema,
+    ultima_data_discurso_por_orador,
 )
 from pdf_quadro import (
     PARES_MESES as PARES_MESES_QUADRO,
@@ -87,7 +88,7 @@ from png_oradores import (
     gerar_png_oradores,
     gerar_preview_quadro_mes,
 )
-from servicos import escolher_rodizio_presidentes
+from servicos import escolher_rodizio_presidentes, oradores_mais_tempo_sem_discurso
 from util import (
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -4444,6 +4445,56 @@ def abrir_seletor_oradores(
 
     campo_orador.on_select = ao_mudar_orador
 
+    # Sugestão de oradores da minha congregação há mais tempo sem discursar
+    # (só ao designar um envio; recebidos vêm de outras congregações).
+    area_sugestoes_orador = ft.Column(spacing=6, tight=True, visible=False)
+
+    def montar_sugestoes_orador():
+        if eh_oradores:
+            return
+        ids = [int(o.key) for o in campo_orador.options]
+        if not ids:
+            return
+        nomes = {int(o.key): o.text.split(" — ")[0] for o in campo_orador.options}
+        ultima = ultima_data_discurso_por_orador()
+        ordem = oradores_mais_tempo_sem_discurso(ids, ultima)
+
+        def escolher(orador_id: int):
+            campo_orador.value = str(orador_id)
+            atualizar_sugestoes_datas()
+            page.update()
+
+        chips = []
+        for oid in ordem[:5]:
+            u = ultima.get(oid)
+            sub = f"última: {u}" if u else "nunca discursou"
+            chips.append(
+                ft.OutlinedButton(
+                    content=ft.Column(
+                        [
+                            ft.Text(nomes.get(oid, str(oid)), size=12,
+                                    weight=ft.FontWeight.W_600),
+                            ft.Text(sub, size=10, color=TEXTO_SECUNDARIO),
+                        ],
+                        spacing=0,
+                        tight=True,
+                    ),
+                    on_click=lambda e, oid=oid: escolher(oid),
+                )
+            )
+        area_sugestoes_orador.controls = [
+            ft.Text(
+                "Sugestões — há mais tempo sem discursar",
+                size=12,
+                color=TEXTO_SECUNDARIO,
+                weight=ft.FontWeight.W_600,
+            ),
+            ft.Row(chips, wrap=True, spacing=8, run_spacing=8),
+        ]
+        area_sugestoes_orador.visible = True
+
+    montar_sugestoes_orador()
+
     def fechar(_=None):
         page.pop_dialog()
 
@@ -4517,6 +4568,7 @@ def abrir_seletor_oradores(
     conteudo.extend(
         [
             area_existente,
+            area_sugestoes_orador,
             area_novo,
             campo_tema,
             ft.Container(height=4),
