@@ -29,6 +29,13 @@ COR_SUCESSO = "#34D399"
 COR_AVISO = "#FBBF24"
 COR_ERRO = "#F87171"
 
+# Prévia do Quadro de Anúncios (PC): largura base em pixels e limites de zoom.
+# O PNG é gerado a LARGURA_PREVIEW_BASE * 3 px, então ampliar até 300% continua
+# nítido sem regerar a imagem.
+LARGURA_PREVIEW_BASE = 620
+ZOOM_PREVIEW_MIN = 0.5
+ZOOM_PREVIEW_MAX = 3.0
+
 # Diálogo / tabela do mês
 LARGURA_DIALOG_MES = 1040
 ALTURA_CONTEUDO_DIALOG_MES = 480

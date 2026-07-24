@@ -130,8 +130,11 @@ from tema import (
     LARGURA_COL_ORADOR_MES,
     LARGURA_COL_TEMA_MES,
     LARGURA_DIALOG_MES,
+    LARGURA_PREVIEW_BASE,
     TEXTO_PRIMARIO,
     TEXTO_SECUNDARIO,
+    ZOOM_PREVIEW_MAX,
+    ZOOM_PREVIEW_MIN,
 )
 from util import (
     _datas_por_weekday_no_mes,
@@ -7284,8 +7287,15 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
     estado = {
         "ano": hoje.year if str(hoje.year) in anos_disponiveis else ANO_PADRAO_ARRANJOS,
         "mes_inicial": par_meses_do_mes_quadro(hoje.month)[0],
+        # Prévia do PC: qual dos dois meses está na tela e o zoom aplicado.
+        "mes_preview": par_meses_do_mes_quadro(hoje.month)[0],
+        "zoom": 1.0,
     }
     area_preview = ft.Container(expand=True)
+    rotulo_zoom = ft.Text("100%", size=12, color=TEXTO_SECUNDARIO, width=46,
+                          text_align=ft.TextAlign.CENTER)
+    rotulo_mes_preview = ft.Text("", size=13, weight=ft.FontWeight.W_600,
+                                 color=TEXTO_PRIMARIO)
 
     opcoes_pares = [
         ft.dropdown.Option(
@@ -7294,6 +7304,26 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
         )
         for inicio, fim in PARES_MESES_QUADRO
     ]
+
+    def aplicar_zoom(novo: float, atualizar_tela: bool = True):
+        estado["zoom"] = max(ZOOM_PREVIEW_MIN, min(ZOOM_PREVIEW_MAX, round(novo, 2)))
+        if atualizar_tela:
+            montar_preview()
+            page.update()
+
+    def ao_rolar_preview(e):
+        """Roda do mouse sobre a prévia: para cima amplia, para baixo reduz."""
+        delta = getattr(getattr(e, "scroll_delta", None), "y", 0) or 0
+        if not delta:
+            return
+        aplicar_zoom(estado["zoom"] * (0.9 if delta > 0 else 1.1))
+
+    def mudar_mes_preview(delta: int):
+        inicio = estado["mes_inicial"]
+        estado["mes_preview"] = inicio if estado["mes_preview"] != inicio else inicio + 1
+        _ = delta
+        montar_preview()
+        page.update()
 
     def montar_preview():
         config = carregar_configuracao()
@@ -7308,26 +7338,50 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                     size=12, color=TEXTO_SECUNDARIO, italic=True,
                 )
             )
-        for mes in (inicio, inicio + 1):
-            dados = carregar_dados_mes_quadro(estado["ano"], mes)
-            if mobile:
+        if mobile:
+            for mes in (inicio, inicio + 1):
+                dados = carregar_dados_mes_quadro(estado["ano"], mes)
                 # No celular a tabela larga do PDF fica ilegível ao encaixar na
                 # largura da tela. Mostramos a prévia com componentes nativos
                 # (texto grande de verdade). O PDF exportado é o layout fiel.
                 blocos.append(
                     _preview_quadro_mobile(estado["ano"], mes, dados, nome_congregacao)
                 )
-            else:
-                png_bytes = gerar_preview_quadro_mes(estado["ano"], mes, dados, nome_congregacao)
-                imagem = ft.Image(src=png_bytes, fit=ft.BoxFit.CONTAIN)
-                blocos.append(
-                    ft.Container(content=imagem, padding=ft.Padding.only(bottom=24))
-                )
-        area_preview.content = ft.Column(
-            blocos,
-            scroll=ft.ScrollMode.AUTO,
+            area_preview.content = ft.Column(
+                blocos,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+            return
+
+        # PC: um mês por vez, com zoom (roda do mouse ou botões). A imagem é
+        # gerada a LARGURA_PREVIEW_BASE * ESCALA px, então ampliar até ~300%
+        # continua nítido sem precisar regerar o PNG.
+        mes = estado["mes_preview"]
+        if mes not in (inicio, inicio + 1):
+            mes = inicio
+            estado["mes_preview"] = mes
+        rotulo_mes_preview.value = f"{NOMES_MESES[mes]} de {estado['ano']}"
+        rotulo_zoom.value = f"{int(round(estado['zoom'] * 100))}%"
+
+        dados = carregar_dados_mes_quadro(estado["ano"], mes)
+        png_bytes = gerar_preview_quadro_mes(
+            estado["ano"], mes, dados, nome_congregacao, largura_base=LARGURA_PREVIEW_BASE
+        )
+        imagem = ft.Image(
+            src=png_bytes,
+            width=LARGURA_PREVIEW_BASE * estado["zoom"],
+            fit=ft.BoxFit.FILL,
+        )
+        area_preview.content = ft.GestureDetector(
+            on_scroll=ao_rolar_preview,
+            content=ft.Column(
+                [ft.Row([imagem], scroll=ft.ScrollMode.AUTO, tight=True)],
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
             expand=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH if mobile else ft.CrossAxisAlignment.START,
         )
 
     def exportar(_=None):
@@ -7470,6 +7524,38 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
 
+    barra_preview = ft.Row(
+        [
+            ft.IconButton(
+                ft.Icons.CHEVRON_LEFT,
+                tooltip="Outro mês do par",
+                on_click=lambda _: mudar_mes_preview(-1),
+            ),
+            rotulo_mes_preview,
+            ft.IconButton(
+                ft.Icons.CHEVRON_RIGHT,
+                tooltip="Outro mês do par",
+                on_click=lambda _: mudar_mes_preview(1),
+            ),
+            ft.Container(expand=True),
+            ft.Text("Zoom (roda do mouse)", size=12, color=TEXTO_SECUNDARIO),
+            ft.IconButton(
+                ft.Icons.ZOOM_OUT,
+                tooltip="Reduzir",
+                on_click=lambda _: aplicar_zoom(estado["zoom"] - 0.1),
+            ),
+            rotulo_zoom,
+            ft.IconButton(
+                ft.Icons.ZOOM_IN,
+                tooltip="Ampliar",
+                on_click=lambda _: aplicar_zoom(estado["zoom"] + 0.1),
+            ),
+            ft.TextButton("100%", on_click=lambda _: aplicar_zoom(1.0)),
+        ],
+        spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
     return ft.Column(
         [
             criar_cabecalho_tela(
@@ -7488,7 +7574,9 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
-            ft.Container(height=16),
+            ft.Container(height=8),
+            barra_preview,
+            ft.Container(height=8),
             area_preview,
         ],
         spacing=0,
