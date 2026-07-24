@@ -136,6 +136,22 @@ from tema import (
     ZOOM_PREVIEW_MAX,
     ZOOM_PREVIEW_MIN,
 )
+from ui_comuns import (
+    _cor_fundo_item_menu,
+    _estilo_campo_busca,
+    _icone_entrega,
+    _largura_dialog,
+    _rotulo_entrega,
+    _sombra_card,
+    aplicar_tema,
+    criar_cabecalho_tela,
+    criar_painel_informativo,
+    criar_secao_titulo,
+    executar_com_progresso,
+    linha_campos,
+    mostrar_aviso,
+    mostrar_sucesso,
+)
 from util import (
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -789,123 +805,6 @@ def alinhamento_celula(nome_coluna: str) -> ft.TextAlign:
 # ---------------------------------------------------------------------------
 # Tema e componentes visuais reutilizáveis
 # ---------------------------------------------------------------------------
-
-def _sombra_card(intensidade: float = 0.35) -> ft.BoxShadow:
-    """Sombra suave para cards no modo escuro."""
-    return ft.BoxShadow(
-        blur_radius=16,
-        spread_radius=0,
-        color=ft.Colors.with_opacity(intensidade, "#000000"),
-        offset=ft.Offset(0, 4),
-    )
-
-
-def _estilo_campo_busca() -> dict:
-    """Estilo compartilhado dos campos de busca."""
-    return {
-        "border_radius": 10,
-        "height": 44,
-        "content_padding": ft.Padding.symmetric(horizontal=12),
-        "bgcolor": FUNDO_ELEVADO,
-        "border_color": BORDA_SUAVE,
-        "focused_border_color": COR_DESTAQUE,
-        "cursor_color": COR_DESTAQUE,
-        "color": TEXTO_PRIMARIO,
-    }
-
-
-def aplicar_tema(page: ft.Page) -> None:
-    """Aplica o tema "Meia-noite teal" (azul profundo com acento verde-água)."""
-    esquema = ft.ColorScheme(
-        primary=COR_DESTAQUE,
-        on_primary="#04342C",
-        primary_container="#0F3D3A",
-        on_primary_container=COR_DESTAQUE_SUAVE,
-        secondary=COR_DESTAQUE_CLARA,
-        on_secondary="#04342C",
-        surface=FUNDO_APP,
-        on_surface=TEXTO_PRIMARIO,
-        on_surface_variant=TEXTO_SECUNDARIO,
-        surface_container_lowest=FUNDO_APP,
-        surface_container_low=FUNDO_SIDEBAR,
-        surface_container=FUNDO_CARD,
-        surface_container_high=FUNDO_ELEVADO,
-        surface_container_highest="#233250",
-        outline=BORDA_SUAVE,
-        outline_variant="#1E2942",
-        error=COR_ERRO,
-    )
-    tema = ft.Theme(color_scheme=esquema, use_material3=True)
-    page.theme_mode = ft.ThemeMode.DARK
-    page.theme = tema
-    page.dark_theme = tema
-    page.bgcolor = FUNDO_APP
-
-
-def criar_secao_titulo(texto: str) -> ft.Text:
-    """Subtítulo de seção usado em todas as telas."""
-    return ft.Text(texto, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
-
-
-def criar_cabecalho_tela(
-    titulo: str,
-    subtitulo: str = "",
-    subtitulo_no_celular: bool = False,
-) -> ft.Column:
-    """Cabeçalho padronizado de cada tela (compacto no celular)."""
-    mobile = eh_mobile()
-    if mobile and not subtitulo_no_celular:
-        # A barra superior já mostra o nome da seção; repetir o título aqui
-        # só rouba espaço da tabela/lista. Telas com informação real no
-        # cabeçalho (o Início) usam subtitulo_no_celular=True.
-        return ft.Column([], spacing=0, tight=True)
-    controles = [
-        ft.Text(
-            titulo,
-            size=20 if mobile else 28,
-            weight=ft.FontWeight.BOLD,
-            color=TEXTO_PRIMARIO,
-        ),
-    ]
-    if subtitulo and (not mobile or subtitulo_no_celular):
-        # No celular o subtítulo descritivo é omitido (a barra superior já dá
-        # o contexto); telas que trazem informação real nele — como o Início —
-        # pedem exibição com subtitulo_no_celular=True.
-        controles.append(
-            ft.Text(
-                subtitulo,
-                size=12 if mobile else 14,
-                color=TEXTO_SECUNDARIO,
-                max_lines=3,
-                overflow=ft.TextOverflow.ELLIPSIS,
-            )
-        )
-    return ft.Column(controles, spacing=4)
-
-
-def criar_painel_informativo(titulo: str, mensagem: str, icone=ft.Icons.INFO_OUTLINE) -> ft.Container:
-    """Painel de destaque com o mesmo estilo do Dashboard."""
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Icon(icone, color=COR_DESTAQUE, size=22),
-                        ft.Text(titulo, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
-                    ],
-                    spacing=10,
-                ),
-                ft.Text(mensagem, size=14, color=TEXTO_SECUNDARIO),
-            ],
-            spacing=8,
-        ),
-        padding=24,
-        bgcolor=FUNDO_ELEVADO,
-        border=ft.Border.all(1, BORDA_SUAVE),
-        border_radius=14,
-        shadow=_sombra_card(0.25),
-    )
-
 
 def _rotulo_coluna(nome: str, config: dict | None = None) -> str:
     """Retorna rótulo amigável da coluna, se existir."""
@@ -1728,61 +1627,6 @@ def confirmar_exclusao_congregacao(
 # Formulário de designações
 # ---------------------------------------------------------------------------
 
-def mostrar_aviso(page: ft.Page, titulo: str, mensagem: str) -> None:
-    """Exibe um dialog informativo."""
-    page.show_dialog(
-        ft.AlertDialog(
-            modal=True,
-            title=ft.Text(titulo),
-            content=ft.Text(mensagem),
-            actions=[ft.TextButton("OK", on_click=lambda _: page.pop_dialog())],
-        )
-    )
-
-
-def mostrar_sucesso(page: ft.Page, mensagem: str) -> None:
-    """Confirmação discreta no rodapé (snackbar), sem interromper o fluxo."""
-    page.show_dialog(
-        ft.SnackBar(
-            content=ft.Text(mensagem, color="#04342C", weight=ft.FontWeight.W_600),
-            bgcolor=COR_DESTAQUE_CLARA,
-        )
-    )
-
-
-def executar_com_progresso(page: ft.Page, mensagem: str, tarefa: Callable[[], object]):
-    """Mostra um anel de progresso enquanto roda ``tarefa`` e devolve o resultado.
-
-    A geração de PDF/PNG é síncrona e pode demorar. Como a interface do Flet roda
-    num cliente separado, o anel continua animando durante o processamento — dando
-    ao usuário o retorno visual de que algo está acontecendo. Envolve apenas a
-    tarefa pesada; os avisos de sucesso/erro vêm depois, no chamador.
-    """
-    dialogo = ft.AlertDialog(
-        modal=True,
-        content=ft.Row(
-            [
-                ft.ProgressRing(width=22, height=22, stroke_width=3),
-                ft.Text(mensagem),
-            ],
-            spacing=16,
-            tight=True,
-        ),
-    )
-    page.show_dialog(dialogo)
-    page.update()
-    try:
-        return tarefa()
-    finally:
-        page.pop_dialog()
-        page.update()
-
-
-# Serviços globais registrados em main(): salvar arquivos e compartilhar (celular).
-_file_picker_global: "ft.FilePicker | None" = None
-_share_global: "ft.Share | None" = None
-
-
 def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
     """Entrega ao usuário um arquivo já gerado em `exports/`.
 
@@ -1814,25 +1658,6 @@ def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
                           f"Detalhes: {exc}")
 
     page.run_task(_salvar)
-
-
-def _rotulo_entrega() -> str:
-    """Texto do botão de entrega do arquivo conforme a plataforma."""
-    return "Salvar arquivo" if eh_mobile() else "Abrir pasta"
-
-
-def _icone_entrega():
-    return ft.Icons.SAVE_ALT if eh_mobile() else ft.Icons.FOLDER_OPEN
-
-
-def linha_campos(*campos, spacing: int = 12) -> ft.Control:
-    """Campos de formulário lado a lado no PC; empilhados no celular."""
-    if eh_mobile():
-        return ft.Column(
-            list(campos), spacing=10,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        )
-    return ft.Row(list(campos), spacing=spacing)
 
 
 def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
@@ -4237,20 +4062,6 @@ def _criar_linha_orador_arranjo(
             ft.BorderSide(0, BORDA_SUAVE),
         ),
     )
-
-
-def _largura_dialog(page: ft.Page, largura_desktop: int) -> int:
-    """Largura do conteúdo de um dialog/cartão, adaptada ao celular.
-
-    No desktop devolve a largura desejada. No celular, limita à largura útil
-    da tela (descontando as margens do próprio dialog) para o conteúdo não ser
-    espremido a ponto de o texto quebrar letra a letra.
-    """
-    if not eh_mobile():
-        return largura_desktop
-    if page is not None and page.width:
-        return max(240, min(largura_desktop, int(page.width) - 64))
-    return min(largura_desktop, 320)
 
 
 def _altura_conteudo_dialog_mes(page: ft.Page) -> int:
@@ -7771,13 +7582,6 @@ def abrir_dialog_gerenciar_presidentes(
 # ---------------------------------------------------------------------------
 # Layout principal
 # ---------------------------------------------------------------------------
-
-def _cor_fundo_item_menu(selecionado: bool):
-    """Fundo suave e arredondado para o item selecionado."""
-    if selecionado:
-        return ft.Colors.with_opacity(0.14, COR_DESTAQUE_CLARA)
-    return ft.Colors.TRANSPARENT
-
 
 def atualizar_menu_lateral(itens_menu: list[dict], indice_ativo: int) -> None:
     """Atualiza destaque visual dos itens do menu lateral."""
