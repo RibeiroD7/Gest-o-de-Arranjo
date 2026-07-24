@@ -97,6 +97,72 @@ def oradores_mais_tempo_sem_discurso(
     return sorted(orador_ids, key=chave)
 
 
+def sugerir_recebidos(
+    oradores: list[dict],
+    prioritarios: set[int],
+    ultimo_uso_por_tema: dict[int, str],
+    limite: int = 12,
+    max_por_orador: int = 3,
+) -> list[dict]:
+    """Ranqueia pares orador+tema para receber da congregação anfitriã.
+
+    A ordem privilegia: 1) temas marcados como PRIORITÁRIOS para a minha
+    congregação; 2) temas nunca feitos ou há mais tempo sem uso; 3) o número
+    do tema (desempate estável). Um orador aparece no máximo ``max_por_orador``
+    vezes, para a lista não ser dominada por quem faz muitos temas.
+
+    Args:
+        oradores: [{id, nome, temas: [nr, ...], qualquer_tema: bool}] — os
+            oradores disponíveis da anfitriã com os temas que podem fazer.
+        prioritarios: números dos temas prioritários.
+        ultimo_uso_por_tema: {nr: chave ordenável 'AAAAMM...'} — '' ou ausente
+            significa que o tema nunca foi feito.
+        limite: máximo de sugestões retornadas.
+        max_por_orador: máximo de sugestões por orador.
+
+    Returns:
+        [{orador_id, orador_nome, tema_nr, prioritario, nunca_feito,
+          ultimo_uso_chave}] em ordem de recomendação.
+    """
+    todos_os_temas = sorted(ultimo_uso_por_tema.keys())
+    pares: list[tuple] = []
+    for orador in oradores:
+        temas = (
+            todos_os_temas
+            if orador.get("qualquer_tema")
+            else sorted(set(orador.get("temas") or []))
+        )
+        for nr in temas:
+            chave_uso = ultimo_uso_por_tema.get(nr, "") or ""
+            eh_prioritario = nr in prioritarios
+            pares.append(
+                (
+                    (0 if eh_prioritario else 1, chave_uso, nr),
+                    {
+                        "orador_id": orador["id"],
+                        "orador_nome": orador.get("nome", ""),
+                        "tema_nr": nr,
+                        "prioritario": eh_prioritario,
+                        "nunca_feito": not chave_uso,
+                        "ultimo_uso_chave": chave_uso,
+                    },
+                )
+            )
+
+    pares.sort(key=lambda item: item[0])
+    sugestoes: list[dict] = []
+    usos_por_orador: dict[int, int] = {}
+    for _chave, sugestao in pares:
+        oid = sugestao["orador_id"]
+        if usos_por_orador.get(oid, 0) >= max_por_orador:
+            continue
+        usos_por_orador[oid] = usos_por_orador.get(oid, 0) + 1
+        sugestoes.append(sugestao)
+        if len(sugestoes) >= limite:
+            break
+    return sugestoes
+
+
 def detectar_conflitos_oradores(registros: list[dict]) -> list[dict]:
     """Detecta oradores designados mais de uma vez na mesma data.
 

@@ -5,6 +5,7 @@ from servicos import (
     detectar_conflitos_oradores,
     escolher_rodizio_presidentes,
     oradores_mais_tempo_sem_discurso,
+    sugerir_recebidos,
 )
 
 
@@ -84,6 +85,53 @@ class TestOradoresMaisTempoSemDiscurso:
         ids = [1, 2, 3]
         oradores_mais_tempo_sem_discurso(ids, {2: "01/01/2026"})
         assert ids == [1, 2, 3]
+
+
+class TestSugerirRecebidos:
+    def _oradores(self):
+        return [
+            {"id": 1, "nome": "Ana", "temas": [10, 20], "qualquer_tema": False},
+            {"id": 2, "nome": "Beto", "temas": [20, 30], "qualquer_tema": False},
+        ]
+
+    def test_prioritario_vem_primeiro(self):
+        # Tema 30 é prioritário, mesmo tendo uso mais recente que o 10.
+        uso = {10: "", 20: "202601", 30: "202606"}
+        sugestoes = sugerir_recebidos(self._oradores(), {30}, uso)
+        assert sugestoes[0]["tema_nr"] == 30
+        assert sugestoes[0]["orador_id"] == 2
+        assert sugestoes[0]["prioritario"] is True
+
+    def test_nunca_feito_antes_de_usado(self):
+        uso = {10: "", 20: "202601", 30: "202606"}
+        sugestoes = sugerir_recebidos(self._oradores(), set(), uso)
+        # 10 nunca feito (Ana) vem antes de 20 (jan) e 30 (jun).
+        assert (sugestoes[0]["tema_nr"], sugestoes[0]["orador_id"]) == (10, 1)
+        assert sugestoes[0]["nunca_feito"] is True
+        assert [s["tema_nr"] for s in sugestoes[:2]] == [10, 20]
+
+    def test_qualquer_tema_considera_todos(self):
+        oradores = [{"id": 5, "nome": "Rafael", "temas": [], "qualquer_tema": True}]
+        uso = {1: "", 2: "202601"}
+        sugestoes = sugerir_recebidos(oradores, set(), uso)
+        assert [s["tema_nr"] for s in sugestoes] == [1, 2]
+
+    def test_limite_por_orador(self):
+        oradores = [
+            {"id": 1, "nome": "Ana", "temas": [1, 2, 3, 4, 5], "qualquer_tema": False},
+            {"id": 2, "nome": "Beto", "temas": [6], "qualquer_tema": False},
+        ]
+        uso = {n: "" for n in range(1, 7)}
+        sugestoes = sugerir_recebidos(oradores, set(), uso, max_por_orador=3)
+        assert sum(1 for s in sugestoes if s["orador_id"] == 1) == 3
+        assert any(s["orador_id"] == 2 for s in sugestoes)
+
+    def test_limite_total(self):
+        oradores = [
+            {"id": 1, "nome": "Ana", "temas": list(range(1, 30)), "qualquer_tema": False}
+        ]
+        uso = {n: "" for n in range(1, 30)}
+        assert len(sugerir_recebidos(oradores, set(), uso, limite=5, max_por_orador=99)) == 5
 
 
 class TestDetectarConflitosOradores:

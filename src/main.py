@@ -46,6 +46,7 @@ from database import (
     contar_designacoes_por_mes,
     contar_designacoes_por_status,
     create_tables,
+    definir_tema_prioritario,
     definir_visibilidade_ano_coluna,
     excluir_ano_coluna,
     excluir_arranjo,
@@ -65,6 +66,7 @@ from database import (
     listar_datas_especiais_por_ano,
     listar_presidentes_cadastro,
     listar_tipos_evento,
+    oradores_com_temas_da_congregacao,
     relatorio_frequencia_oradores,
     remover_orador_arranjo,
     restaurar_backup,
@@ -105,6 +107,7 @@ from servicos import (
     detectar_conflitos_oradores,
     escolher_rodizio_presidentes,
     oradores_mais_tempo_sem_discurso,
+    sugerir_recebidos,
 )
 from tema import (
     ALTURA_CONTEUDO_DIALOG_MES,
@@ -3194,6 +3197,11 @@ def abrir_dialog_tema(
         value=dados["data_limite_uso"],
         width=200,
     )
+    campo_prioritario = ft.Checkbox(
+        label="Tema prioritário para a minha congregação",
+        value=bool(dados.get("prioritario")),
+        tooltip="Sobe para o topo na escolha assistida de oradores recebidos",
+    )
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
 
     anos_visiveis = listar_anos_colunas(apenas_visiveis=True)
@@ -3246,6 +3254,7 @@ def abrir_dialog_tema(
                 uso_por_ano,
                 categoria=campo_assunto.value or "",
             )
+            definir_tema_prioritario(tema_nr, bool(campo_prioritario.value))
         except Exception:
             texto_erro.value = "Não foi possível salvar o tema."
             texto_erro.visible = True
@@ -3275,6 +3284,7 @@ def abrir_dialog_tema(
                         campo_assunto,
                         campo_notas,
                         campo_data_limite,
+                        campo_prioritario,
                         *conteudo_anos,
                         texto_erro,
                     ],
@@ -4581,6 +4591,116 @@ def abrir_seletor_oradores(
 
     montar_sugestoes_orador()
 
+    def abrir_escolha_assistida(_=None):
+        """Ranqueia orador+tema da anfitriã por prioridade e tempo sem uso."""
+        host_id = dados_arranjo.get("congregacao_host_id")
+        if not host_id:
+            mostrar_aviso(
+                page,
+                "Congregação não definida",
+                "Defina a congregação anfitriã do arranjo para usar a escolha assistida.",
+            )
+            return
+        oradores_host = oradores_com_temas_da_congregacao(int(host_id))
+        if not oradores_host:
+            mostrar_aviso(
+                page,
+                "Sem oradores cadastrados",
+                "Cadastre os oradores da congregação anfitriã (com os temas que "
+                "podem fazer) para receber sugestões.",
+            )
+            return
+        for orador in oradores_host:
+            orador["qualquer_tema"] = obs_tem_qualquer_tema(
+                orador.get("observacoes", "")
+            )
+
+        df = carregar_dataframe_temas()
+        prioritarios = {
+            int(nr) for nr, p in zip(df["nr"], df["prioritario"]) if p
+        }
+        uso = {int(nr): (c or "") for nr, c in zip(df["nr"], df["ultimo_uso_chave"])}
+        titulos = {int(nr): (t or "") for nr, t in zip(df["nr"], df["titulo"])}
+        ultimos = {int(nr): (u or "") for nr, u in zip(df["nr"], df["ultimo_uso"])}
+
+        sugestoes = sugerir_recebidos(oradores_host, prioritarios, uso, limite=15)
+        if not sugestoes:
+            mostrar_aviso(
+                page,
+                "Sem sugestões",
+                "Os oradores da anfitriã não têm temas cadastrados.",
+            )
+            return
+
+        def escolher_sugestao(s: dict):
+            campo_orador.value = str(s["orador_id"])
+            campo_tema.value = str(s["tema_nr"])
+            page.pop_dialog()
+            atualizar_sugestoes_datas()
+            page.update()
+
+        def subtitulo_sugestao(s: dict) -> str:
+            nr = s["tema_nr"]
+            titulo = _resumir_texto_tabela(titulos.get(nr, ""), 52)
+            if s["nunca_feito"]:
+                uso_txt = "nunca feito na sua congregação"
+            else:
+                uso_txt = f"último uso: {ultimos.get(nr) or '—'}"
+            return f"{nr} - {titulo}\n{uso_txt}"
+
+        itens = [
+            ft.ListTile(
+                dense=True,
+                leading=ft.Icon(
+                    ft.Icons.STAR if s["prioritario"] else ft.Icons.MENU_BOOK_OUTLINED,
+                    size=20,
+                    color=COR_AVISO if s["prioritario"] else TEXTO_SECUNDARIO,
+                ),
+                title=ft.Text(
+                    s["orador_nome"]
+                    + ("  ·  tema prioritário" if s["prioritario"] else ""),
+                    size=13,
+                    weight=ft.FontWeight.W_600,
+                ),
+                subtitle=ft.Text(subtitulo_sugestao(s), size=12),
+                on_click=lambda e, s=dict(s): escolher_sugestao(s),
+            )
+            for s in sugestoes
+        ]
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text(
+                    "Escolha assistida — prioridades e temas há mais tempo sem fazer",
+                    size=15,
+                    weight=ft.FontWeight.W_600,
+                ),
+                content=ft.Container(
+                    width=_largura_dialog(page, 520),
+                    height=440,
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                "Sugestões entre os oradores da anfitriã, começando "
+                                "pelos temas que você marcou como prioritários (★) e "
+                                "pelos há mais tempo sem uso. Toque para preencher.",
+                                size=12,
+                                color=TEXTO_SECUNDARIO,
+                            ),
+                            *itens,
+                        ],
+                        spacing=2,
+                        tight=True,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=lambda _: page.pop_dialog())
+                ],
+            )
+        )
+
     def fechar(_=None):
         page.pop_dialog()
 
@@ -4650,7 +4770,18 @@ def abrir_seletor_oradores(
         fechar()
         atualizar_listas()
 
-    conteudo = [alternador_modo] if eh_oradores else []
+    conteudo = (
+        [
+            alternador_modo,
+            ft.OutlinedButton(
+                content="Escolha assistida (prioridades e temas parados)",
+                icon=ft.Icons.AUTO_AWESOME,
+                on_click=abrir_escolha_assistida,
+            ),
+        ]
+        if eh_oradores
+        else []
+    )
     conteudo.extend(
         [
             area_existente,

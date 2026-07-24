@@ -360,6 +360,11 @@ def create_tables(conn):
     if "ativo" not in colunas_oradores:
         cursor.execute("ALTER TABLE oradores ADD COLUMN ativo INTEGER NOT NULL DEFAULT 1")
 
+    # Temas prioritários para a minha congregação (escolha assistida de recebidos).
+    colunas_temas = [linha[1] for linha in cursor.execute("PRAGMA table_info(temas)")]
+    if "prioritario" not in colunas_temas:
+        cursor.execute("ALTER TABLE temas ADD COLUMN prioritario INTEGER NOT NULL DEFAULT 0")
+
     colunas_especiais = [linha[1] for linha in cursor.execute("PRAGMA table_info(datas_especiais)")]
     if "congregacao_id" not in colunas_especiais:
         cursor.execute("ALTER TABLE datas_especiais ADD COLUMN congregacao_id INTEGER")
@@ -883,6 +888,62 @@ def carregar_recebidos_por_ano(ano: int) -> dict[str, dict]:
             linha[0]: {"orador": linha[1], "tema_nr": linha[2], "tema": linha[3]}
             for linha in linhas
         }
+    finally:
+        conn.close()
+
+
+def definir_tema_prioritario(nr: int, prioritario: bool) -> None:
+    """Marca/desmarca um tema como prioritário para a minha congregação."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE temas SET prioritario = ? WHERE nr = ?",
+            (1 if prioritario else 0, nr),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def oradores_com_temas_da_congregacao(congregacao_id: int) -> list[dict]:
+    """Oradores ativos de uma congregação, com os temas que podem fazer.
+
+    Retorna [{id, nome, observacoes, temas: [nr, ...]}] — base da escolha
+    assistida de recebidos (a lista que o irmão da anfitriã envia fica
+    registrada no cadastro de oradores dela).
+    """
+    conn = get_connection()
+    try:
+        oradores = conn.execute(
+            """
+            SELECT id, nome, COALESCE(observacoes, '') AS observacoes
+            FROM oradores
+            WHERE congregacao_id = ? AND COALESCE(ativo, 1) = 1
+            ORDER BY nome
+            """,
+            (congregacao_id,),
+        ).fetchall()
+        temas_por_orador: dict[int, list[int]] = {}
+        for orador_id, tema_nr in conn.execute(
+            """
+            SELECT ot.orador_id, ot.tema_nr
+            FROM orador_temas ot
+            JOIN oradores o ON o.id = ot.orador_id
+            WHERE o.congregacao_id = ?
+            ORDER BY ot.tema_nr
+            """,
+            (congregacao_id,),
+        ):
+            temas_por_orador.setdefault(orador_id, []).append(int(tema_nr))
+        return [
+            {
+                "id": int(oid),
+                "nome": nome,
+                "observacoes": obs,
+                "temas": temas_por_orador.get(int(oid), []),
+            }
+            for oid, nome, obs in oradores
+        ]
     finally:
         conn.close()
 
@@ -1592,7 +1653,8 @@ def carregar_tema(nr: int) -> dict | None:
     try:
         migrar_temas(conn)
         cursor = conn.execute(
-            "SELECT nr, titulo, notas, data_limite_uso, categoria FROM temas WHERE nr = ?",
+            "SELECT nr, titulo, notas, data_limite_uso, categoria, "
+            "COALESCE(prioritario, 0) FROM temas WHERE nr = ?",
             (nr,),
         )
         row = cursor.fetchone()
@@ -1610,6 +1672,7 @@ def carregar_tema(nr: int) -> dict | None:
             "notas": row[2] or "",
             "data_limite_uso": row[3] or "",
             "categoria": row[4] or "",
+            "prioritario": bool(row[5]),
             "uso_por_ano": {int(ano): (data or "") for ano, data in uso_rows},
         }
     finally:
@@ -1705,7 +1768,8 @@ def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
                    CASE
                        WHEN COALESCE(notas, '') != '' THEN 1
                        ELSE 0
-                   END AS tem_observacao
+                   END AS tem_observacao,
+                   COALESCE(prioritario, 0) AS prioritario
             FROM temas
             ORDER BY nr
             """,
@@ -1751,7 +1815,8 @@ def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
     return temas_df[
         [
             "nr", "titulo", "assunto", *colunas_ano, "ultimo_uso",
-            "restricoes", "data_limite_uso", "restrito", "tem_observacao", "ultimo_uso_chave",
+            "restricoes", "data_limite_uso", "restrito", "tem_observacao",
+            "ultimo_uso_chave", "prioritario",
         ]
     ]
 
