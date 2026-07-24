@@ -547,6 +547,7 @@ def carregar_oradores_arranjo(arranjo_id: int) -> list[dict]:
                    ao.tema_nr,
                    ao.congregacao_id,
                    ao.data,
+                   COALESCE(ao.status, 'pendente') AS status,
                    COALESCE(o.nome, '') AS orador_nome,
                    COALESCE(t.titulo, '') AS tema_titulo,
                    COALESCE(c.nome, '') AS congregacao_nome
@@ -638,6 +639,69 @@ def atualizar_orador_arranjo(
             (tema_nr, congregacao_id, data, registro_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+STATUS_DESIGNACAO = ("pendente", "confirmado", "recusado")
+
+
+def atualizar_status_orador_arranjo(registro_id: int, status: str) -> None:
+    """Define o status de confirmação de uma designação (pendente/confirmado/recusado)."""
+    if status not in STATUS_DESIGNACAO:
+        status = "pendente"
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE arranjo_oradores SET status = ? WHERE id = ?",
+            (status, registro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def contar_designacoes_por_status(ano: int) -> dict[str, int]:
+    """Conta as designações do ano por status (pendente/confirmado/recusado)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            SELECT COALESCE(ao.status, 'pendente') AS status, COUNT(*)
+            FROM arranjo_oradores ao
+            JOIN arranjos a ON ao.arranjo_id = a.id
+            WHERE a.ano = ?
+            GROUP BY COALESCE(ao.status, 'pendente')
+            """,
+            (ano,),
+        )
+        return {linha[0]: int(linha[1]) for linha in cursor.fetchall()}
+    finally:
+        conn.close()
+
+
+def ultima_data_discurso_por_orador() -> dict[int, str]:
+    """Última data (DD/MM/AAAA) em que cada orador foi enviado para discursar.
+
+    Considera os registros do tipo 'enviado' (oradores da minha congregação
+    mandados a outra). Usado para sugerir quem está há mais tempo sem discursar.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            SELECT orador_id, data
+            FROM arranjo_oradores
+            WHERE tipo = 'enviado' AND data IS NOT NULL AND data <> ''
+            """
+        )
+        ultima: dict[int, str] = {}
+        for orador_id, data in cursor.fetchall():
+            chave = (data[6:10], data[3:5], data[0:2])
+            atual = ultima.get(orador_id)
+            if atual is None or chave > (atual[6:10], atual[3:5], atual[0:2]):
+                ultima[orador_id] = data
+        return ultima
     finally:
         conn.close()
 

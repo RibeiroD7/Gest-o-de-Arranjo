@@ -24,6 +24,7 @@ from database import (
     adicionar_orador_arranjo,
     adicionar_tipo_evento,
     atualizar_orador_arranjo,
+    atualizar_status_orador_arranjo,
     carregar_arranjo,
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
@@ -3915,6 +3916,36 @@ def _resumir_texto_tabela(texto: str, limite: int = 42) -> str:
     return texto[: limite - 3] + "..."
 
 
+STATUS_DESIGNACAO_INFO = {
+    "pendente": (ft.Icons.SCHEDULE, COR_AVISO, "Pendente"),
+    "confirmado": (ft.Icons.CHECK_CIRCLE, COR_SUCESSO, "Confirmado"),
+    "recusado": (ft.Icons.CANCEL, COR_ERRO, "Recusado"),
+}
+PROXIMO_STATUS_DESIGNACAO = {
+    "pendente": "confirmado",
+    "confirmado": "recusado",
+    "recusado": "pendente",
+}
+
+
+def _selo_status_designacao(registro: dict, on_status: Callable[[int, str], None]):
+    """Selo clicável de status; um toque cicla pendente → confirmado → recusado."""
+    status = registro.get("status") or "pendente"
+    icone, cor, rotulo = STATUS_DESIGNACAO_INFO.get(
+        status, STATUS_DESIGNACAO_INFO["pendente"]
+    )
+    return ft.IconButton(
+        icon=icone,
+        icon_size=17,
+        icon_color=cor,
+        tooltip=f"{rotulo} — toque para alterar",
+        style=ft.ButtonStyle(padding=4),
+        on_click=lambda e, rid=int(registro["id"]), atual=status: on_status(
+            rid, PROXIMO_STATUS_DESIGNACAO.get(atual, "confirmado")
+        ),
+    )
+
+
 def _criar_cabecalho_tabela_oradores() -> ft.Container:
     """Cabeçalho da tabela: Data | Orador | Tema | Ações."""
     return ft.Container(
@@ -3963,6 +3994,7 @@ def _criar_linha_orador_arranjo(
     on_remover: Callable[[int], None],
     ultima_linha: bool = False,
     on_whatsapp: Callable[[dict], None] | None = None,
+    on_status: Callable[[int, str], None] | None = None,
 ) -> ft.Container:
     """Linha da tabela: Data | Orador | Tema | Ações."""
     tema = _rotulo_tema_orador_arranjo(registro)
@@ -4000,6 +4032,11 @@ def _criar_linha_orador_arranjo(
                 ft.Row(
                     [
                         *(
+                            [_selo_status_designacao(registro, on_status)]
+                            if on_status
+                            else []
+                        ),
+                        *(
                             [
                                 ft.IconButton(
                                     icon=ft.Icons.CHAT_OUTLINED,
@@ -4031,7 +4068,9 @@ def _criar_linha_orador_arranjo(
                         ),
                     ],
                     spacing=0,
-                    width=LARGURA_COL_ACOES_MES + (34 if on_whatsapp else 0),
+                    width=LARGURA_COL_ACOES_MES
+                    + (34 if on_whatsapp else 0)
+                    + (34 if on_status else 0),
                 ),
             ],
             spacing=ESPACO_COLUNAS_MES,
@@ -4107,6 +4146,7 @@ def _montar_tabela_secao(
     on_editar: Callable[[dict], None],
     on_remover: Callable[[int], None],
     on_whatsapp: Callable[[dict], None] | None = None,
+    on_status: Callable[[int, str], None] | None = None,
 ) -> list[ft.Control]:
     """Monta tabela simples com cabeçalho e linhas."""
     if not registros:
@@ -4126,6 +4166,7 @@ def _montar_tabela_secao(
             on_remover,
             ultima_linha=indice == len(registros) - 1,
             on_whatsapp=on_whatsapp,
+            on_status=on_status,
         )
         for indice, item in enumerate(registros)
     ]
@@ -5205,6 +5246,10 @@ def abrir_dialog_oradores_mes(
     def whatsapp_designacao(item: dict):
         _abrir_whatsapp_designacao_envio(page, item)
 
+    def alterar_status(registro_id: int, novo_status: str):
+        atualizar_status_orador_arranjo(registro_id, novo_status)
+        atualizar_listas()
+
     def preencher_listas():
         registros = carregar_oradores_arranjo(arranjo_id)
         recebidos = [r for r in registros if r["tipo"] == "recebido"]
@@ -5215,6 +5260,7 @@ def abrir_dialog_oradores_mes(
             "Nenhum orador cadastrado.",
             editar_orador,
             remover_orador,
+            on_status=alterar_status,
         )
         lista_enviados.controls = _montar_tabela_secao(
             enviados,
@@ -5222,6 +5268,7 @@ def abrir_dialog_oradores_mes(
             editar_orador,
             remover_orador,
             on_whatsapp=whatsapp_designacao,
+            on_status=alterar_status,
         )
         preencher_presidentes()
         preencher_especiais()
