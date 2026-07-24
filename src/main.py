@@ -7621,6 +7621,63 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     )
 
 
+def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
+    """Boas-vindas no primeiro uso: orienta o preenchimento inicial."""
+
+    def ir_ajustes(_=None):
+        page.pop_dialog()
+        navegar(6)  # Ajustes → Minha Congregação
+
+    passos = [
+        ("1. Sua congregação", "Preencha os dados em Ajustes → Minha Congregação."),
+        ("2. Congregações do circuito", "Cadastre as demais congregações."),
+        ("3. Oradores e temas", "Adicione oradores e importe os temas (S-99/S-99a)."),
+        ("4. Programação", "Monte os arranjos do mês — ou importe tudo de uma planilha."),
+    ]
+    linhas = [
+        ft.Column(
+            [
+                ft.Text(titulo, weight=ft.FontWeight.W_600, size=13, color=TEXTO_PRIMARIO),
+                ft.Text(desc, size=12, color=TEXTO_SECUNDARIO),
+            ],
+            spacing=1,
+            tight=True,
+        )
+        for titulo, desc in passos
+    ]
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Bem-vindo ao Gestão de Arranjo"),
+            content=ft.Container(
+                width=_largura_dialog(page, 420),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "O app começa vazio. Estes são os primeiros passos:",
+                            size=13,
+                            color=TEXTO_PRIMARIO,
+                        ),
+                        ft.Container(height=6),
+                        *linhas,
+                    ],
+                    spacing=10,
+                    tight=True,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Depois", on_click=lambda _: page.pop_dialog()),
+                ft.FilledButton(
+                    "Preencher Minha Congregação",
+                    icon=ft.Icons.APARTMENT,
+                    on_click=ir_ajustes,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+
+
 def _verificar_atualizacao(page: ft.Page) -> None:
     """Avisa (snackbar) se houver versão mais nova no GitHub. Só no desktop.
 
@@ -7820,6 +7877,10 @@ def main(page: ft.Page):
     page.update()
     navegar(0)
     _verificar_atualizacao(page)
+
+    # Primeiro uso: se a congregação ainda não foi preenchida, orienta o usuário.
+    if not carregar_configuracao().get("nome_congregacao", "").strip():
+        _mostrar_onboarding(page, navegar)
 
 
 # Ponto de entrada do flet build (mobile) e do `flet run` (desktop): o Flet
