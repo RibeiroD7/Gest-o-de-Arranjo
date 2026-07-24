@@ -35,6 +35,7 @@ from database import (
     carregar_temas_de_orador,
     carregar_todas_designacoes_presidente,
     contar_designacoes_por_mes,
+    contar_designacoes_por_status,
     create_tables,
     definir_visibilidade_ano_coluna,
     excluir_ano_coluna,
@@ -2467,6 +2468,14 @@ def tela_inicio(
         if r["cobertas"] and r["presidentes"] < r["semanas"]:
             faltam = r["semanas"] - r["presidentes"]
             pendencias.append(f"{nome_mes}: {faltam} semana(s) sem presidente")
+
+    # Designações aguardando confirmação do orador (status "pendente").
+    aguardando = contar_designacoes_por_status(ano).get("pendente", 0)
+    if aguardando:
+        pendencias.insert(
+            0, f"{aguardando} designação(ões) aguardando confirmação"
+        )
+
     if len(pendencias) > 6:
         restante = len(pendencias) - 6
         pendencias = pendencias[:6] + [f"… e mais {restante} pendência(s)"]
