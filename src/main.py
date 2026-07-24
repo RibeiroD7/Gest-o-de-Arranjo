@@ -98,6 +98,30 @@ from servicos import (
     escolher_rodizio_presidentes,
     oradores_mais_tempo_sem_discurso,
 )
+from tema import (
+    ALTURA_CONTEUDO_DIALOG_MES,
+    BORDA_SUAVE,
+    COR_AVISO,
+    COR_DESTAQUE,
+    COR_DESTAQUE_CLARA,
+    COR_DESTAQUE_SUAVE,
+    COR_ERRO,
+    COR_SUCESSO,
+    ESPACO_COLUNAS_MES,
+    FUNDO_APP,
+    FUNDO_CARD,
+    FUNDO_ELEVADO,
+    FUNDO_SIDEBAR,
+    ICON_SIZE_MENU,
+    LARGURA_BARRA_LATERAL,
+    LARGURA_COL_ACOES_MES,
+    LARGURA_COL_DATA_MES,
+    LARGURA_COL_ORADOR_MES,
+    LARGURA_COL_TEMA_MES,
+    LARGURA_DIALOG_MES,
+    TEXTO_PRIMARIO,
+    TEXTO_SECUNDARIO,
+)
 from util import (
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -115,9 +139,6 @@ from util import (
 # Configuração
 # ---------------------------------------------------------------------------
 
-LARGURA_BARRA_LATERAL = 192
-ICON_SIZE_MENU = 18
-
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
 VERSAO_APP = "1.2.0"
 
@@ -127,24 +148,6 @@ URL_API_RELEASE = (
     "https://api.github.com/repos/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
 )
 URL_RELEASES = "https://github.com/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
-
-# Identidade visual — "Meia-noite teal": azul profundo com acento verde-água
-COR_DESTAQUE = "#14B8A6"
-COR_DESTAQUE_CLARA = "#2DD4BF"
-COR_DESTAQUE_SUAVE = "#5EEAD4"
-
-FUNDO_APP = "#0E1524"
-FUNDO_SIDEBAR = "#121A2E"
-FUNDO_CARD = "#16223B"
-FUNDO_ELEVADO = "#1C2A47"
-
-TEXTO_PRIMARIO = "#E7ECF5"
-TEXTO_SECUNDARIO = "#7C89A6"
-BORDA_SUAVE = "#24304E"
-
-COR_SUCESSO = "#34D399"
-COR_AVISO = "#FBBF24"
-COR_ERRO = "#F87171"
 
 SECOES = [
     {"nome": "Início", "icone": ft.Icons.HOME},
@@ -183,13 +186,6 @@ SQL_CONGREGACOES = """
 """
 
 ANO_PADRAO_ARRANJOS = 2026
-LARGURA_DIALOG_MES = 1040
-ALTURA_CONTEUDO_DIALOG_MES = 480
-LARGURA_COL_DATA_MES = 76
-LARGURA_COL_ORADOR_MES = 150
-LARGURA_COL_ACOES_MES = 80
-LARGURA_COL_TEMA_MES = 150  # largura fixa da coluna Tema no celular (tabela rola na horizontal)
-ESPACO_COLUNAS_MES = 8
 QUANTIDADE_DATAS_SUGERIDAS = 5
 
 NOMES_MESES = [
