@@ -706,6 +706,29 @@ def ultima_data_discurso_por_orador() -> dict[int, str]:
         conn.close()
 
 
+def carregar_designacoes_ano(ano: int) -> list[dict]:
+    """Todos os registros (recebido/enviado) do ano com data e orador.
+
+    Usado para detectar conflitos (mesmo orador na mesma data).
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            SELECT ao.data, ao.orador_id, COALESCE(o.nome, '') AS orador_nome
+            FROM arranjo_oradores ao
+            JOIN arranjos a ON ao.arranjo_id = a.id
+            JOIN oradores o ON ao.orador_id = o.id
+            WHERE a.ano = ? AND ao.data IS NOT NULL AND ao.data <> ''
+            """,
+            (ano,),
+        )
+        colunas = [desc[0] for desc in cursor.description]
+        return [dict(zip(colunas, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
 def listar_anos_arranjos() -> list[int]:
     """Lista anos com arranjos cadastrados."""
     conn = get_connection()

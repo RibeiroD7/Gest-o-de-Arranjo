@@ -28,6 +28,7 @@ from database import (
     carregar_arranjo,
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
+    carregar_designacoes_ano,
     carregar_oradores_arranjo,
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
@@ -88,7 +89,11 @@ from png_oradores import (
     gerar_png_oradores,
     gerar_preview_quadro_mes,
 )
-from servicos import escolher_rodizio_presidentes, oradores_mais_tempo_sem_discurso
+from servicos import (
+    detectar_conflitos_oradores,
+    escolher_rodizio_presidentes,
+    oradores_mais_tempo_sem_discurso,
+)
 from util import (
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -2475,6 +2480,14 @@ def tela_inicio(
     if aguardando:
         pendencias.insert(
             0, f"{aguardando} designação(ões) aguardando confirmação"
+        )
+
+    # Conflitos (mesmo orador na mesma data) vêm primeiro — são os mais críticos.
+    conflitos = detectar_conflitos_oradores(carregar_designacoes_ano(ano))
+    for conflito in reversed(conflitos[:3]):
+        nome = conflito["orador_nome"] or "Orador"
+        pendencias.insert(
+            0, f"Conflito: {nome} em {conflito['data']} ({conflito['ocorrencias']}×)"
         )
 
     if len(pendencias) > 6:
