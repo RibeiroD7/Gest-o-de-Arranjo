@@ -18,6 +18,7 @@ from typing import Callable
 import flet as ft
 import pandas as pd
 
+import tema
 from armazenamento import (
     EXPORTS_DIR,
     definir_layout_mobile,
@@ -37,6 +38,7 @@ from database import (
     carregar_dataframe_temas,
     carregar_designacoes_ano,
     carregar_enviados_por_ano,
+    carregar_escala_fonte,
     carregar_oradores_arranjo,
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
@@ -72,6 +74,7 @@ from database import (
     restaurar_backup,
     salvar_arranjo,
     salvar_data_especial,
+    salvar_escala_fonte,
     salvar_orador,
     salvar_ordem_presidentes,
     salvar_presidente,
@@ -110,7 +113,6 @@ from servicos import (
     sugerir_recebidos,
 )
 from tema import (
-    ALTURA_CONTEUDO_DIALOG_MES,
     BORDA_SUAVE,
     COR_AVISO,
     COR_DESTAQUE,
@@ -123,18 +125,13 @@ from tema import (
     FUNDO_CARD,
     FUNDO_ELEVADO,
     FUNDO_SIDEBAR,
-    ICON_SIZE_MENU,
-    LARGURA_BARRA_LATERAL,
-    LARGURA_COL_ACOES_MES,
-    LARGURA_COL_DATA_MES,
-    LARGURA_COL_ORADOR_MES,
-    LARGURA_COL_TEMA_MES,
     LARGURA_DIALOG_MES,
     LARGURA_PREVIEW_BASE,
     TEXTO_PRIMARIO,
     TEXTO_SECUNDARIO,
     ZOOM_PREVIEW_MAX,
     ZOOM_PREVIEW_MIN,
+    fonte,
 )
 from ui_comuns import (
     _cor_fundo_item_menu,
@@ -868,7 +865,7 @@ def criar_tabela(
     if habilitar_selecao:
         colunas.append(
             ft.DataColumn(
-                ft.Text("Selecionar", weight=ft.FontWeight.W_600, size=12, color=TEXTO_PRIMARIO),
+                ft.Text("Selecionar", weight=ft.FontWeight.W_600, size=fonte(12), color=TEXTO_PRIMARIO),
                 numeric=False,
             )
         )
@@ -878,7 +875,7 @@ def criar_tabela(
                     _rotulo_coluna(nome, config),
                     weight=ft.FontWeight.W_600,
                     text_align=alinhamento_celula(nome),
-                    size=12,
+                    size=fonte(12),
                     color=TEXTO_PRIMARIO,
                 )
             )
@@ -889,19 +886,19 @@ def criar_tabela(
             if on_editar:
                 colunas.append(
                     ft.DataColumn(
-                        ft.Text("Editar", weight=ft.FontWeight.W_600, size=12, color=TEXTO_PRIMARIO)
+                        ft.Text("Editar", weight=ft.FontWeight.W_600, size=fonte(12), color=TEXTO_PRIMARIO)
                     )
                 )
             if on_excluir:
                 colunas.append(
                     ft.DataColumn(
-                        ft.Text("Excluir", weight=ft.FontWeight.W_600, size=12, color=TEXTO_PRIMARIO)
+                        ft.Text("Excluir", weight=ft.FontWeight.W_600, size=fonte(12), color=TEXTO_PRIMARIO)
                     )
                 )
         elif on_editar:
             colunas.append(
                 ft.DataColumn(
-                    ft.Text(rotulo_acoes, weight=ft.FontWeight.W_600, size=12, color=TEXTO_PRIMARIO)
+                    ft.Text(rotulo_acoes, weight=ft.FontWeight.W_600, size=fonte(12), color=TEXTO_PRIMARIO)
                 )
             )
 
@@ -955,7 +952,7 @@ def criar_tabela(
                 max_linhas = 2
             controle_celula: ft.Control = ft.Text(
                 texto,
-                size=12,
+                size=fonte(12),
                 color=TEXTO_PRIMARIO,
                 text_align=alinhamento_celula(nome),
                 max_lines=max_linhas,
@@ -972,7 +969,7 @@ def criar_tabela(
                 if ao_alternar and registro_id is not None:
                     estrela = ft.IconButton(
                         icon=ft.Icons.STAR if eh_prioritario else ft.Icons.STAR_BORDER,
-                        icon_size=16,
+                        icon_size=fonte(16),
                         icon_color=COR_AVISO if eh_prioritario else TEXTO_SECUNDARIO,
                         tooltip=(
                             "Tema prioritário — clique para desmarcar"
@@ -987,7 +984,7 @@ def criar_tabela(
                 elif eh_prioritario:
                     estrela = ft.Icon(
                         ft.Icons.STAR,
-                        size=14,
+                        size=fonte(14),
                         color=COR_AVISO,
                         tooltip="Tema prioritário para a minha congregação",
                     )
@@ -1006,7 +1003,7 @@ def criar_tabela(
                         ft.DataCell(
                             ft.IconButton(
                                 icon=ft.Icons.EDIT,
-                                icon_size=18,
+                                icon_size=fonte(18),
                                 tooltip="Editar",
                                 on_click=lambda e, rid=registro_id: on_editar(rid),
                             )
@@ -1017,7 +1014,7 @@ def criar_tabela(
                         ft.DataCell(
                             ft.IconButton(
                                 icon=ft.Icons.DELETE,
-                                icon_size=18,
+                                icon_size=fonte(18),
                                 tooltip="Excluir",
                                 icon_color=COR_ERRO,
                                 on_click=lambda e, rid=registro_id: on_excluir(rid),
@@ -1029,7 +1026,7 @@ def criar_tabela(
                     ft.DataCell(
                         ft.IconButton(
                             icon=ft.Icons.EDIT,
-                            icon_size=18,
+                            icon_size=fonte(18),
                             tooltip="Editar orador",
                             on_click=lambda e, rid=registro_id: on_editar(rid),
                         )
@@ -1115,7 +1112,7 @@ def criar_tela_padrao(
     DataFrame já filtrado pela busca.
     """
     area_tabela = ft.Container(expand=True)
-    texto_contagem = ft.Text(size=13, color=TEXTO_SECUNDARIO)
+    texto_contagem = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
 
     def atualizar_view(termo_busca: str = ""):
         df_atual = df() if callable(df) else df
@@ -1255,15 +1252,15 @@ def abrir_dialog_orador(
         max_lines=4,
         expand=True,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     temas_selecionados: set[int] = set(dados["temas_nr"]) if dados else set()
     df_temas = carregar_dados("SELECT nr, titulo FROM temas ORDER BY nr")
     lista_temas = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=220)
-    texto_contagem_temas = ft.Text(size=12, color=TEXTO_SECUNDARIO)
+    texto_contagem_temas = ft.Text(size=fonte(12), color=TEXTO_SECUNDARIO)
     texto_qualquer_tema = ft.Text(
         "Este orador pode fazer qualquer tema — não é preciso selecionar temas.",
-        size=12,
+        size=fonte(12),
         italic=True,
         color=TEXTO_SECUNDARIO,
         visible=faz_qualquer_tema,
@@ -1309,7 +1306,7 @@ def abrir_dialog_orador(
                             caixa,
                             ft.Text(
                                 rotulo,
-                                size=13,
+                                size=fonte(13),
                                 expand=True,
                                 max_lines=2,
                                 overflow=ft.TextOverflow.ELLIPSIS,
@@ -1389,7 +1386,7 @@ def abrir_dialog_orador(
                     texto_erro,
                     ft.Container(height=4),
                     campo_qualquer_tema,
-                    ft.Text("Temas que pode fazer", weight=ft.FontWeight.W_600, size=13),
+                    ft.Text("Temas que pode fazer", weight=ft.FontWeight.W_600, size=fonte(13)),
                     texto_qualquer_tema,
                     campo_busca_temas,
                     lista_temas,
@@ -1498,7 +1495,7 @@ def abrir_dialog_congregacao(
         value=dados["horario"] if dados else "",
         expand=True,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
         page.pop_dialog()
@@ -1767,7 +1764,7 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
     chip_data = ft.Container(
         content=ft.Text(
             data_ref.strftime("%d/%m"),
-            size=12,
+            size=fonte(12),
             weight=ft.FontWeight.W_600,
             color=COR_AVISO,
         ),
@@ -1778,7 +1775,7 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
     chip_tipo = ft.Container(
         content=ft.Text(
             especial.get("tipo", "Data especial"),
-            size=12,
+            size=fonte(12),
             weight=ft.FontWeight.W_600,
             color=COR_AVISO,
             max_lines=1,
@@ -1794,12 +1791,12 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
         corpo = [chip_tipo]
         if detalhes:
             corpo.append(
-                ft.Text(detalhes, size=12, color=TEXTO_SECUNDARIO,
+                ft.Text(detalhes, size=fonte(12), color=TEXTO_SECUNDARIO,
                         max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
             )
         if presidente:
             corpo.append(
-                ft.Text(f"Pres.: {presidente}", size=12, color=TEXTO_SECUNDARIO,
+                ft.Text(f"Pres.: {presidente}", size=fonte(12), color=TEXTO_SECUNDARIO,
                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
             )
         return ft.Row(
@@ -1818,7 +1815,7 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
             chip_tipo,
             ft.Text(
                 detalhes,
-                size=12,
+                size=fonte(12),
                 color=TEXTO_SECUNDARIO,
                 expand=True,
                 max_lines=1,
@@ -1826,7 +1823,7 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
             ),
             ft.Text(
                 f"Pres.: {presidente}" if presidente else "",
-                size=12,
+                size=fonte(12),
                 color=TEXTO_SECUNDARIO,
             ),
         ],
@@ -1855,7 +1852,7 @@ def _linha_agenda_inicio(
     chip_data = ft.Container(
         content=ft.Text(
             data_ref.strftime("%d/%m"),
-            size=12,
+            size=fonte(12),
             weight=ft.FontWeight.W_600,
             color=COR_DESTAQUE_SUAVE,
         ),
@@ -1865,7 +1862,7 @@ def _linha_agenda_inicio(
     )
     texto_presidente = ft.Text(
         f"Pres.: {presidente['nome']}" if presidente else "sem presidente",
-        size=12,
+        size=fonte(12),
         color=TEXTO_SECUNDARIO if presidente else COR_ERRO,
         max_lines=1,
         no_wrap=True,
@@ -1882,7 +1879,7 @@ def _linha_agenda_inicio(
                     [
                         ft.Text(
                             orador,
-                            size=13,
+                            size=fonte(13),
                             weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO if info else TEXTO_SECUNDARIO,
                             max_lines=1,
@@ -1892,7 +1889,7 @@ def _linha_agenda_inicio(
                             [
                                 ft.Text(
                                     tema or ("sem orador definido" if not info else "sem tema"),
-                                    size=12,
+                                    size=fonte(12),
                                     color=TEXTO_SECUNDARIO,
                                     italic=not tema,
                                     max_lines=1,
@@ -1916,7 +1913,7 @@ def _linha_agenda_inicio(
             chip_data,
             ft.Text(
                 orador,
-                size=13,
+                size=fonte(13),
                 weight=ft.FontWeight.W_600,
                 color=TEXTO_PRIMARIO if info else TEXTO_SECUNDARIO,
                 width=150,
@@ -1925,7 +1922,7 @@ def _linha_agenda_inicio(
             ),
             ft.Text(
                 tema or ("sem orador definido" if not info else "sem tema"),
-                size=12,
+                size=fonte(12),
                 color=TEXTO_SECUNDARIO,
                 italic=not tema,
                 expand=True,
@@ -1951,7 +1948,7 @@ def _card_kpi_inicio(
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Icon(icone or ft.Icons.INSIGHTS, size=20, color=cor_valor),
+                    content=ft.Icon(icone or ft.Icons.INSIGHTS, size=fonte(20), color=cor_valor),
                     bgcolor=ft.Colors.with_opacity(0.12, cor_valor),
                     border_radius=10,
                     padding=8 if mobile else 10,
@@ -1962,17 +1959,17 @@ def _card_kpi_inicio(
                     [
                         ft.Text(
                             rotulo,
-                            size=11 if mobile else 12,
+                            size=fonte(11) if mobile else fonte(12),
                             color=TEXTO_SECUNDARIO,
                             max_lines=2,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         ft.Row(
                             [
-                                ft.Text(valor, size=22, weight=ft.FontWeight.W_700, color=cor_valor),
+                                ft.Text(valor, size=fonte(22), weight=ft.FontWeight.W_700, color=cor_valor),
                                 ft.Text(
                                     detalhe,
-                                    size=11 if mobile else 12,
+                                    size=fonte(11) if mobile else fonte(12),
                                     color=TEXTO_SECUNDARIO,
                                     expand=True,
                                     max_lines=1,
@@ -2048,13 +2045,13 @@ def _card_proxima_reuniao(
             [
                 ft.Text(
                     f"{data_ref.day:02d}",
-                    size=30,
+                    size=fonte(30),
                     weight=ft.FontWeight.W_700,
                     color=COR_DESTAQUE_SUAVE if not especial else COR_AVISO,
                 ),
                 ft.Text(
                     NOMES_MESES[data_ref.month][:3].upper(),
-                    size=12,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_600,
                     color=TEXTO_SECUNDARIO,
                 ),
@@ -2076,12 +2073,12 @@ def _card_proxima_reuniao(
         itens_cabecalho = [
             ft.Text(
                 "PRÓXIMA REUNIÃO",
-                size=11,
+                size=fonte(11),
                 weight=ft.FontWeight.W_700,
                 color=TEXTO_SECUNDARIO,
             ),
             ft.Container(
-                content=ft.Text(rotulo_quando, size=11, weight=ft.FontWeight.W_600, color=cor_borda),
+                content=ft.Text(rotulo_quando, size=fonte(11), weight=ft.FontWeight.W_600, color=cor_borda),
                 bgcolor=ft.Colors.with_opacity(0.12, cor_borda),
                 border_radius=6,
                 padding=ft.Padding.symmetric(horizontal=8, vertical=2),
@@ -2098,19 +2095,19 @@ def _card_proxima_reuniao(
             [
                 ft.Text(
                     "PRÓXIMA REUNIÃO",
-                    size=11,
+                    size=fonte(11),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Container(
-                    content=ft.Text(quando, size=11, weight=ft.FontWeight.W_600, color=cor_borda),
+                    content=ft.Text(quando, size=fonte(11), weight=ft.FontWeight.W_600, color=cor_borda),
                     bgcolor=ft.Colors.with_opacity(0.12, cor_borda),
                     border_radius=6,
                     padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                 ),
                 ft.Text(
                     dia_semana,
-                    size=11,
+                    size=fonte(11),
                     color=TEXTO_SECUNDARIO,
                     expand=True,
                     no_wrap=True,
@@ -2125,7 +2122,7 @@ def _card_proxima_reuniao(
         cabecalho_card,
         ft.Text(
             titulo_principal,
-            size=18,
+            size=fonte(18),
             weight=ft.FontWeight.W_700,
             color=TEXTO_PRIMARIO if (info or especial) else TEXTO_SECUNDARIO,
             max_lines=1,
@@ -2136,7 +2133,7 @@ def _card_proxima_reuniao(
         detalhes.append(
             ft.Text(
                 linha,
-                size=13,
+                size=fonte(13),
                 color=TEXTO_SECUNDARIO,
                 max_lines=2,
                 overflow=ft.TextOverflow.ELLIPSIS,
@@ -2145,7 +2142,7 @@ def _card_proxima_reuniao(
     detalhes.append(
         ft.Text(
             f"Presidente: {rotulo_presidente}" if rotulo_presidente else "Presidente: a definir",
-            size=12,
+            size=fonte(12),
             color=TEXTO_SECUNDARIO if rotulo_presidente else COR_ERRO,
         )
     )
@@ -2174,7 +2171,7 @@ def _linha_sugestao_tema(mapa: dict) -> ft.Control:
         ft.Container(
             content=ft.Text(
                 str(mapa["nr"]),
-                size=12,
+                size=fonte(12),
                 weight=ft.FontWeight.W_700,
                 color=COR_DESTAQUE_SUAVE,
             ),
@@ -2186,7 +2183,7 @@ def _linha_sugestao_tema(mapa: dict) -> ft.Control:
         ),
         ft.Text(
             mapa["titulo"],
-            size=13,
+            size=fonte(13),
             color=TEXTO_PRIMARIO,
             expand=True,
             max_lines=1,
@@ -2199,7 +2196,7 @@ def _linha_sugestao_tema(mapa: dict) -> ft.Control:
         colunas.append(
             ft.Text(
                 assunto,
-                size=11,
+                size=fonte(11),
                 color=TEXTO_SECUNDARIO,
                 width=180,
                 max_lines=1,
@@ -2210,7 +2207,7 @@ def _linha_sugestao_tema(mapa: dict) -> ft.Control:
         ft.Container(
             content=ft.Text(
                 ultimo,
-                size=11,
+                size=fonte(11),
                 weight=ft.FontWeight.W_600,
                 color=COR_AVISO if ultimo == "Nunca" else TEXTO_SECUNDARIO,
                 no_wrap=True,
@@ -2315,7 +2312,7 @@ def tela_inicio(
             [
                 ft.Row(
                     [
-                        ft.Text("Semanas seguintes", size=14, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
+                        ft.Text("Semanas seguintes", size=fonte(14), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
                         ft.Container(expand=True),
                         ft.TextButton(
                             "Ver programação",
@@ -2378,8 +2375,8 @@ def tela_inicio(
     linhas_pendencias: list[ft.Control] = [
         ft.Row(
             [
-                ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, size=15, color=COR_AVISO),
-                ft.Text(texto, size=12, color=TEXTO_PRIMARIO, expand=True, max_lines=2),
+                ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, size=fonte(15), color=COR_AVISO),
+                ft.Text(texto, size=fonte(12), color=TEXTO_PRIMARIO, expand=True, max_lines=2),
             ],
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.START,
@@ -2388,8 +2385,8 @@ def tela_inicio(
     ] or [
         ft.Row(
             [
-                ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=15, color=COR_SUCESSO),
-                ft.Text("Tudo em dia até o fim do ano.", size=12, color=TEXTO_PRIMARIO),
+                ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=fonte(15), color=COR_SUCESSO),
+                ft.Text("Tudo em dia até o fim do ano.", size=fonte(12), color=TEXTO_PRIMARIO),
             ],
             spacing=8,
         )
@@ -2445,7 +2442,7 @@ def tela_inicio(
     card_pendencias = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Pendências", size=14, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
+                ft.Text("Pendências", size=fonte(14), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
                 ft.Container(height=6),
                 *linhas_pendencias,
             ],
@@ -2461,7 +2458,7 @@ def tela_inicio(
     card_acoes = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Ações rápidas", size=14, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
+                ft.Text("Ações rápidas", size=fonte(14), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
                 ft.Container(height=6),
                 ft.FilledButton(
                     f"Exportar quadro {NOMES_MESES[par_inicio][:3]}–{NOMES_MESES[par_fim][:3]}",
@@ -2511,10 +2508,10 @@ def tela_inicio(
             [
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.LIGHTBULB_OUTLINE, size=16, color=COR_AVISO),
+                        ft.Icon(ft.Icons.LIGHTBULB_OUTLINE, size=fonte(16), color=COR_AVISO),
                         ft.Text(
                             "Sugestões de temas — há mais tempo sem fazer",
-                            size=14,
+                            size=fonte(14),
                             weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO,
                             expand=True,
@@ -2554,10 +2551,10 @@ def tela_inicio(
             passos.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.LOOKS_ONE_OUTLINED, size=18, color=COR_DESTAQUE_SUAVE),
+                        ft.Icon(ft.Icons.LOOKS_ONE_OUTLINED, size=fonte(18), color=COR_DESTAQUE_SUAVE),
                         ft.Text(
                             "Importe os formulários S-99/S-99a (PDF) na aba Temas.",
-                            size=13, color=TEXTO_PRIMARIO, expand=True,
+                            size=fonte(13), color=TEXTO_PRIMARIO, expand=True,
                         ),
                         ft.TextButton("Abrir Temas", on_click=lambda _: ir_para(4)),
                     ],
@@ -2568,11 +2565,11 @@ def tela_inicio(
             passos.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.LOOKS_TWO_OUTLINED, size=18, color=COR_DESTAQUE_SUAVE),
+                        ft.Icon(ft.Icons.LOOKS_TWO_OUTLINED, size=fonte(18), color=COR_DESTAQUE_SUAVE),
                         ft.Text(
                             "Cadastre congregações, oradores e presidentes — pela planilha-modelo "
                             "em Ajustes ou restaurando um backup.",
-                            size=13, color=TEXTO_PRIMARIO, expand=True,
+                            size=fonte(13), color=TEXTO_PRIMARIO, expand=True,
                         ),
                         ft.TextButton("Abrir Ajustes", on_click=lambda _: ir_para(INDICE_AJUSTES)),
                     ],
@@ -2582,7 +2579,7 @@ def tela_inicio(
         card_primeiros_passos = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text("Primeiros passos", size=14, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
+                    ft.Text("Primeiros passos", size=fonte(14), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
                     ft.Container(height=4),
                     *passos,
                 ],
@@ -2669,8 +2666,8 @@ def _criar_lista_oradores(
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.PERSON_SEARCH, size=36, color=TEXTO_SECUNDARIO),
-                    ft.Text("Nenhum orador encontrado.", size=13, color=TEXTO_SECUNDARIO),
+                    ft.Icon(ft.Icons.PERSON_SEARCH, size=fonte(36), color=TEXTO_SECUNDARIO),
+                    ft.Text("Nenhum orador encontrado.", size=fonte(13), color=TEXTO_SECUNDARIO),
                 ],
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -2707,7 +2704,7 @@ def _criar_lista_oradores(
                 estado_selecao["ids"].discard(rid)
 
         chip = ft.Container(
-            content=ft.Text(chip_texto, size=11, weight=ft.FontWeight.W_600, color=chip_cor),
+            content=ft.Text(chip_texto, size=fonte(11), weight=ft.FontWeight.W_600, color=chip_cor),
             bgcolor=ft.Colors.with_opacity(0.13, chip_cor),
             border_radius=9,
             padding=ft.Padding.symmetric(horizontal=9, vertical=3),
@@ -2715,7 +2712,7 @@ def _criar_lista_oradores(
         avatar = ft.Container(
             content=ft.Text(
                 _iniciais_nome(nome),
-                size=12,
+                size=fonte(12),
                 weight=ft.FontWeight.W_600,
                 color=COR_DESTAQUE_SUAVE,
             ),
@@ -2732,14 +2729,14 @@ def _criar_lista_oradores(
         )
         botao_editar = ft.IconButton(
             icon=ft.Icons.EDIT_OUTLINED,
-            icon_size=17,
+            icon_size=fonte(17),
             tooltip="Editar",
             icon_color=TEXTO_SECUNDARIO,
             on_click=lambda e, rid=orador_id: on_editar(rid),
         )
         botao_excluir = ft.IconButton(
             icon=ft.Icons.DELETE_OUTLINE,
-            icon_size=17,
+            icon_size=fonte(17),
             tooltip="Excluir",
             icon_color=COR_ERRO,
             on_click=lambda e, rid=orador_id: on_excluir(rid),
@@ -2763,7 +2760,7 @@ def _criar_lista_oradores(
                             avatar,
                             ft.Text(
                                 nome,
-                                size=14,
+                                size=fonte(14),
                                 weight=ft.FontWeight.W_600,
                                 color=TEXTO_PRIMARIO,
                                 expand=True,
@@ -2780,7 +2777,7 @@ def _criar_lista_oradores(
                         [
                             ft.Text(
                                 detalhes,
-                                size=12,
+                                size=fonte(12),
                                 color=TEXTO_SECUNDARIO,
                                 expand=True,
                                 max_lines=1,
@@ -2809,19 +2806,19 @@ def _criar_lista_oradores(
                 ft.Row(
                     [
                         ft.Text(
-                            nome, size=14, weight=ft.FontWeight.W_600,
+                            nome, size=fonte(14), weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO, no_wrap=True,
                             overflow=ft.TextOverflow.ELLIPSIS, expand=True,
                         ),
                         ft.Text(
-                            f"· {categoria}" if categoria else "", size=12,
+                            f"· {categoria}" if categoria else "", size=fonte(12),
                             color=TEXTO_SECUNDARIO, no_wrap=True,
                         ),
                     ],
                     spacing=6,
                 ),
                 ft.Text(
-                    telefone, size=12, color=TEXTO_SECUNDARIO,
+                    telefone, size=fonte(12), color=TEXTO_SECUNDARIO,
                     no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
@@ -2937,7 +2934,7 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                         ),
                         ft.IconButton(
                             icon=ft.Icons.PERSON_ADD_ALT,
-                            icon_size=18,
+                            icon_size=fonte(18),
                             icon_color=COR_DESTAQUE_SUAVE,
                             tooltip=f"Adicionar orador em {nome_congregacao}",
                             on_click=adicionar_aqui,
@@ -3067,7 +3064,7 @@ def abrir_dialog_tema(
         value=bool(dados.get("prioritario")),
         tooltip="Sobe para o topo na escolha assistida de oradores recebidos",
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     anos_visiveis = listar_anos_colunas(apenas_visiveis=True)
     campos_ano: dict[int, ft.TextField] = {}
@@ -3132,7 +3129,7 @@ def abrir_dialog_tema(
     conteudo_anos = []
     if linhas_anos:
         conteudo_anos = [
-            ft.Text("Datas de uso por ano", weight=ft.FontWeight.W_600, size=13),
+            ft.Text("Datas de uso por ano", weight=ft.FontWeight.W_600, size=fonte(13)),
             ft.Container(height=4),
             ft.Row(linhas_anos, spacing=8, wrap=True),
             ft.Container(height=4),
@@ -3224,7 +3221,7 @@ def abrir_dialog_gerenciar_anos(page: ft.Page, recarregar: Callable[[], None]) -
         width=140,
         keyboard_type=ft.KeyboardType.NUMBER,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
         page.pop_dialog()
@@ -3254,20 +3251,20 @@ def abrir_dialog_gerenciar_anos(page: ft.Page, recarregar: Callable[[], None]) -
                             ft.Text(str(ano), width=56, weight=ft.FontWeight.W_600),
                             ft.Text(
                                 "Visível" if visivel else "Oculto",
-                                size=12,
+                                size=fonte(12),
                                 color=TEXTO_SECUNDARIO if visivel else COR_AVISO,
                                 expand=True,
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.VISIBILITY if visivel else ft.Icons.VISIBILITY_OFF,
                                 tooltip="Ocultar coluna" if visivel else "Exibir coluna",
-                                icon_size=20,
+                                icon_size=fonte(20),
                                 on_click=alternar_visibilidade,
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.DELETE_OUTLINE,
                                 tooltip="Excluir ano e seus dados",
-                                icon_size=20,
+                                icon_size=fonte(20),
                                 icon_color=COR_ERRO,
                                 on_click=confirmar_exclusao,
                             ),
@@ -3309,7 +3306,7 @@ def abrir_dialog_gerenciar_anos(page: ft.Page, recarregar: Callable[[], None]) -
                         ft.Text(
                             "Cada ano corresponde a uma coluna da planilha. "
                             "Ocultar remove da tabela sem apagar dados; excluir apaga o ano e as datas.",
-                            size=13,
+                            size=fonte(13),
                             color=TEXTO_SECUNDARIO,
                         ),
                         ft.Container(height=8),
@@ -3335,7 +3332,7 @@ def abrir_dialog_gerenciar_anos(page: ft.Page, recarregar: Callable[[], None]) -
 def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     """Catálogo de temas com colunas por ano (como na planilha)."""
     area_tabela = ft.Container(expand=True)
-    texto_contagem = ft.Text(size=13, color=TEXTO_SECUNDARIO)
+    texto_contagem = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
 
     def _opcoes_assunto() -> list[ft.dropdown.Option]:
         df_assuntos = carregar_dados(
@@ -3379,12 +3376,12 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     # Cache do dataframe: consultas ao banco só quando os dados mudam de fato
     estado_temas: dict = {"df": None, "pagina": 0, "montado": False}
 
-    texto_pagina = ft.Text(size=13, color=TEXTO_SECUNDARIO)
+    texto_pagina = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
     botao_pag_anterior = ft.IconButton(
-        icon=ft.Icons.CHEVRON_LEFT, tooltip="Página anterior", icon_size=20
+        icon=ft.Icons.CHEVRON_LEFT, tooltip="Página anterior", icon_size=fonte(20)
     )
     botao_pag_proxima = ft.IconButton(
-        icon=ft.Icons.CHEVRON_RIGHT, tooltip="Próxima página", icon_size=20
+        icon=ft.Icons.CHEVRON_RIGHT, tooltip="Próxima página", icon_size=fonte(20)
     )
     if eh_mobile():
         # No celular a contagem longa empurrava as setas para fora da tela e
@@ -3567,8 +3564,8 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
             ft.Row([campo_busca]),
             ft.Container(height=8),
             ft.ExpansionTile(
-                title=ft.Text("Ações e filtros", size=13, weight=ft.FontWeight.W_600),
-                leading=ft.Icon(ft.Icons.TUNE, size=18, color=COR_DESTAQUE_SUAVE),
+                title=ft.Text("Ações e filtros", size=fonte(13), weight=ft.FontWeight.W_600),
+                leading=ft.Icon(ft.Icons.TUNE, size=fonte(18), color=COR_DESTAQUE_SUAVE),
                 tile_padding=ft.Padding.symmetric(horizontal=8),
                 controls_padding=ft.Padding.only(left=8, right=8, bottom=12),
                 controls=[
@@ -3641,7 +3638,7 @@ def _criar_lista_congregacoes_mobile(
     """Lista de congregações em cards empilhados (a tabela não cabe no celular)."""
     if df.empty:
         return ft.Container(
-            content=ft.Text("Nenhuma congregação encontrada.", size=13, color=TEXTO_SECUNDARIO),
+            content=ft.Text("Nenhuma congregação encontrada.", size=fonte(13), color=TEXTO_SECUNDARIO),
             padding=32,
             alignment=ft.Alignment.CENTER,
         )
@@ -3664,15 +3661,15 @@ def _criar_lista_congregacoes_mobile(
         contato = " · ".join(p for p in (responsavel, telefone) if p)
         if contato:
             detalhes.append(
-                ft.Text(contato, size=12, color=TEXTO_SECUNDARIO,
+                ft.Text(contato, size=fonte(12), color=TEXTO_SECUNDARIO,
                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
             )
         if reuniao:
             detalhes.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.SCHEDULE, size=13, color=TEXTO_SECUNDARIO),
-                        ft.Text(reuniao, size=12, color=TEXTO_SECUNDARIO,
+                        ft.Icon(ft.Icons.SCHEDULE, size=fonte(13), color=TEXTO_SECUNDARIO),
+                        ft.Text(reuniao, size=fonte(12), color=TEXTO_SECUNDARIO,
                                 expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                     ],
                     spacing=6,
@@ -3682,8 +3679,8 @@ def _criar_lista_congregacoes_mobile(
             detalhes.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.PLACE_OUTLINED, size=13, color=TEXTO_SECUNDARIO),
-                        ft.Text(endereco, size=12, color=TEXTO_SECUNDARIO,
+                        ft.Icon(ft.Icons.PLACE_OUTLINED, size=fonte(13), color=TEXTO_SECUNDARIO),
+                        ft.Text(endereco, size=fonte(12), color=TEXTO_SECUNDARIO,
                                 expand=True, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
                     ],
                     spacing=6,
@@ -3698,20 +3695,20 @@ def _criar_lista_congregacoes_mobile(
                         ft.Row(
                             [
                                 ft.Text(
-                                    nome, size=14, weight=ft.FontWeight.W_600,
+                                    nome, size=fonte(14), weight=ft.FontWeight.W_600,
                                     color=TEXTO_PRIMARIO, expand=True,
                                     max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
                                 ft.IconButton(
                                     icon=ft.Icons.EDIT_OUTLINED,
-                                    icon_size=17,
+                                    icon_size=fonte(17),
                                     tooltip="Editar",
                                     icon_color=TEXTO_SECUNDARIO,
                                     on_click=lambda e, rid=cong_id: on_editar(rid),
                                 ),
                                 ft.IconButton(
                                     icon=ft.Icons.DELETE_OUTLINE,
-                                    icon_size=17,
+                                    icon_size=fonte(17),
                                     tooltip="Excluir",
                                     icon_color=COR_ERRO,
                                     on_click=lambda e, rid=cong_id: on_excluir(rid),
@@ -3809,7 +3806,7 @@ def abrir_dialog_adicionar_ano(page: ft.Page, ao_concluir: Callable[[int], None]
         keyboard_type=ft.KeyboardType.NUMBER,
         autofocus=True,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
         page.pop_dialog()
@@ -3860,12 +3857,12 @@ def _linha_detalhe_arranjo(rotulo: str, valor: str, icone: str) -> ft.Control:
         [
             ft.Row(
                 [
-                    ft.Icon(icone, size=16, color=COR_DESTAQUE),
-                    ft.Text(rotulo, size=12, weight=ft.FontWeight.W_600, color=TEXTO_SECUNDARIO),
+                    ft.Icon(icone, size=fonte(16), color=COR_DESTAQUE),
+                    ft.Text(rotulo, size=fonte(12), weight=ft.FontWeight.W_600, color=TEXTO_SECUNDARIO),
                 ],
                 spacing=6,
             ),
-            ft.Text(texto, size=14, color=TEXTO_PRIMARIO),
+            ft.Text(texto, size=fonte(14), color=TEXTO_PRIMARIO),
         ],
         spacing=4,
     )
@@ -3898,7 +3895,7 @@ def _selo_status_designacao(registro: dict, on_status: Callable[[int, str], None
     )
     return ft.IconButton(
         icon=icone,
-        icon_size=17,
+        icon_size=fonte(17),
         icon_color=cor,
         tooltip=f"{rotulo} — toque para alterar",
         style=ft.ButtonStyle(padding=4),
@@ -3917,30 +3914,30 @@ def _criar_cabecalho_tabela_oradores() -> ft.Container:
             [
                 ft.Text(
                     "Data",
-                    width=LARGURA_COL_DATA_MES,
-                    size=12,
+                    width=tema.LARGURA_COL_DATA_MES,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Text(
                     "Orador",
-                    width=LARGURA_COL_ORADOR_MES,
-                    size=12,
+                    width=tema.LARGURA_COL_ORADOR_MES,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Text(
                     "Tema",
-                    width=LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    width=tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
                     expand=None if eh_mobile() else True,
-                    size=12,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Text(
                     "Ações",
-                    width=LARGURA_COL_ACOES_MES,
-                    size=12,
+                    width=tema.LARGURA_COL_ACOES_MES,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
@@ -3970,24 +3967,24 @@ def _criar_linha_orador_arranjo(
             [
                 ft.Text(
                     data,
-                    width=LARGURA_COL_DATA_MES,
-                    size=13,
+                    width=tema.LARGURA_COL_DATA_MES,
+                    size=fonte(13),
                     weight=ft.FontWeight.W_600,
                     color=TEXTO_PRIMARIO,
                 ),
                 ft.Text(
                     registro.get("orador_nome", ""),
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_PRIMARIO,
-                    width=LARGURA_COL_ORADOR_MES,
+                    width=tema.LARGURA_COL_ORADOR_MES,
                     max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.Text(
                     tema,
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
-                    width=LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    width=tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
                     expand=None if eh_mobile() else True,
                     max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS,
@@ -4003,7 +4000,7 @@ def _criar_linha_orador_arranjo(
                             [
                                 ft.IconButton(
                                     icon=ft.Icons.CHAT_OUTLINED,
-                                    icon_size=17,
+                                    icon_size=fonte(17),
                                     tooltip="Enviar ao orador (WhatsApp)",
                                     icon_color="#34D399",
                                     style=ft.ButtonStyle(padding=4),
@@ -4017,7 +4014,7 @@ def _criar_linha_orador_arranjo(
                             [
                                 ft.IconButton(
                                     icon=ft.Icons.EVENT_REPEAT_OUTLINED,
-                                    icon_size=17,
+                                    icon_size=fonte(17),
                                     tooltip="Trocar/mover a data",
                                     icon_color=COR_DESTAQUE_SUAVE,
                                     style=ft.ButtonStyle(padding=4),
@@ -4029,7 +4026,7 @@ def _criar_linha_orador_arranjo(
                         ),
                         ft.IconButton(
                             icon=ft.Icons.EDIT_OUTLINED,
-                            icon_size=17,
+                            icon_size=fonte(17),
                             tooltip="Editar",
                             icon_color=COR_DESTAQUE,
                             style=ft.ButtonStyle(padding=4),
@@ -4037,7 +4034,7 @@ def _criar_linha_orador_arranjo(
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
-                            icon_size=17,
+                            icon_size=fonte(17),
                             tooltip="Remover",
                             icon_color=COR_ERRO,
                             style=ft.ButtonStyle(padding=4),
@@ -4045,7 +4042,7 @@ def _criar_linha_orador_arranjo(
                         ),
                     ],
                     spacing=0,
-                    width=LARGURA_COL_ACOES_MES
+                    width=tema.LARGURA_COL_ACOES_MES
                     + (34 if on_whatsapp else 0)
                     + (34 if on_status else 0)
                     + (34 if on_mover else 0),
@@ -4068,7 +4065,7 @@ def _altura_conteudo_dialog_mes(page: ft.Page) -> int:
     """Altura máxima do conteúdo rolável conforme o tamanho da janela."""
     if page.window and page.window.height:
         return max(280, min(560, int(page.window.height * 0.52)))
-    return ALTURA_CONTEUDO_DIALOG_MES
+    return tema.ALTURA_CONTEUDO_DIALOG_MES
 
 
 def _criar_rodape_dialog_mes(
@@ -4118,7 +4115,7 @@ def _montar_tabela_secao(
         return [
             ft.Text(
                 mensagem_vazia,
-                size=13,
+                size=fonte(13),
                 color=TEXTO_SECUNDARIO,
                 italic=True,
             )
@@ -4183,7 +4180,7 @@ def abrir_dialog_editar_orador_arranjo(
         value=str(registro["congregacao_id"]) if registro.get("congregacao_id") else None,
         expand=True,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
         page.pop_dialog()
@@ -4278,7 +4275,7 @@ def abrir_seletor_oradores(
     area_sugestoes = ft.Column(spacing=6, tight=True)
     texto_sugestoes = ft.Text(
         "Selecione o orador para ver as datas sugeridas.",
-        size=12,
+        size=fonte(12),
         color=TEXTO_SECUNDARIO,
         italic=True,
     )
@@ -4318,7 +4315,7 @@ def abrir_seletor_oradores(
         ],
         visible=eh_oradores,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def aplicar_modo(modo: str):
         estado["modo"] = modo
@@ -4366,7 +4363,7 @@ def abrir_seletor_oradores(
             area_sugestoes.controls = [
                 ft.Text(
                     "Nenhuma data disponível neste mês.",
-                    size=12,
+                    size=fonte(12),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
                 )
@@ -4428,9 +4425,9 @@ def abrir_seletor_oradores(
                 ft.OutlinedButton(
                     content=ft.Column(
                         [
-                            ft.Text(nomes.get(oid, str(oid)), size=12,
+                            ft.Text(nomes.get(oid, str(oid)), size=fonte(12),
                                     weight=ft.FontWeight.W_600),
-                            ft.Text(sub, size=10, color=TEXTO_SECUNDARIO),
+                            ft.Text(sub, size=fonte(10), color=TEXTO_SECUNDARIO),
                         ],
                         spacing=0,
                         tight=True,
@@ -4441,7 +4438,7 @@ def abrir_seletor_oradores(
         area_sugestoes_orador.controls = [
             ft.Text(
                 "Sugestões — há mais tempo sem discursar",
-                size=12,
+                size=fonte(12),
                 color=TEXTO_SECUNDARIO,
                 weight=ft.FontWeight.W_600,
             ),
@@ -4513,16 +4510,16 @@ def abrir_seletor_oradores(
                 dense=True,
                 leading=ft.Icon(
                     ft.Icons.STAR if s["prioritario"] else ft.Icons.MENU_BOOK_OUTLINED,
-                    size=20,
+                    size=fonte(20),
                     color=COR_AVISO if s["prioritario"] else TEXTO_SECUNDARIO,
                 ),
                 title=ft.Text(
                     s["orador_nome"]
                     + ("  ·  tema prioritário" if s["prioritario"] else ""),
-                    size=13,
+                    size=fonte(13),
                     weight=ft.FontWeight.W_600,
                 ),
-                subtitle=ft.Text(subtitulo_sugestao(s), size=12),
+                subtitle=ft.Text(subtitulo_sugestao(s), size=fonte(12)),
                 on_click=lambda e, s=dict(s): escolher_sugestao(s),
             )
             for s in sugestoes
@@ -4533,7 +4530,7 @@ def abrir_seletor_oradores(
                 modal=True,
                 title=ft.Text(
                     "Escolha assistida — prioridades e temas há mais tempo sem fazer",
-                    size=15,
+                    size=fonte(15),
                     weight=ft.FontWeight.W_600,
                 ),
                 content=ft.Container(
@@ -4545,7 +4542,7 @@ def abrir_seletor_oradores(
                                 "Sugestões entre os oradores da anfitriã, começando "
                                 "pelos temas que você marcou como prioritários (★) e "
                                 "pelos há mais tempo sem uso. Toque para preencher.",
-                                size=12,
+                                size=fonte(12),
                                 color=TEXTO_SECUNDARIO,
                             ),
                             *itens,
@@ -4665,7 +4662,7 @@ def abrir_seletor_oradores(
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
-                title=ft.Text(titulo_dialog, size=18, weight=ft.FontWeight.W_600),
+                title=ft.Text(titulo_dialog, size=fonte(18), weight=ft.FontWeight.W_600),
                 content=ft.Container(
                     content=ft.Column(
                         conteudo,
@@ -4744,13 +4741,13 @@ def abrir_dialog_selecao_exportacao_png(
                         [
                             ft.Text(
                                 nome,
-                                size=14,
+                                size=fonte(14),
                                 weight=ft.FontWeight.W_600,
                                 color=TEXTO_PRIMARIO,
                             ),
                             ft.Text(
                                 f"{data} · {tema}",
-                                size=12,
+                                size=fonte(12),
                                 color=TEXTO_SECUNDARIO,
                             ),
                         ],
@@ -4770,7 +4767,7 @@ def abrir_dialog_selecao_exportacao_png(
         tight=True,
         scroll=ft.ScrollMode.AUTO,
     )
-    texto_erro = ft.Text("", color=COR_ERRO, size=13, visible=False)
+    texto_erro = ft.Text("", color=COR_ERRO, size=fonte(13), visible=False)
 
     async def gerar_imagem(_=None):
         selecionados = [
@@ -4835,7 +4832,7 @@ def abrir_dialog_selecao_exportacao_png(
                     [
                         ft.Text(
                             "Desmarque os itens que não devem aparecer na imagem.",
-                            size=13,
+                            size=fonte(13),
                             color=TEXTO_SECUNDARIO,
                         ),
                         ft.Container(height=8),
@@ -4906,13 +4903,13 @@ def abrir_dialog_gerenciar_tipos_evento(
     """Adicionar e remover tipos de evento especial."""
     lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=220)
     campo_nome = ft.TextField(label="Novo tipo", hint_text="Ex: Escola de Pioneiros", expand=True)
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def preencher():
         tipos = listar_tipos_evento()
         if not tipos:
             lista.controls = [
-                ft.Text("Nenhum tipo cadastrado.", size=13, color=TEXTO_SECUNDARIO, italic=True)
+                ft.Text("Nenhum tipo cadastrado.", size=fonte(13), color=TEXTO_SECUNDARIO, italic=True)
             ]
             return
 
@@ -4924,10 +4921,10 @@ def abrir_dialog_gerenciar_tipos_evento(
 
             return ft.Row(
                 [
-                    ft.Text(item["nome"], size=14, expand=True),
+                    ft.Text(item["nome"], size=fonte(14), expand=True),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
-                        icon_size=18,
+                        icon_size=fonte(18),
                         icon_color=COR_ERRO,
                         tooltip="Remover (datas já cadastradas não mudam)",
                         on_click=excluir,
@@ -5085,7 +5082,7 @@ def abrir_dialog_data_especial(
         value=str(registro["presidente_id"]) if editando and registro.get("presidente_id") else "",
         expand=True,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
         page.pop_dialog()
@@ -5164,7 +5161,7 @@ def abrir_dialog_data_especial(
                             "Sem orador nem tema, o tipo do evento aparece no lugar do "
                             "orador no Quadro de Anúncios. Com discurso, mostra o orador, "
                             "o tema e a congregação escolhida.",
-                            size=12,
+                            size=fonte(12),
                             color=TEXTO_SECUNDARIO,
                         ),
                         texto_erro,
@@ -5220,7 +5217,7 @@ async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
                 title=ft.Text("Enviar designação"),
                 content=ft.Text(
                     "Gere a imagem da designação para salvar ou enviar pelo WhatsApp.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
                 actions=[
@@ -5307,7 +5304,7 @@ async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
             ft.AlertDialog(
                 modal=True,
                 title=ft.Text("Imagem gerada"),
-                content=ft.Text(f"A imagem foi salva em:\n{caminho}", size=13, color=TEXTO_SECUNDARIO),
+                content=ft.Text(f"A imagem foi salva em:\n{caminho}", size=fonte(13), color=TEXTO_SECUNDARIO),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar_dialog),
                     ft.OutlinedButton(_rotulo_entrega(), icon=_icone_entrega(), on_click=abrir_pasta),
@@ -5383,24 +5380,24 @@ def abrir_dialog_trocar_data(
     itens: list[ft.Control] = []
     if outros:
         itens.append(
-            ft.Text("Trocar com…", size=12, weight=ft.FontWeight.W_700,
+            ft.Text("Trocar com…", size=fonte(12), weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO)
         )
         for outro in outros:
             itens.append(
                 ft.ListTile(
                     dense=True,
-                    leading=ft.Icon(ft.Icons.SWAP_HORIZ, size=18, color=COR_DESTAQUE),
-                    title=ft.Text(f"{outro.get('orador_nome', '')}", size=13),
+                    leading=ft.Icon(ft.Icons.SWAP_HORIZ, size=fonte(18), color=COR_DESTAQUE),
+                    title=ft.Text(f"{outro.get('orador_nome', '')}", size=fonte(13)),
                     subtitle=ft.Text(
-                        _formatar_data_exibicao(outro.get("data")), size=12
+                        _formatar_data_exibicao(outro.get("data")), size=fonte(12)
                     ),
                     on_click=lambda e, o=dict(outro): trocar(o),
                 )
             )
     if sugestoes:
         itens.append(
-            ft.Text("Mover para data livre…", size=12, weight=ft.FontWeight.W_700,
+            ft.Text("Mover para data livre…", size=fonte(12), weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO)
         )
         for item in sugestoes:
@@ -5408,9 +5405,9 @@ def abrir_dialog_trocar_data(
                 ft.ListTile(
                     dense=True,
                     leading=ft.Icon(
-                        ft.Icons.EVENT_AVAILABLE, size=18, color=COR_SUCESSO
+                        ft.Icons.EVENT_AVAILABLE, size=fonte(18), color=COR_SUCESSO
                     ),
-                    title=ft.Text(item["rotulo"], size=13),
+                    title=ft.Text(item["rotulo"], size=fonte(13)),
                     on_click=lambda e, d=item["data"]: mover(d),
                 )
             )
@@ -5418,7 +5415,7 @@ def abrir_dialog_trocar_data(
         itens = [
             ft.Text(
                 "Não há outras datas neste mês para trocar ou mover.",
-                size=13,
+                size=fonte(13),
                 color=TEXTO_SECUNDARIO,
                 italic=True,
             )
@@ -5430,7 +5427,7 @@ def abrir_dialog_trocar_data(
             title=ft.Text(
                 f"Data de {registro.get('orador_nome', '')} — "
                 f"{_formatar_data_exibicao(registro.get('data'))}",
-                size=16,
+                size=fonte(16),
                 weight=ft.FontWeight.W_600,
             ),
             content=ft.Container(
@@ -5532,7 +5529,7 @@ def abrir_dialog_oradores_mes(
             lista_especiais.controls = [
                 ft.Text(
                     "Nenhuma data especial neste mês.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
                 )
@@ -5560,7 +5557,7 @@ def abrir_dialog_oradores_mes(
             chip_tipo_especial = ft.Container(
                 content=ft.Text(
                     registro["tipo"],
-                    size=12,
+                    size=fonte(12),
                     weight=ft.FontWeight.W_600,
                     color=COR_AVISO,
                     max_lines=1,
@@ -5579,7 +5576,7 @@ def abrir_dialog_oradores_mes(
                                 [
                                     ft.Text(
                                         registro["data"][:5],
-                                        size=13,
+                                        size=fonte(13),
                                         weight=ft.FontWeight.W_600,
                                         color=TEXTO_PRIMARIO,
                                     ),
@@ -5587,14 +5584,14 @@ def abrir_dialog_oradores_mes(
                                                  alignment=ft.Alignment.CENTER_LEFT),
                                     ft.IconButton(
                                         icon=ft.Icons.EDIT_OUTLINED,
-                                        icon_size=17,
+                                        icon_size=fonte(17),
                                         tooltip="Editar",
                                         icon_color=COR_DESTAQUE,
                                         on_click=editar,
                                     ),
                                     ft.IconButton(
                                         icon=ft.Icons.DELETE_OUTLINE,
-                                        icon_size=17,
+                                        icon_size=fonte(17),
                                         tooltip="Excluir",
                                         icon_color=COR_ERRO,
                                         on_click=excluir,
@@ -5605,7 +5602,7 @@ def abrir_dialog_oradores_mes(
                             ),
                             ft.Text(
                                 detalhes,
-                                size=12,
+                                size=fonte(12),
                                 color=TEXTO_SECUNDARIO,
                                 max_lines=2,
                                 overflow=ft.TextOverflow.ELLIPSIS,
@@ -5624,7 +5621,7 @@ def abrir_dialog_oradores_mes(
                     [
                         ft.Text(
                             registro["data"][:5],
-                            size=13,
+                            size=fonte(13),
                             weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO,
                             width=52,
@@ -5632,7 +5629,7 @@ def abrir_dialog_oradores_mes(
                         chip_tipo_especial,
                         ft.Text(
                             detalhes,
-                            size=12,
+                            size=fonte(12),
                             color=TEXTO_SECUNDARIO,
                             expand=True,
                             max_lines=1,
@@ -5640,14 +5637,14 @@ def abrir_dialog_oradores_mes(
                         ),
                         ft.IconButton(
                             icon=ft.Icons.EDIT_OUTLINED,
-                            icon_size=17,
+                            icon_size=fonte(17),
                             tooltip="Editar",
                             icon_color=COR_DESTAQUE,
                             on_click=editar,
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
-                            icon_size=17,
+                            icon_size=fonte(17),
                             tooltip="Excluir",
                             icon_color=COR_ERRO,
                             on_click=excluir,
@@ -5673,7 +5670,7 @@ def abrir_dialog_oradores_mes(
                 ft.Text(
                     "Nenhum presidente cadastrado ainda. "
                     "Cadastre-os na aba Ajustes → Gerenciar presidentes.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
                 )
@@ -5711,12 +5708,12 @@ def abrir_dialog_oradores_mes(
             rotulo_data = ft.Text(
                 f"{_rotulo_weekday(data_ref.weekday())}, "
                 f"{data_ref.day:02d}/{data_ref.month:02d}",
-                size=13,
+                size=fonte(13),
                 weight=ft.FontWeight.W_600,
             )
             botao_remover = ft.IconButton(
                 icon=ft.Icons.DELETE_OUTLINE,
-                icon_size=18,
+                icon_size=fonte(18),
                 icon_color=COR_ERRO,
                 tooltip="Remover presidente desta data",
                 on_click=ao_remover,
@@ -5820,7 +5817,7 @@ def abrir_dialog_oradores_mes(
 
     def _cabecalho_secao(titulo: str, on_exportar, on_adicionar) -> ft.Control:
         texto = ft.Text(
-            titulo, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+            titulo, size=fonte(16), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
             expand=True, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
         )
         botao_exportar = ft.OutlinedButton(
@@ -5850,7 +5847,7 @@ def abrir_dialog_oradores_mes(
         if eh_mobile():
             return ft.Column(
                 [
-                    ft.Text(descricao, size=13, color=TEXTO_SECUNDARIO),
+                    ft.Text(descricao, size=fonte(13), color=TEXTO_SECUNDARIO),
                     ft.Row(list(botoes), spacing=8, wrap=True),
                 ],
                 spacing=8,
@@ -5858,7 +5855,7 @@ def abrir_dialog_oradores_mes(
             )
         return ft.Row(
             [
-                ft.Text(descricao, size=13, color=TEXTO_SECUNDARIO, expand=True),
+                ft.Text(descricao, size=fonte(13), color=TEXTO_SECUNDARIO, expand=True),
                 *botoes,
             ],
             spacing=8,
@@ -5919,7 +5916,7 @@ def abrir_dialog_oradores_mes(
                     "Isto apaga os presidentes já designados neste mês e refaz o "
                     "rodízio do zero, evitando repetir quem presidiu há pouco.\n\n"
                     "Ajustes manuais deste mês serão perdidos. Continuar?",
-                    size=13,
+                    size=fonte(13),
                 ),
                 actions=[
                     ft.TextButton("Cancelar", on_click=fechar),
@@ -6011,7 +6008,7 @@ def abrir_dialog_oradores_mes(
             ativo = valor == "recebidos"
             texto = ft.Text(
                 rotulo,
-                size=13,
+                size=fonte(13),
                 no_wrap=True,
                 color=COR_DESTAQUE_SUAVE if ativo else TEXTO_SECUNDARIO,
                 weight=ft.FontWeight.W_700 if ativo else ft.FontWeight.W_500,
@@ -6059,10 +6056,10 @@ def abrir_dialog_oradores_mes(
             [
                 ft.Text(
                     f"{titulo_mes} — {reunioes['host_nome']}",
-                    size=20,
+                    size=fonte(20),
                     weight=ft.FontWeight.W_600,
                 ),
-                ft.Text(linha_reunioes, size=13, color=TEXTO_SECUNDARIO),
+                ft.Text(linha_reunioes, size=fonte(13), color=TEXTO_SECUNDARIO),
             ],
             spacing=6,
             tight=True,
@@ -6165,7 +6162,7 @@ def abrir_dialog_arranjo(
         min_lines=2,
         max_lines=3,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def preencher_da_congregacao(e):
         if not campo_congregacao.value:
@@ -6321,12 +6318,12 @@ def _criar_card_mes_programacao(
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Text(rotulo, size=15, weight=ft.FontWeight.W_700, color=TEXTO_SECUNDARIO),
+                    ft.Text(rotulo, size=fonte(15), weight=ft.FontWeight.W_700, color=TEXTO_SECUNDARIO),
                     ft.Container(height=8),
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, size=16, color=TEXTO_SECUNDARIO),
-                            ft.Text("Cadastrar arranjo", size=13, color=TEXTO_SECUNDARIO),
+                            ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, size=fonte(16), color=TEXTO_SECUNDARIO),
+                            ft.Text("Cadastrar arranjo", size=fonte(13), color=TEXTO_SECUNDARIO),
                         ],
                         spacing=6,
                     ),
@@ -6355,7 +6352,7 @@ def _criar_card_mes_programacao(
         status, cor_status = "parcial", COR_AVISO
 
     badge = ft.Container(
-        content=ft.Text(status, size=11, weight=ft.FontWeight.W_600, color=cor_status),
+        content=ft.Text(status, size=fonte(11), weight=ft.FontWeight.W_600, color=cor_status),
         bgcolor=ft.Colors.with_opacity(0.14, cor_status),
         border_radius=8,
         padding=ft.Padding.symmetric(horizontal=8, vertical=2),
@@ -6382,20 +6379,20 @@ def _criar_card_mes_programacao(
             [
                 ft.Row(
                     [
-                        ft.Text(rotulo, size=15, weight=ft.FontWeight.W_700, color=TEXTO_PRIMARIO, expand=True),
+                        ft.Text(rotulo, size=fonte(15), weight=ft.FontWeight.W_700, color=TEXTO_PRIMARIO, expand=True),
                         badge,
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Container(height=4),
-                ft.Text(subtitulo, size=12, color=TEXTO_SECUNDARIO, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text(subtitulo, size=fonte(12), color=TEXTO_SECUNDARIO, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                 ft.Container(height=10),
                 segmentos,
                 ft.Container(height=8),
                 ft.Text(
                     f"{resumo['recebidos']} recebidos · {resumo['enviados']} enviados · "
                     f"{presidentes} de {semanas} pres.",
-                    size=11,
+                    size=fonte(11),
                     color=TEXTO_SECUNDARIO,
                 ),
             ],
@@ -6421,7 +6418,7 @@ def tela_programacao(
     """Programação anual: um card por mês com status, aberto num dialog com abas."""
     estado = {"ano": ANO_PADRAO_ARRANJOS}
     area_blocos = ft.Container(expand=True)
-    texto_contagem = ft.Text(size=13, color=TEXTO_SECUNDARIO)
+    texto_contagem = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
 
     def cadastrar_mes(mes: int):
         abrir_dialog_arranjo(
@@ -6618,7 +6615,7 @@ def tela_ajustes(
     texto_sucesso = ft.Text(
         "Informações salvas com sucesso.",
         color=COR_SUCESSO,
-        size=13,
+        size=fonte(13),
         visible=False,
     )
 
@@ -6642,11 +6639,11 @@ def tela_ajustes(
     formulario = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Minha congregação", size=16, weight=ft.FontWeight.W_600),
+                ft.Text("Minha congregação", size=fonte(16), weight=ft.FontWeight.W_600),
                 ft.Container(height=4),
                 ft.Text(
                     "Dados usados nos cabeçalhos dos PDFs e nas exportações.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Container(height=8),
@@ -6671,11 +6668,11 @@ def tela_ajustes(
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Divider(height=1, color=BORDA_SUAVE),
-                ft.Text("Presidentes", size=14, weight=ft.FontWeight.W_600),
+                ft.Text("Presidentes", size=fonte(14), weight=ft.FontWeight.W_600),
                 ft.Text(
                     "Cadastro de quem pode presidir a reunião de fim de semana "
                     "(a atribuição semana a semana é feita na Programação).",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Row(
@@ -6735,7 +6732,7 @@ def tela_ajustes(
                     "Guarde este arquivo em um local seguro (nuvem, pendrive). "
                     "Ele poderá ser importado neste aplicativo ou no futuro "
                     "aplicativo para smartphone.",
-                    size=13,
+                    size=fonte(13),
                 ),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar),
@@ -6777,7 +6774,7 @@ def tela_ajustes(
                     "Os dados atuais serão substituídos pelos do arquivo selecionado.\n"
                     "Uma cópia de segurança do estado atual será salva antes.\n\n"
                     "Deseja continuar?",
-                    size=13,
+                    size=fonte(13),
                 ),
                 actions=[
                     ft.TextButton("Cancelar", on_click=fechar),
@@ -6815,7 +6812,7 @@ def tela_ajustes(
                     "Preencha as abas Congregações, Oradores e Presidentes "
                     "(a aba Leia-me explica cada coluna) e depois importe o "
                     "arquivo aqui em Ajustes.",
-                    size=13,
+                    size=fonte(13),
                 ),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar),
@@ -6870,7 +6867,7 @@ def tela_ajustes(
     secao_planilha = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Carga inicial por planilha", size=16, weight=ft.FontWeight.W_600),
+                ft.Text("Carga inicial por planilha", size=fonte(16), weight=ft.FontWeight.W_600),
                 ft.Container(height=4),
                 ft.Text(
                     "Para começar num aplicativo vazio há dois caminhos: restaurar "
@@ -6879,7 +6876,7 @@ def tela_ajustes(
                     "importação apenas adiciona dados — nada é apagado. Os temas "
                     "não entram na planilha: importe os formulários S-99/S-99a "
                     "diretamente na aba Temas.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Container(height=12),
@@ -6914,7 +6911,7 @@ def tela_ajustes(
     secao_backup = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Backup dos dados", size=16, weight=ft.FontWeight.W_600),
+                ft.Text("Backup dos dados", size=fonte(16), weight=ft.FontWeight.W_600),
                 ft.Container(height=4),
                 ft.Text(
                     "Exporte todos os dados do aplicativo — congregações, oradores, "
@@ -6922,7 +6919,7 @@ def tela_ajustes(
                     "arranjos, designações, presidentes e datas especiais — para um "
                     "arquivo JSON portátil, o mesmo formato que será usado pelo "
                     "futuro aplicativo de smartphone.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Container(height=12),
@@ -6954,6 +6951,57 @@ def tela_ajustes(
         width=_largura_dialog(page, 560),
     )
 
+    def mudar_escala(e=None):
+        """Aplica e salva a escala de fonte, remontando a tela."""
+        try:
+            nova = float(seletor_escala.value)
+        except (TypeError, ValueError):
+            nova = 1.0
+        tema.definir_escala(nova)
+        salvar_escala_fonte(tema.escala_atual())
+        recarregar()
+
+    seletor_escala = ft.Dropdown(
+        label="Tamanho do texto",
+        width=None if eh_mobile() else 220,
+        value=f"{tema.escala_atual():.2f}",
+        options=[
+            ft.dropdown.Option(key="0.90", text="Pequeno (90%)"),
+            ft.dropdown.Option(key="1.00", text="Padrão (100%)"),
+            ft.dropdown.Option(key="1.15", text="Grande (115%)"),
+            ft.dropdown.Option(key="1.30", text="Maior (130%)"),
+            ft.dropdown.Option(key="1.45", text="Muito grande (145%)"),
+        ],
+        border_color=BORDA_SUAVE,
+        focused_border_color=COR_DESTAQUE,
+    )
+    seletor_escala.on_select = mudar_escala
+
+    secao_acessibilidade = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text("Acessibilidade", size=fonte(16), weight=ft.FontWeight.W_600),
+                ft.Container(height=4),
+                ft.Text(
+                    "Aumente o texto do aplicativo inteiro. As colunas das tabelas "
+                    "acompanham o tamanho escolhido.",
+                    size=fonte(13),
+                    color=TEXTO_SECUNDARIO,
+                ),
+                ft.Container(height=12),
+                seletor_escala,
+            ],
+            spacing=0,
+            tight=True,
+        ),
+        padding=16 if eh_mobile() else 28,
+        bgcolor=FUNDO_CARD,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=14,
+        shadow=_sombra_card(),
+        width=_largura_dialog(page, 560),
+    )
+
     painel_uso = criar_painel_informativo(
         "Uso nas exportações",
         "Estas informações serão utilizadas na geração do PDF de envio "
@@ -6970,6 +7018,8 @@ def tela_ajustes(
             ),
             ft.Container(height=12 if eh_mobile() else 24),
             formulario,
+            ft.Container(height=24),
+            secao_acessibilidade,
             ft.Container(height=24),
             secao_backup,
             ft.Container(height=24),
@@ -7026,7 +7076,7 @@ def _preview_quadro_mobile(
             [
                 ft.Container(
                     content=ft.Text(
-                        rotulo_data, size=12, weight=ft.FontWeight.W_700,
+                        rotulo_data, size=fonte(12), weight=ft.FontWeight.W_700,
                         color=PRETO, text_align=ft.TextAlign.CENTER,
                         max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                     ),
@@ -7036,7 +7086,7 @@ def _preview_quadro_mobile(
                 ),
                 ft.Container(
                     content=ft.Text(
-                        texto_pres, size=12, weight=ft.FontWeight.W_600, color=PRETO,
+                        texto_pres, size=fonte(12), weight=ft.FontWeight.W_600, color=PRETO,
                         max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                     ),
                     bgcolor=COR_GRAY, alignment=ft.Alignment.CENTER_LEFT,
@@ -7052,9 +7102,9 @@ def _preview_quadro_mobile(
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Text(rotulo, size=13, weight=ft.FontWeight.W_700, color=PRETO,
+                    ft.Text(rotulo, size=fonte(13), weight=ft.FontWeight.W_700, color=PRETO,
                             width=110),
-                    ft.Text(valor or "", size=14, color=PRETO, expand=True),
+                    ft.Text(valor or "", size=fonte(14), color=PRETO, expand=True),
                 ],
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -7103,9 +7153,9 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
         "zoom": 1.0,
     }
     area_preview = ft.Container(expand=True)
-    rotulo_zoom = ft.Text("100%", size=12, color=TEXTO_SECUNDARIO, width=46,
+    rotulo_zoom = ft.Text("100%", size=fonte(12), color=TEXTO_SECUNDARIO, width=46,
                           text_align=ft.TextAlign.CENTER)
-    rotulo_mes_preview = ft.Text("", size=13, weight=ft.FontWeight.W_600,
+    rotulo_mes_preview = ft.Text("", size=fonte(13), weight=ft.FontWeight.W_600,
                                  color=TEXTO_PRIMARIO)
 
     opcoes_pares = [
@@ -7146,7 +7196,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
             blocos.append(
                 ft.Text(
                     "Prévia dos dois meses. O PDF exportado tem o layout de impressão.",
-                    size=12, color=TEXTO_SECUNDARIO, italic=True,
+                    size=fonte(12), color=TEXTO_SECUNDARIO, italic=True,
                 )
             )
         if mobile:
@@ -7349,7 +7399,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                 on_click=lambda _: mudar_mes_preview(1),
             ),
             ft.Container(expand=True),
-            ft.Text("Zoom (roda do mouse)", size=12, color=TEXTO_SECUNDARIO),
+            ft.Text("Zoom (roda do mouse)", size=fonte(12), color=TEXTO_SECUNDARIO),
             ft.IconButton(
                 ft.Icons.ZOOM_OUT,
                 tooltip="Reduzir",
@@ -7413,7 +7463,7 @@ def abrir_dialog_gerenciar_presidentes(
         ],
         width=190,
     )
-    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=13, visible=False)
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
     botao_salvar = ft.FilledButton("Adicionar", icon=ft.Icons.ADD)
 
     def limpar_formulario():
@@ -7431,7 +7481,7 @@ def abrir_dialog_gerenciar_presidentes(
             lista_cadastro.controls = [
                 ft.Text(
                     "Nenhum presidente cadastrado ainda.",
-                    size=13,
+                    size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
                 )
@@ -7472,32 +7522,32 @@ def abrir_dialog_gerenciar_presidentes(
 
             return ft.Row(
                 [
-                    ft.Text(f"{indice + 1}º", size=12, color=TEXTO_SECUNDARIO, width=30),
-                    ft.Text(item["nome"], size=14, expand=True),
-                    ft.Text(item["categoria"], size=13, color=TEXTO_SECUNDARIO, width=140),
+                    ft.Text(f"{indice + 1}º", size=fonte(12), color=TEXTO_SECUNDARIO, width=30),
+                    ft.Text(item["nome"], size=fonte(14), expand=True),
+                    ft.Text(item["categoria"], size=fonte(13), color=TEXTO_SECUNDARIO, width=140),
                     ft.IconButton(
                         icon=ft.Icons.ARROW_UPWARD,
-                        icon_size=16,
+                        icon_size=fonte(16),
                         tooltip="Subir no rodízio",
                         disabled=indice == 0,
                         on_click=lambda e, i=indice: mover(i, -1),
                     ),
                     ft.IconButton(
                         icon=ft.Icons.ARROW_DOWNWARD,
-                        icon_size=16,
+                        icon_size=fonte(16),
                         tooltip="Descer no rodízio",
                         disabled=indice == len(cadastro) - 1,
                         on_click=lambda e, i=indice: mover(i, 1),
                     ),
                     ft.IconButton(
                         icon=ft.Icons.EDIT,
-                        icon_size=18,
+                        icon_size=fonte(18),
                         tooltip="Editar",
                         on_click=editar,
                     ),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
-                        icon_size=18,
+                        icon_size=fonte(18),
                         icon_color=COR_ERRO,
                         tooltip="Excluir (remove também as semanas atribuídas)",
                         on_click=excluir,
@@ -7557,10 +7607,10 @@ def abrir_dialog_gerenciar_presidentes(
                         ft.Container(height=8),
                         ft.Row(
                             [
-                                ft.Text("Cadastrados", weight=ft.FontWeight.W_600, size=13, expand=True),
+                                ft.Text("Cadastrados", weight=ft.FontWeight.W_600, size=fonte(13), expand=True),
                                 ft.Text(
                                     "A ordem define o rodízio automático",
-                                    size=12,
+                                    size=fonte(12),
                                     color=TEXTO_SECUNDARIO,
                                 ),
                             ],
@@ -7606,11 +7656,11 @@ def criar_barra_lateral(
                 [
                     ft.Text(
                         "GESTÃO DE ARRANJO",
-                        size=11,
+                        size=fonte(11),
                         weight=ft.FontWeight.W_600,
                         color=TEXTO_SECUNDARIO,
                     ),
-                    ft.Text(f"v{VERSAO_APP}", size=10, color=TEXTO_SECUNDARIO),
+                    ft.Text(f"v{VERSAO_APP}", size=fonte(10), color=TEXTO_SECUNDARIO),
                 ],
                 spacing=2,
                 tight=True,
@@ -7622,10 +7672,10 @@ def criar_barra_lateral(
     for indice, secao in enumerate(SECOES):
         selecionado = indice == 0
         cor = COR_DESTAQUE_SUAVE if selecionado else TEXTO_SECUNDARIO
-        icone = ft.Icon(secao["icone"], size=ICON_SIZE_MENU, color=cor)
+        icone = ft.Icon(secao["icone"], size=tema.ICON_SIZE_MENU, color=cor)
         rotulo = ft.Text(
             secao["nome"],
-            size=13,
+            size=fonte(13),
             color=cor,
             weight=ft.FontWeight.W_600 if selecionado else ft.FontWeight.W_400,
             max_lines=1,
@@ -7643,7 +7693,7 @@ def criar_barra_lateral(
         itens_coluna.append(wrapper)
 
     return ft.Container(
-        width=LARGURA_BARRA_LATERAL,
+        width=tema.LARGURA_BARRA_LATERAL,
         bgcolor=FUNDO_SIDEBAR,
         border=ft.Border.only(right=ft.BorderSide(1, "#1E2942")),
         padding=ft.Padding.symmetric(vertical=20, horizontal=10),
@@ -7687,7 +7737,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     hoje = date.today()
     estado = {"ano": hoje.year, "mes": hoje.month}
     corpo = ft.Column(spacing=6, tight=True)
-    titulo_mes = ft.Text("", size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
+    titulo_mes = ft.Text("", size=fonte(16), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
     dias_semana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 
     def render():
@@ -7710,11 +7760,11 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             def linha_detalhe(icone, cor, titulo, texto):
                 return ft.Row(
                     [
-                        ft.Icon(icone, size=16, color=cor),
+                        ft.Icon(icone, size=fonte(16), color=cor),
                         ft.Column(
                             [
-                                ft.Text(titulo, size=11, color=TEXTO_SECUNDARIO),
-                                ft.Text(texto, size=13, color=TEXTO_PRIMARIO),
+                                ft.Text(titulo, size=fonte(11), color=TEXTO_SECUNDARIO),
+                                ft.Text(texto, size=fonte(13), color=TEXTO_PRIMARIO),
                             ],
                             spacing=0,
                             tight=True,
@@ -7778,7 +7828,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 detalhes = [
                     ft.Text(
                         "Nada agendado para este dia.",
-                        size=13,
+                        size=fonte(13),
                         color=TEXTO_SECUNDARIO,
                         italic=True,
                     )
@@ -7787,7 +7837,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             page.show_dialog(
                 ft.AlertDialog(
                     modal=True,
-                    title=ft.Text(data_str, size=16, weight=ft.FontWeight.W_600),
+                    title=ft.Text(data_str, size=fonte(16), weight=ft.FontWeight.W_600),
                     content=ft.Container(
                         width=_largura_dialog(page, 380),
                         content=ft.Column(
@@ -7816,7 +7866,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 marcadores.append(
                     ft.Text(
                         esp.get("tipo") or "Evento",
-                        size=10,
+                        size=fonte(10),
                         color=COR_AVISO,
                         weight=ft.FontWeight.W_600,
                         max_lines=1,
@@ -7827,7 +7877,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 marcadores.append(
                     ft.Text(
                         rec.get("orador") or "",
-                        size=10,
+                        size=fonte(10),
                         color=COR_SUCESSO,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -7837,7 +7887,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 marcadores.append(
                     ft.Text(
                         f"→ {env.get('orador', '')}",
-                        size=10,
+                        size=fonte(10),
                         color=COR_DESTAQUE_CLARA,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -7847,7 +7897,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 marcadores.append(
                     ft.Text(
                         f"+{len(envs) - 2} envio(s)",
-                        size=9,
+                        size=fonte(9),
                         color=TEXTO_SECUNDARIO,
                     )
                 )
@@ -7855,7 +7905,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 marcadores.append(
                     ft.Text(
                         f"P: {pres['nome']}",
-                        size=9,
+                        size=fonte(9),
                         color=TEXTO_SECUNDARIO,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -7867,7 +7917,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                     [
                         ft.Text(
                             str(dia),
-                            size=12,
+                            size=fonte(12),
                             weight=ft.FontWeight.W_700 if eh_hoje else ft.FontWeight.W_500,
                             color=COR_DESTAQUE if eh_hoje else TEXTO_PRIMARIO,
                         ),
@@ -7896,7 +7946,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 ft.Container(
                     content=ft.Text(
                         d,
-                        size=11,
+                        size=fonte(11),
                         weight=ft.FontWeight.W_600,
                         color=TEXTO_SECUNDARIO,
                         text_align=ft.TextAlign.CENTER,
@@ -7941,7 +7991,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         return ft.Row(
             [
                 ft.Container(width=10, height=10, bgcolor=cor, border_radius=3),
-                ft.Text(rotulo, size=11, color=TEXTO_SECUNDARIO),
+                ft.Text(rotulo, size=fonte(11), color=TEXTO_SECUNDARIO),
             ],
             spacing=5,
             tight=True,
@@ -7991,8 +8041,8 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
     linhas = [
         ft.Column(
             [
-                ft.Text(titulo, weight=ft.FontWeight.W_600, size=13, color=TEXTO_PRIMARIO),
-                ft.Text(desc, size=12, color=TEXTO_SECUNDARIO),
+                ft.Text(titulo, weight=ft.FontWeight.W_600, size=fonte(13), color=TEXTO_PRIMARIO),
+                ft.Text(desc, size=fonte(12), color=TEXTO_SECUNDARIO),
             ],
             spacing=1,
             tight=True,
@@ -8009,7 +8059,7 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
                     [
                         ft.Text(
                             "O app começa vazio. Estes são os primeiros passos:",
-                            size=13,
+                            size=fonte(13),
                             color=TEXTO_PRIMARIO,
                         ),
                         ft.Container(height=6),
@@ -8161,6 +8211,8 @@ def main(page: ft.Page):
         eh_mobile(),
     )
     garantir_tabelas()
+    # Escala de fonte escolhida pelo usuário (acessibilidade), antes de montar a UI.
+    tema.definir_escala(carregar_escala_fonte())
     _auto_backup_diario()
 
     page.title = "Gestão de Arranjo"
@@ -8237,7 +8289,7 @@ def main(page: ft.Page):
         # conteúdo em largura total (sem barra lateral fixa).
         area_conteudo.padding = ft.Padding.symmetric(horizontal=16, vertical=16)
         titulo_topo = ft.Text(
-            SECOES[0]["nome"], size=18, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+            SECOES[0]["nome"], size=fonte(18), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
         )
         estado["titulo_topo"] = titulo_topo
 
@@ -8257,7 +8309,7 @@ def main(page: ft.Page):
             rodape_versao = ft.Container(
                 content=ft.Text(
                     f"Gestão de Arranjo · v{VERSAO_APP}",
-                    size=12, color=TEXTO_SECUNDARIO,
+                    size=fonte(12), color=TEXTO_SECUNDARIO,
                 ),
                 padding=ft.Padding.only(left=16, top=12, bottom=4),
             )

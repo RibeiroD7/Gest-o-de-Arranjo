@@ -25,6 +25,7 @@ from tema import (
     FUNDO_SIDEBAR,
     TEXTO_PRIMARIO,
     TEXTO_SECUNDARIO,
+    fonte,
 )
 
 # ---------------------------------------------------------------------------
@@ -98,7 +99,7 @@ def _cor_fundo_item_menu(selecionado: bool):
 
 def criar_secao_titulo(texto: str) -> ft.Text:
     """Subtítulo de seção usado em todas as telas."""
-    return ft.Text(texto, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
+    return ft.Text(texto, size=fonte(16), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
 
 
 def criar_cabecalho_tela(
@@ -116,7 +117,7 @@ def criar_cabecalho_tela(
     controles = [
         ft.Text(
             titulo,
-            size=20 if mobile else 28,
+            size=fonte(20) if mobile else fonte(28),
             weight=ft.FontWeight.BOLD,
             color=TEXTO_PRIMARIO,
         ),
@@ -128,7 +129,7 @@ def criar_cabecalho_tela(
         controles.append(
             ft.Text(
                 subtitulo,
-                size=12 if mobile else 14,
+                size=fonte(12) if mobile else fonte(14),
                 color=TEXTO_SECUNDARIO,
                 max_lines=3,
                 overflow=ft.TextOverflow.ELLIPSIS,
@@ -146,15 +147,15 @@ def criar_painel_informativo(
             [
                 ft.Row(
                     [
-                        ft.Icon(icone, color=COR_DESTAQUE, size=22),
+                        ft.Icon(icone, color=COR_DESTAQUE, size=fonte(22)),
                         ft.Text(
-                            titulo, size=16, weight=ft.FontWeight.W_600,
+                            titulo, size=fonte(16), weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO,
                         ),
                     ],
                     spacing=10,
                 ),
-                ft.Text(mensagem, size=14, color=TEXTO_SECUNDARIO),
+                ft.Text(mensagem, size=fonte(14), color=TEXTO_SECUNDARIO),
             ],
             spacing=8,
         ),

@@ -365,6 +365,7 @@ def create_tables(conn):
     if "prioritario" not in colunas_temas:
         cursor.execute("ALTER TABLE temas ADD COLUMN prioritario INTEGER NOT NULL DEFAULT 0")
 
+
     colunas_especiais = [linha[1] for linha in cursor.execute("PRAGMA table_info(datas_especiais)")]
     if "congregacao_id" not in colunas_especiais:
         cursor.execute("ALTER TABLE datas_especiais ADD COLUMN congregacao_id INTEGER")
@@ -397,6 +398,13 @@ def create_tables(conn):
     # Status de confirmação das designações (pendente/confirmado/recusado).
     # Registros já existentes são históricos: marcados como confirmados; novos
     # nascem como "pendente" (o coordenador confirma quando o orador responde).
+    # Acessibilidade: escala de fonte escolhida pelo usuário.
+    colunas_config = [linha[1] for linha in cursor.execute("PRAGMA table_info(configuracoes)")]
+    if "escala_fonte" not in colunas_config:
+        cursor.execute(
+            "ALTER TABLE configuracoes ADD COLUMN escala_fonte REAL NOT NULL DEFAULT 1.0"
+        )
+
     colunas_ao = [linha[1] for linha in cursor.execute("PRAGMA table_info(arranjo_oradores)")]
     if "status" not in colunas_ao:
         cursor.execute(
@@ -888,6 +896,41 @@ def carregar_recebidos_por_ano(ano: int) -> dict[str, dict]:
             linha[0]: {"orador": linha[1], "tema_nr": linha[2], "tema": linha[3]}
             for linha in linhas
         }
+    finally:
+        conn.close()
+
+
+def carregar_escala_fonte() -> float:
+    """Escala de fonte salva (1.0 = padrão). Defensiva: nunca quebra a abertura."""
+    try:
+        conn = get_connection()
+        try:
+            linha = conn.execute(
+                "SELECT COALESCE(escala_fonte, 1.0) FROM configuracoes WHERE id = 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        return float(linha[0]) if linha and linha[0] else 1.0
+    except Exception:  # noqa: BLE001 — banco antigo/sem a coluna: usa o padrão
+        return 1.0
+
+
+def salvar_escala_fonte(escala: float) -> None:
+    """Guarda a escala de fonte escolhida pelo usuário.
+
+    Upsert: um UPDATE puro não gravaria nada enquanto a linha única de
+    `configuracoes` (id = 1) ainda não existisse — caso de instalação nova.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO configuracoes (id, escala_fonte) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET escala_fonte = excluded.escala_fonte
+            """,
+            (float(escala),),
+        )
+        conn.commit()
     finally:
         conn.close()
 
