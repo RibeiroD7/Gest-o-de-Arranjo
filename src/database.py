@@ -706,6 +706,58 @@ def ultima_data_discurso_por_orador() -> dict[int, str]:
         conn.close()
 
 
+def relatorio_frequencia_oradores(congregacao_id: int | None = None) -> list[dict]:
+    """Frequência de discursos (enviados) por orador ativo.
+
+    Retorna [{nome, quantidade, ultima_data}] ordenado de quem discursou menos
+    (e há mais tempo) para o que mais discursou. Se ``congregacao_id`` for dado,
+    limita aos oradores daquela congregação (ex.: a minha).
+    """
+    conn = get_connection()
+    try:
+        query = """
+            SELECT o.id, o.nome,
+                   COUNT(ao.id) AS quantidade,
+                   MAX(
+                       substr(ao.data, 7, 4) || substr(ao.data, 4, 2)
+                       || substr(ao.data, 1, 2)
+                   ) AS ultima_chave
+            FROM oradores o
+            LEFT JOIN arranjo_oradores ao
+                ON ao.orador_id = o.id AND ao.tipo = 'enviado'
+                   AND ao.data IS NOT NULL AND ao.data <> ''
+            WHERE COALESCE(o.ativo, 1) = 1
+        """
+        params: list = []
+        if congregacao_id is not None:
+            query += " AND o.congregacao_id = ?"
+            params.append(congregacao_id)
+        query += " GROUP BY o.id, o.nome"
+        linhas = conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+
+    def _data_de_chave(chave: str | None) -> str:
+        if not chave or len(chave) != 8:
+            return ""
+        return f"{chave[6:8]}/{chave[4:6]}/{chave[0:4]}"
+
+    resultado = [
+        {
+            "nome": nome,
+            "quantidade": int(quantidade or 0),
+            "ultima_data": _data_de_chave(ultima_chave),
+            "_ordem": ultima_chave or "",
+        }
+        for _id, nome, quantidade, ultima_chave in linhas
+    ]
+    # Menos discursos primeiro; empate: quem discursou há mais tempo (ou nunca).
+    resultado.sort(key=lambda r: (r["quantidade"], r["_ordem"], r["nome"]))
+    for item in resultado:
+        del item["_ordem"]
+    return resultado
+
+
 def carregar_designacoes_ano(ano: int) -> list[dict]:
     """Todos os registros (recebido/enviado) do ano com data e orador.
 

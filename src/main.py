@@ -57,6 +57,7 @@ from database import (
     listar_datas_especiais_por_ano,
     listar_presidentes_cadastro,
     listar_tipos_evento,
+    relatorio_frequencia_oradores,
     remover_orador_arranjo,
     restaurar_backup,
     salvar_arranjo,
@@ -81,6 +82,7 @@ from pdf_quadro import (
 from pdf_quadro import (
     par_meses_do_mes as par_meses_do_mes_quadro,
 )
+from pdf_relatorios import gerar_pdf_relatorios
 from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from png_oradores import (
     abrir_pasta_do_arquivo,
@@ -2528,6 +2530,38 @@ def tela_inicio(
         except Exception as exc:
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
+    def gerar_relatorios(_=None):
+        try:
+            minha_cong = obter_id_minha_congregacao()
+            freq = relatorio_frequencia_oradores(
+                int(minha_cong) if minha_cong else None
+            )
+            df_rel = df_temas.sort_values(["ultimo_uso_chave", "nr"]).head(20)
+            temas_parados = [
+                {
+                    "nr": linha["nr"],
+                    "titulo": linha["titulo"],
+                    "ultimo_uso": linha.get("ultimo_uso", ""),
+                }
+                for linha in (
+                    dict(zip(df_rel.columns, valores))
+                    for valores in df_rel.itertuples(index=False, name=None)
+                )
+            ]
+            caminho, erro = executar_com_progresso(
+                page,
+                "Gerando relatório...",
+                lambda: gerar_pdf_relatorios(freq, temas_parados),
+            )
+            if erro:
+                mostrar_aviso(page, "Erro", erro)
+                return
+            entregar_arquivo(page, caminho, abrir_arquivo)
+            if not eh_mobile():
+                mostrar_sucesso(page, f"Relatório gerado: {caminho}")
+        except Exception as exc:
+            mostrar_aviso(page, "Erro", f"Não foi possível gerar o relatório: {exc}")
+
     par_inicio, par_fim = par_meses_do_mes_quadro(mes)
     card_pendencias = ft.Container(
         content=ft.Column(
@@ -2569,6 +2603,11 @@ def tela_inicio(
                     "Catálogo de temas",
                     icon=ft.Icons.MENU_BOOK_OUTLINED,
                     on_click=lambda _: ir_para(4),
+                ),
+                ft.OutlinedButton(
+                    "Relatórios (PDF)",
+                    icon=ft.Icons.ASSESSMENT_OUTLINED,
+                    on_click=gerar_relatorios,
                 ),
             ],
             spacing=8,
