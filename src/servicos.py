@@ -7,6 +7,7 @@ devolvem decisões; quem persiste no banco é o ``main.py``.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Container
 
 
@@ -67,3 +68,63 @@ def escolher_rodizio_presidentes(
         designacoes[chave] = escolhido
 
     return escolhas
+
+
+def oradores_mais_tempo_sem_discurso(
+    orador_ids: list[int],
+    ultima_data_por_orador: dict[int, str],
+) -> list[int]:
+    """Ordena oradores do que está há mais tempo sem discursar para o mais recente.
+
+    Quem nunca discursou vem primeiro. Em caso de empate, mantém a ordem de
+    ``orador_ids`` (que o chamador passa já ordenada, ex.: alfabética).
+
+    Args:
+        orador_ids: ids dos oradores candidatos, na ordem de desempate.
+        ultima_data_por_orador: {orador_id: última data DD/MM/AAAA que discursou}.
+            Um id ausente significa que nunca discursou.
+
+    Returns:
+        Os mesmos ids, reordenados (há mais tempo sem discursar primeiro).
+    """
+
+    def chave(orador_id: int) -> tuple[str, str, str]:
+        data = ultima_data_por_orador.get(orador_id)
+        # "" ordena antes de qualquer ano real, então "nunca" vem primeiro.
+        return _chave_data_br(data) if data else ("", "", "")
+
+    # sorted é estável: empates preservam a ordem original de orador_ids.
+    return sorted(orador_ids, key=chave)
+
+
+def detectar_conflitos_oradores(registros: list[dict]) -> list[dict]:
+    """Detecta oradores designados mais de uma vez na mesma data.
+
+    Args:
+        registros: dicts com ``data`` (DD/MM/AAAA), ``orador_id`` e, opcional,
+            ``orador_nome``.
+
+    Returns:
+        Um dict por conflito: ``{data, orador_id, orador_nome, ocorrencias}``,
+        ordenado por data e por orador.
+    """
+    por_chave: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    for registro in registros:
+        orador_id = registro.get("orador_id")
+        data = registro.get("data")
+        if orador_id is None or not data:
+            continue
+        por_chave[(data, orador_id)].append(registro)
+
+    conflitos = [
+        {
+            "data": data,
+            "orador_id": orador_id,
+            "orador_nome": lista[0].get("orador_nome", ""),
+            "ocorrencias": len(lista),
+        }
+        for (data, orador_id), lista in por_chave.items()
+        if len(lista) > 1
+    ]
+    conflitos.sort(key=lambda c: (_chave_data_br(c["data"]), c["orador_id"]))
+    return conflitos

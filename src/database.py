@@ -388,6 +388,17 @@ def create_tables(conn):
     migrar_oradores(conn)
     migrar_arranjos(conn)
     migrar_arranjo_oradores(conn)
+
+    # Status de confirmação das designações (pendente/confirmado/recusado).
+    # Registros já existentes são históricos: marcados como confirmados; novos
+    # nascem como "pendente" (o coordenador confirma quando o orador responde).
+    colunas_ao = [linha[1] for linha in cursor.execute("PRAGMA table_info(arranjo_oradores)")]
+    if "status" not in colunas_ao:
+        cursor.execute(
+            "ALTER TABLE arranjo_oradores ADD COLUMN status TEXT NOT NULL DEFAULT 'pendente'"
+        )
+        cursor.execute("UPDATE arranjo_oradores SET status = 'confirmado'")
+
     conn.commit()
     print("Tabelas criadas com sucesso!")
 
