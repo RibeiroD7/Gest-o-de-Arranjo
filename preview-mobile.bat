@@ -23,7 +23,7 @@ if not exist "venv\Scripts\python.exe" (
     )
     echo Instalando dependencias, aguarde alguns minutos...
     venv\Scripts\python.exe -m pip install --upgrade pip
-    venv\Scripts\python.exe -m pip install -r requirements.txt
+    venv\Scripts\python.exe -m pip install -r src\requirements.txt
     if errorlevel 1 (
         echo.
         echo ERRO: falha ao instalar as dependencias.
@@ -37,7 +37,7 @@ echo.
 echo Abrindo o app no layout de celular...
 echo (Estreite a janela para simular a tela de um telefone.)
 echo.
-venv\Scripts\python.exe mobile\src\main.py
+venv\Scripts\python.exe src\main.py
 
 if errorlevel 1 (
     echo.

@@ -11,11 +11,9 @@ nada é apagado.
 
 import re
 from datetime import datetime
-from pathlib import Path
 
+from armazenamento import EXPORTS_DIR
 from database import get_connection
-
-EXPORTS_DIR = Path("exports")
 
 ABA_LEIA_ME = "Leia-me"
 ABA_CONGREGACOES = "Congregações"

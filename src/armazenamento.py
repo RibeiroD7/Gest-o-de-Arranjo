@@ -53,5 +53,11 @@ def caminho_temas_seed_json() -> Path | None:
 
 
 def eh_mobile() -> bool:
-    """True quando rodando empacotado num celular (área de storage definida)."""
+    """True quando rodando empacotado num celular (área de storage definida).
+
+    Pode ser forçado com a variável de ambiente GA_FORCAR_MOBILE=1 para ver o
+    layout de celular rodando o app no computador (sem esperar o build do APK).
+    """
+    if os.environ.get("GA_FORCAR_MOBILE") == "1":
+        return True
     return _STORAGE is not None

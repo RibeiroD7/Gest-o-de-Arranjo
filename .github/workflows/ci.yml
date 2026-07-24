@@ -1,0 +1,30 @@
+name: CI
+
+# Verifica lint e testes em cada push e Pull Request. Diferente do
+# release.yml (que só compila os instaladores ao publicar uma tag), este roda
+# sempre, pegando erros antes de chegarem numa release.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  lint-e-testes:
+    name: Lint + testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências de teste
+        # Só o necessário para a lógica pura e o banco (sem Flet/GUI).
+        run: pip install pandas python-dateutil pytest ruff
+
+      - name: Ruff (lint)
+        run: ruff check src tests
+
+      - name: Pytest
+        run: pytest -q

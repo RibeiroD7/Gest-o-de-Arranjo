@@ -9,7 +9,7 @@ if not exist "venv\Scripts\activate.bat" (
 )
 
 call venv\Scripts\activate.bat
-python main.py
+python src\main.py
 
 if errorlevel 1 (
     echo.

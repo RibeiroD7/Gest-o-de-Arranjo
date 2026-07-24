@@ -124,8 +124,14 @@ jobs:
           [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
 
+      - name: Remover dependências só de desktop
+        # python-calamine é um pacote nativo (Rust) sem wheel para Android e é
+        # usado apenas no desktop (leitura do Temas.xlsx). No celular a carga
+        # inicial vem de temas_seed.json. Removemos a linha antes de compilar o
+        # APK para não tentar instalá-la — a fonte .py continua única.
+        run: sed -i '/python-calamine/d' pyproject.toml
+
       - name: Compilar
-        working-directory: mobile
         # --split-per-abi gera um APK por arquitetura (bem menor que o
         # universal, que embute todas). Sem perda de funcionalidade.
         run: flet build apk --yes --split-per-abi --build-version ${{ env.VERSAO }} --verbose
@@ -133,14 +139,14 @@ jobs:
       - name: Renomear APKs
         run: |
           echo "APKs gerados:"
-          ls -la mobile/build/apk/
+          ls -la build/apk/
           # Principal: arm64-v8a (praticamente todos os celulares atuais).
-          APK_ARM64=$(ls mobile/build/apk/*arm64-v8a*.apk 2>/dev/null | head -1)
-          if [ -z "$APK_ARM64" ]; then APK_ARM64=$(ls mobile/build/apk/*.apk | head -1); fi
+          APK_ARM64=$(ls build/apk/*arm64-v8a*.apk 2>/dev/null | head -1)
+          if [ -z "$APK_ARM64" ]; then APK_ARM64=$(ls build/apk/*.apk | head -1); fi
           cp "$APK_ARM64" GestaoArranjo-${{ env.VERSAO }}-android.apk
           # Reserva para aparelhos antigos de 32 bits, se existir.
-          if ls mobile/build/apk/*armeabi-v7a*.apk >/dev/null 2>&1; then
-            cp mobile/build/apk/*armeabi-v7a*.apk GestaoArranjo-${{ env.VERSAO }}-android-32bits.apk
+          if ls build/apk/*armeabi-v7a*.apk >/dev/null 2>&1; then
+            cp build/apk/*armeabi-v7a*.apk GestaoArranjo-${{ env.VERSAO }}-android-32bits.apk
           fi
 
       - uses: actions/upload-artifact@v4

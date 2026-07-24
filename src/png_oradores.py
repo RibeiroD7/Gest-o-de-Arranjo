@@ -14,9 +14,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from armazenamento import ASSETS_DIR
+from armazenamento import ASSETS_DIR, EXPORTS_DIR
 
-EXPORTS_DIR = Path("exports")
 ESCALA = 3
 DPI = 300
 LARGURA_BASE = 480
@@ -698,9 +697,13 @@ def gerar_preview_quadro_mes(
     mes: int,
     dados: list[dict],
     nome_congregacao: str,
+    largura_base: int = 620,
 ) -> bytes:
-    """Prévia PNG de um mês do quadro, com a mesma geometria do PDF modelo."""
-    largura_base = 620
+    """Prévia PNG de um mês do quadro, com a mesma geometria do PDF modelo.
+
+    `largura_base` controla a resolução: no celular passamos um valor maior
+    para o texto ficar nítido quando a imagem é exibida ampliada.
+    """
     largura_imagem = largura_base * ESCALA
     margem = _px(16)
     largura_util = largura_imagem - margem * 2

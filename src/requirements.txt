@@ -4,6 +4,7 @@ pandas
 reportlab
 python-dateutil
 Pillow
+pywin32>=306; sys_platform == "win32"
 openpyxl
 python-calamine; sys_platform != "android"
 pypdf

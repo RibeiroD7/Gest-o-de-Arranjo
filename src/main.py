@@ -1,22 +1,23 @@
 """
-Gestão de Arranjo — aplicativo desktop em Flet.
+Gestão de Arranjo — aplicativo em Flet (Windows, Linux e Android).
 
-Execute com: python main.py
+Fonte única: os três sistemas compilam desta mesma pasta `src/`. As diferenças
+de plataforma são resolvidas em tempo de execução (ver armazenamento.eh_mobile).
+
+Execute com: python src/main.py
 """
 
 from __future__ import annotations
 
 import re
-import unicodedata
-from calendar import monthrange
-from datetime import date, datetime, timedelta
-from pathlib import Path
-from typing import Callable
 import webbrowser
+from datetime import date, timedelta
+from typing import Callable
 
 import flet as ft
 import pandas as pd
 
+from armazenamento import EXPORTS_DIR, eh_mobile, garantir_pastas
 from database import (
     adicionar_ano_coluna,
     adicionar_ano_planejamento,
@@ -27,10 +28,11 @@ from database import (
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
     carregar_oradores_arranjo,
-    carregar_tema,
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
+    carregar_tema,
     carregar_temas_de_orador,
+    carregar_todas_designacoes_presidente,
     contar_designacoes_por_mes,
     create_tables,
     definir_visibilidade_ano_coluna,
@@ -46,12 +48,10 @@ from database import (
     garantir_configuracao_inicial,
     get_connection,
     importar_temas_pdf,
-    importar_temas_planilha,
     listar_anos_arranjos,
     listar_anos_colunas,
     listar_anos_planejamento,
     listar_datas_especiais_por_ano,
-    carregar_todas_designacoes_presidente,
     listar_presidentes_cadastro,
     listar_tipos_evento,
     remover_orador_arranjo,
@@ -64,21 +64,39 @@ from database import (
     salvar_presidente_cadastro,
     salvar_tema,
 )
-from pdf_envio import gerar_pdf_envio
-from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from pdf_quadro import (
     PARES_MESES as PARES_MESES_QUADRO,
+)
+from pdf_quadro import (
     abrir_arquivo,
-    par_meses_do_mes as par_meses_do_mes_quadro,
-    carregar_dados_mes as carregar_dados_mes_quadro,
     gerar_quadro_anuncios,
 )
+from pdf_quadro import (
+    carregar_dados_mes as carregar_dados_mes_quadro,
+)
+from pdf_quadro import (
+    par_meses_do_mes as par_meses_do_mes_quadro,
+)
+from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from png_oradores import (
     abrir_pasta_do_arquivo,
     gerar_link_whatsapp,
     gerar_png_designacao_envio,
     gerar_png_oradores,
     gerar_preview_quadro_mes,
+)
+from servicos import escolher_rodizio_presidentes
+from util import (
+    _datas_por_weekday_no_mes,
+    _dia_semana_para_weekday,
+    _formatar_data_arranjo,
+    _formatar_data_exibicao,
+    _normalizar_data_arranjo,
+    _normalizar_texto_busca,
+    _parse_data_arranjo,
+    _rotulo_weekday,
+    _weekday_mais_usado,
+    ha_versao_mais_nova,
 )
 
 # ---------------------------------------------------------------------------
@@ -90,6 +108,13 @@ ICON_SIZE_MENU = 18
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
 VERSAO_APP = "1.0.18"
+
+# Verificação de atualização (só no desktop): consulta a última release no
+# GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
+URL_API_RELEASE = (
+    "https://api.github.com/repos/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
+)
+URL_RELEASES = "https://github.com/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
 
 # Identidade visual — "Meia-noite teal": azul profundo com acento verde-água
 COR_DESTAQUE = "#14B8A6"
@@ -150,6 +175,7 @@ ALTURA_CONTEUDO_DIALOG_MES = 480
 LARGURA_COL_DATA_MES = 76
 LARGURA_COL_ORADOR_MES = 150
 LARGURA_COL_ACOES_MES = 80
+LARGURA_COL_TEMA_MES = 150  # largura fixa da coluna Tema no celular (tabela rola na horizontal)
 ESPACO_COLUNAS_MES = 8
 QUANTIDADE_DATAS_SUGERIDAS = 5
 
@@ -280,6 +306,7 @@ def inserir_orador(
 
 def garantir_tabelas() -> None:
     """Garante que as tabelas do banco existam (incluindo designacoes)."""
+    garantir_pastas()
     conn = get_connection()
     try:
         create_tables(conn)
@@ -465,118 +492,6 @@ NOMES_ESPECIAIS_ARRANJO = {
     "Sem designação",
     "Arranjo Local",
 }
-
-
-def _formatar_data_exibicao(data: str | None) -> str:
-    """Exibe data DD/MM/AAAA ou DD/MM."""
-    if not data:
-        return "—"
-    texto = data.strip()
-    if len(texto) >= 10:
-        return f"{texto[0:2]}/{texto[3:5]}/{texto[6:10]}"
-    return texto
-
-
-MAP_DIA_SEMANA = {
-    "domingo": 6,
-    "segunda-feira": 0,
-    "segunda": 0,
-    "terça-feira": 1,
-    "terca-feira": 1,
-    "terça": 1,
-    "terca": 1,
-    "quarta-feira": 2,
-    "quarta": 2,
-    "quinta-feira": 3,
-    "quinta": 3,
-    "sexta-feira": 4,
-    "sexta": 4,
-    "sábado": 5,
-    "sabado": 5,
-}
-
-
-def _dia_semana_para_weekday(dia_semana: str) -> int | None:
-    """Converte texto do dia da semana para weekday (0=segunda … 6=domingo)."""
-    texto = (dia_semana or "").strip().lower()
-    for chave, valor in MAP_DIA_SEMANA.items():
-        if chave in texto:
-            return valor
-    return None
-
-
-def _normalizar_texto_busca(texto: str) -> str:
-    """Normaliza para comparação: minúsculas, sem acento e sem espaços extras."""
-    base = unicodedata.normalize("NFKD", (texto or "").casefold().strip())
-    return " ".join("".join(c for c in base if not unicodedata.combining(c)).split())
-
-
-def _normalizar_data_arranjo(valor: str) -> str | None:
-    """Normaliza data para DD/MM/AAAA."""
-    texto = (valor or "").strip()
-    if not texto:
-        return None
-    partes = texto.replace(".", "/").split("/")
-    if len(partes) == 2:
-        dia, mes = partes
-        return f"{dia.zfill(2)}/{mes.zfill(2)}/2026"
-    if len(partes) == 3:
-        dia, mes, ano = partes
-        return f"{dia.zfill(2)}/{mes.zfill(2)}/{ano}"
-    return None
-
-
-def _parse_data_arranjo(valor: str | None) -> date | None:
-    """Converte DD/MM/AAAA em date."""
-    norm = _normalizar_data_arranjo(valor or "")
-    if not norm:
-        return None
-    try:
-        return datetime.strptime(norm, "%d/%m/%Y").date()
-    except ValueError:
-        return None
-
-
-def _formatar_data_arranjo(data_ref: date) -> str:
-    return data_ref.strftime("%d/%m/%Y")
-
-
-def _weekday_mais_usado(registros: list[dict], tipo: str) -> int | None:
-    """Detecta o dia da semana mais usado nas designações do mês."""
-    contagem: dict[int, int] = {}
-    for registro in registros:
-        if registro.get("tipo") != tipo:
-            continue
-        data_ref = _parse_data_arranjo(registro.get("data"))
-        if not data_ref:
-            continue
-        contagem[data_ref.weekday()] = contagem.get(data_ref.weekday(), 0) + 1
-    if not contagem:
-        return None
-    return max(contagem, key=contagem.get)
-
-
-def _datas_por_weekday_no_mes(ano: int, mes: int, weekday: int) -> list[date]:
-    ultimo_dia = monthrange(ano, mes)[1]
-    datas: list[date] = []
-    for dia in range(1, ultimo_dia + 1):
-        data_ref = date(ano, mes, dia)
-        if data_ref.weekday() == weekday:
-            datas.append(data_ref)
-    return datas
-
-
-def _rotulo_weekday(weekday: int) -> str:
-    nomes = [
-        "Segunda-feira",
-        "Terça-feira",
-        "Quarta-feira",
-        "Quinta-feira",
-        "Sexta-feira",
-        "Sábado",
-        "Domingo",
-    ]
-    return nomes[weekday]
 
 
 def _obter_reunioes_dialog(arranjo: dict) -> dict:
@@ -902,14 +817,38 @@ def criar_secao_titulo(texto: str) -> ft.Text:
     return ft.Text(texto, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
 
 
-def criar_cabecalho_tela(titulo: str, subtitulo: str = "") -> ft.Column:
-    """Cabeçalho padronizado de cada tela."""
+def criar_cabecalho_tela(
+    titulo: str,
+    subtitulo: str = "",
+    subtitulo_no_celular: bool = False,
+) -> ft.Column:
+    """Cabeçalho padronizado de cada tela (compacto no celular)."""
+    mobile = eh_mobile()
+    if mobile and not subtitulo_no_celular:
+        # A barra superior já mostra o nome da seção; repetir o título aqui
+        # só rouba espaço da tabela/lista. Telas com informação real no
+        # cabeçalho (o Início) usam subtitulo_no_celular=True.
+        return ft.Column([], spacing=0, tight=True)
     controles = [
-        ft.Text(titulo, size=28, weight=ft.FontWeight.BOLD, color=TEXTO_PRIMARIO),
+        ft.Text(
+            titulo,
+            size=20 if mobile else 28,
+            weight=ft.FontWeight.BOLD,
+            color=TEXTO_PRIMARIO,
+        ),
     ]
-    if subtitulo:
+    if subtitulo and (not mobile or subtitulo_no_celular):
+        # No celular o subtítulo descritivo é omitido (a barra superior já dá
+        # o contexto); telas que trazem informação real nele — como o Início —
+        # pedem exibição com subtitulo_no_celular=True.
         controles.append(
-            ft.Text(subtitulo, size=14, color=TEXTO_SECUNDARIO)
+            ft.Text(
+                subtitulo,
+                size=12 if mobile else 14,
+                color=TEXTO_SECUNDARIO,
+                max_lines=3,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
         )
     return ft.Column(controles, spacing=4)
 
@@ -1161,9 +1100,16 @@ def criar_area_tabela(
     config = config or {}
     if "coluna_id" not in config:
         config = {**config, "coluna_id": coluna_id}
+    tabela = criar_tabela(df, on_editar=on_editar, on_excluir=on_excluir, config=config)
+    if eh_mobile():
+        # A tabela é mais larga que a tela do celular: rolagem horizontal
+        # (arrastar para o lado) além da vertical.
+        conteudo = ft.Row([tabela], scroll=ft.ScrollMode.AUTO, tight=True)
+    else:
+        conteudo = tabela
     return ft.Container(
         content=ft.Column(
-            [criar_tabela(df, on_editar=on_editar, on_excluir=on_excluir, config=config)],
+            [conteudo],
             scroll=ft.ScrollMode.AUTO,
             expand=True,
         ),
@@ -1240,12 +1186,48 @@ def criar_tela_padrao(
 
     atualizar_view()
 
+    if eh_mobile():
+        # Celular: cabeçalho enxuto (sem o título de seção "Dados" nem os
+        # espaçadores largos) para a lista ocupar o máximo da tela.
+        linhas_filtro = []
+        if controles_filtro:
+            linhas_filtro = [
+                ft.Column(
+                    controles_filtro,
+                    spacing=8,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                ft.Container(height=8),
+            ]
+        barra = ft.Column(
+            [
+                ft.Row([campo_busca]),
+                *([ft.Row(barra_acoes, spacing=8, wrap=True)] if barra_acoes else []),
+            ],
+            spacing=8,
+        )
+        return ft.Column(
+            [
+                criar_cabecalho_tela(titulo, descricao),
+                ft.Container(height=8),
+                *linhas_filtro,
+                barra,
+                ft.Container(height=6),
+                texto_contagem,
+                ft.Container(height=6),
+                area_tabela,
+            ],
+            spacing=0,
+            expand=True,
+        )
+
     linhas_filtro = []
     if controles_filtro:
         linhas_filtro = [
             ft.Row(controles_filtro, spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Container(height=12),
         ]
+    barra = ft.Row(itens_barra, spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     return ft.Column(
         [
@@ -1254,7 +1236,7 @@ def criar_tela_padrao(
             criar_secao_titulo("Dados"),
             ft.Container(height=12),
             *linhas_filtro,
-            ft.Row(itens_barra, spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            barra,
             ft.Container(height=8),
             texto_contagem,
             ft.Container(height=8),
@@ -1343,20 +1325,38 @@ def abrir_dialog_orador(
         filtro = filtro.strip().lower()
         linhas = []
         for row in df_temas.itertuples():
-            # Mostra o número do esboço antes do título (a não ser que o título
-            # já comece pelo número), para identificar o tema na lista.
-            rotulo = (
-                row.titulo
-                if str(row.titulo).startswith(str(row.nr))
-                else f"{row.nr} - {row.titulo}"
-            )
+            rotulo = f"{row.nr} - {row.titulo}"
             if filtro and filtro not in rotulo.lower():
                 continue
+            # Checkbox sem label + texto com quebra: o label nativo não
+            # quebra linha e era cortado na borda do dialog no celular.
+            caixa = ft.Checkbox(
+                value=row.nr in temas_selecionados,
+                on_change=lambda e, nr=row.nr: alternar_tema(nr, e.control.value),
+            )
+
+            def alternar_pelo_texto(e, nr=row.nr, caixa=caixa):
+                caixa.value = not caixa.value
+                alternar_tema(nr, caixa.value)
+
             linhas.append(
-                ft.Checkbox(
-                    label=rotulo,
-                    value=row.nr in temas_selecionados,
-                    on_change=lambda e, nr=row.nr: alternar_tema(nr, e.control.value),
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            caixa,
+                            ft.Text(
+                                rotulo,
+                                size=13,
+                                expand=True,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    on_click=alternar_pelo_texto,
+                    padding=ft.Padding.symmetric(vertical=2),
                 )
             )
         lista_temas.controls = linhas
@@ -1410,6 +1410,9 @@ def abrir_dialog_orador(
         fechar()
         recarregar()
 
+    # Enter no campo de nome salva o formulário.
+    campo_nome.on_submit = salvar
+
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("Editar orador" if editando else "Novo orador"),
@@ -1418,7 +1421,7 @@ def abrir_dialog_orador(
                 [
                     campo_nome,
                     campo_telefone,
-                    ft.Row([campo_categoria, campo_congregacao], spacing=12),
+                    linha_campos(campo_categoria, campo_congregacao),
                     campo_observacoes,
                     texto_erro,
                     ft.Container(height=4),
@@ -1431,7 +1434,7 @@ def abrir_dialog_orador(
                 ],
                 spacing=12,
                 tight=True,
-                width=480,
+                width=_largura_dialog(page, 480),
                 scroll=ft.ScrollMode.AUTO,
             ),
             padding=ft.Padding.only(top=8),
@@ -1582,6 +1585,9 @@ def abrir_dialog_congregacao(
         fechar()
         recarregar()
 
+    # Enter no campo de nome salva o formulário.
+    campo_nome.on_submit = salvar
+
     page.show_dialog(
         ft.AlertDialog(
             modal=True,
@@ -1590,14 +1596,14 @@ def abrir_dialog_congregacao(
                 content=ft.Column(
                     [
                         campo_nome,
-                        ft.Row([campo_responsavel, campo_telefone], spacing=12),
+                        linha_campos(campo_responsavel, campo_telefone),
                         campo_endereco,
-                        ft.Row([campo_dia, campo_horario], spacing=12),
+                        linha_campos(campo_dia, campo_horario),
                         texto_erro,
                     ],
                     spacing=12,
                     tight=True,
-                    width=480,
+                    width=_largura_dialog(page, 480),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -1680,6 +1686,91 @@ def mostrar_sucesso(page: ft.Page, mensagem: str) -> None:
     )
 
 
+def executar_com_progresso(page: ft.Page, mensagem: str, tarefa: Callable[[], object]):
+    """Mostra um anel de progresso enquanto roda ``tarefa`` e devolve o resultado.
+
+    A geração de PDF/PNG é síncrona e pode demorar. Como a interface do Flet roda
+    num cliente separado, o anel continua animando durante o processamento — dando
+    ao usuário o retorno visual de que algo está acontecendo. Envolve apenas a
+    tarefa pesada; os avisos de sucesso/erro vêm depois, no chamador.
+    """
+    dialogo = ft.AlertDialog(
+        modal=True,
+        content=ft.Row(
+            [
+                ft.ProgressRing(width=22, height=22, stroke_width=3),
+                ft.Text(mensagem),
+            ],
+            spacing=16,
+            tight=True,
+        ),
+    )
+    page.show_dialog(dialogo)
+    page.update()
+    try:
+        return tarefa()
+    finally:
+        page.pop_dialog()
+        page.update()
+
+
+# Serviços globais registrados em main(): salvar arquivos e compartilhar (celular).
+_file_picker_global: "ft.FilePicker | None" = None
+_share_global: "ft.Share | None" = None
+
+
+def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
+    """Entrega ao usuário um arquivo já gerado em `exports/`.
+
+    No PC executa `abrir_desktop(caminho)` (abre o arquivo ou a pasta, como
+    antes). No celular abre o diálogo "salvar em..." do sistema, para o arquivo
+    sair da área privada do app (Downloads, Drive, WhatsApp, etc.).
+    """
+    caminho = str(caminho)
+    if not eh_mobile():
+        abrir_desktop(caminho)
+        return
+
+    async def _salvar():
+        from pathlib import Path as _P
+
+        picker = _file_picker_global
+        if picker is None:
+            mostrar_aviso(page, "Não foi possível salvar",
+                          "Seletor de arquivos indisponível.")
+            return
+        try:
+            await picker.save_file(
+                dialog_title="Salvar arquivo",
+                file_name=_P(caminho).name,
+                src_bytes=_P(caminho).read_bytes(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            mostrar_aviso(page, "Não foi possível salvar o arquivo",
+                          f"Detalhes: {exc}")
+
+    page.run_task(_salvar)
+
+
+def _rotulo_entrega() -> str:
+    """Texto do botão de entrega do arquivo conforme a plataforma."""
+    return "Salvar arquivo" if eh_mobile() else "Abrir pasta"
+
+
+def _icone_entrega():
+    return ft.Icons.SAVE_ALT if eh_mobile() else ft.Icons.FOLDER_OPEN
+
+
+def linha_campos(*campos, spacing: int = 12) -> ft.Control:
+    """Campos de formulário lado a lado no PC; empilhados no celular."""
+    if eh_mobile():
+        return ft.Column(
+            list(campos), spacing=10,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+    return ft.Row(list(campos), spacing=spacing)
+
+
 def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
     """Gera o PDF de envio de oradores selecionados ou exibe aviso."""
     if not orador_ids:
@@ -1691,17 +1782,22 @@ def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
         return
 
     try:
-        caminho, erro = gerar_pdf_envio(list(orador_ids))
+        from pdf_envio import gerar_pdf_envio  # importado sob demanda (desktop)
+
+        caminho, erro = executar_com_progresso(
+            page, "Gerando PDF...", lambda: gerar_pdf_envio(list(orador_ids))
+        )
         if erro:
             mostrar_aviso(page, "Não foi possível gerar o PDF", erro)
             return
 
-        abrir_arquivo(caminho)
-        mostrar_aviso(
-            page,
-            "PDF gerado com sucesso",
-            f"A lista de oradores para envio foi salva em:\n{caminho}",
-        )
+        entregar_arquivo(page, caminho, abrir_arquivo)
+        if not eh_mobile():
+            mostrar_aviso(
+                page,
+                "PDF gerado com sucesso",
+                f"A lista de oradores para envio foi salva em:\n{caminho}",
+            )
     except Exception as exc:
         mostrar_aviso(
             page,
@@ -1779,30 +1875,58 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
         if parte
     )
     presidente = especial.get("presidente_nome") or ""
+    chip_data = ft.Container(
+        content=ft.Text(
+            data_ref.strftime("%d/%m"),
+            size=12,
+            weight=ft.FontWeight.W_600,
+            color=COR_AVISO,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.14, COR_AVISO),
+        border_radius=6,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
+    chip_tipo = ft.Container(
+        content=ft.Text(
+            especial.get("tipo", "Data especial"),
+            size=12,
+            weight=ft.FontWeight.W_600,
+            color=COR_AVISO,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.10, COR_AVISO),
+        border_radius=6,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
+
+    if eh_mobile():
+        # Empilhado, como as demais linhas da agenda no celular.
+        corpo = [chip_tipo]
+        if detalhes:
+            corpo.append(
+                ft.Text(detalhes, size=12, color=TEXTO_SECUNDARIO,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
+            )
+        if presidente:
+            corpo.append(
+                ft.Text(f"Pres.: {presidente}", size=12, color=TEXTO_SECUNDARIO,
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+            )
+        return ft.Row(
+            [
+                chip_data,
+                ft.Column(corpo, spacing=2, tight=True, expand=True,
+                          horizontal_alignment=ft.CrossAxisAlignment.START),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+
     return ft.Row(
         [
-            ft.Container(
-                content=ft.Text(
-                    data_ref.strftime("%d/%m"),
-                    size=12,
-                    weight=ft.FontWeight.W_600,
-                    color=COR_AVISO,
-                ),
-                bgcolor=ft.Colors.with_opacity(0.14, COR_AVISO),
-                border_radius=6,
-                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-            ),
-            ft.Container(
-                content=ft.Text(
-                    especial.get("tipo", "Data especial"),
-                    size=12,
-                    weight=ft.FontWeight.W_600,
-                    color=COR_AVISO,
-                ),
-                bgcolor=ft.Colors.with_opacity(0.10, COR_AVISO),
-                border_radius=6,
-                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-            ),
+            chip_data,
+            chip_tipo,
             ft.Text(
                 detalhes,
                 size=12,
@@ -1839,19 +1963,68 @@ def _linha_agenda_inicio(
     if info and info.get("tema_nr") and tema:
         tema = f"{info['tema_nr']} - {tema}" if not tema.startswith(str(info["tema_nr"])) else tema
 
+    chip_data = ft.Container(
+        content=ft.Text(
+            data_ref.strftime("%d/%m"),
+            size=12,
+            weight=ft.FontWeight.W_600,
+            color=COR_DESTAQUE_SUAVE,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.14, COR_DESTAQUE_CLARA),
+        border_radius=6,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
+    texto_presidente = ft.Text(
+        f"Pres.: {presidente['nome']}" if presidente else "sem presidente",
+        size=12,
+        color=TEXTO_SECUNDARIO if presidente else COR_ERRO,
+        max_lines=1,
+        no_wrap=True,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    if eh_mobile():
+        # Item empilhado: orador, tema e presidente cada um em sua linha,
+        # todos limitados pela largura da coluna — nada é cortado.
+        return ft.Row(
+            [
+                chip_data,
+                ft.Column(
+                    [
+                        ft.Text(
+                            orador,
+                            size=13,
+                            weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO if info else TEXTO_SECUNDARIO,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        *(
+                            [
+                                ft.Text(
+                                    tema or ("sem orador definido" if not info else "sem tema"),
+                                    size=12,
+                                    color=TEXTO_SECUNDARIO,
+                                    italic=not tema,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                )
+                            ]
+                        ),
+                        texto_presidente,
+                    ],
+                    spacing=2,
+                    tight=True,
+                    expand=True,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+
     return ft.Row(
         [
-            ft.Container(
-                content=ft.Text(
-                    data_ref.strftime("%d/%m"),
-                    size=12,
-                    weight=ft.FontWeight.W_600,
-                    color=COR_DESTAQUE_SUAVE,
-                ),
-                bgcolor=ft.Colors.with_opacity(0.14, COR_DESTAQUE_CLARA),
-                border_radius=6,
-                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-            ),
+            chip_data,
             ft.Text(
                 orador,
                 size=13,
@@ -1870,12 +2043,7 @@ def _linha_agenda_inicio(
                 max_lines=1,
                 overflow=ft.TextOverflow.ELLIPSIS,
             ),
-            ft.Text(
-                f"Pres.: {presidente['nome']}" if presidente else "sem presidente",
-                size=12,
-                color=TEXTO_SECUNDARIO if presidente else COR_ERRO,
-                max_lines=1,
-            ),
+            texto_presidente,
         ],
         spacing=10,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1889,6 +2057,7 @@ def _card_kpi_inicio(
     cor_valor: str,
     icone: str | None = None,
 ) -> ft.Container:
+    mobile = eh_mobile()
     return ft.Container(
         content=ft.Row(
             [
@@ -1896,15 +2065,30 @@ def _card_kpi_inicio(
                     content=ft.Icon(icone or ft.Icons.INSIGHTS, size=20, color=cor_valor),
                     bgcolor=ft.Colors.with_opacity(0.12, cor_valor),
                     border_radius=10,
-                    padding=10,
+                    padding=8 if mobile else 10,
                 ),
+                # expand + elipse: no celular o card é estreito e o texto era
+                # cortado sem aviso.
                 ft.Column(
                     [
-                        ft.Text(rotulo, size=12, color=TEXTO_SECUNDARIO),
+                        ft.Text(
+                            rotulo,
+                            size=11 if mobile else 12,
+                            color=TEXTO_SECUNDARIO,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
                         ft.Row(
                             [
                                 ft.Text(valor, size=22, weight=ft.FontWeight.W_700, color=cor_valor),
-                                ft.Text(detalhe, size=12, color=TEXTO_SECUNDARIO),
+                                ft.Text(
+                                    detalhe,
+                                    size=11 if mobile else 12,
+                                    color=TEXTO_SECUNDARIO,
+                                    expand=True,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
                             ],
                             spacing=6,
                             vertical_alignment=ft.CrossAxisAlignment.END,
@@ -1912,15 +2096,16 @@ def _card_kpi_inicio(
                     ],
                     spacing=2,
                     tight=True,
+                    expand=True,
                 ),
             ],
-            spacing=12,
+            spacing=10 if mobile else 12,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=FUNDO_CARD,
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=12,
-        padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+        padding=ft.Padding.symmetric(horizontal=12 if mobile else 16, vertical=12 if mobile else 14),
         expand=True,
     )
 
@@ -1994,8 +2179,33 @@ def _card_proxima_reuniao(
         padding=ft.Padding.symmetric(horizontal=18, vertical=10),
     )
 
-    detalhes: list[ft.Control] = [
-        ft.Row(
+    dia_semana = DIAS_SEMANA_EXTENSO[data_ref.weekday()]
+    if eh_mobile():
+        # No celular o dia da semana entra no próprio chip ("Em 6 dias ·
+        # Sábado") — como texto solto ele era espremido para "S…".
+        rotulo_quando = f"{quando} · {dia_semana}"
+        itens_cabecalho = [
+            ft.Text(
+                "PRÓXIMA REUNIÃO",
+                size=11,
+                weight=ft.FontWeight.W_700,
+                color=TEXTO_SECUNDARIO,
+            ),
+            ft.Container(
+                content=ft.Text(rotulo_quando, size=11, weight=ft.FontWeight.W_600, color=cor_borda),
+                bgcolor=ft.Colors.with_opacity(0.12, cor_borda),
+                border_radius=6,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+            ),
+        ]
+        cabecalho_card = ft.Row(
+            itens_cabecalho,
+            spacing=8,
+            wrap=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    else:
+        cabecalho_card = ft.Row(
             [
                 ft.Text(
                     "PRÓXIMA REUNIÃO",
@@ -2010,14 +2220,20 @@ def _card_proxima_reuniao(
                     padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                 ),
                 ft.Text(
-                    DIAS_SEMANA_EXTENSO[data_ref.weekday()],
+                    dia_semana,
                     size=11,
                     color=TEXTO_SECUNDARIO,
+                    expand=True,
+                    no_wrap=True,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
+        )
+
+    detalhes: list[ft.Control] = [
+        cabecalho_card,
         ft.Text(
             titulo_principal,
             size=18,
@@ -2064,48 +2280,58 @@ def _card_proxima_reuniao(
 
 def _linha_sugestao_tema(mapa: dict) -> ft.Control:
     ultimo = mapa.get("ultimo_uso") or "Nunca"
-    return ft.Row(
-        [
-            ft.Container(
-                content=ft.Text(
-                    str(mapa["nr"]),
-                    size=12,
-                    weight=ft.FontWeight.W_700,
-                    color=COR_DESTAQUE_SUAVE,
-                ),
-                bgcolor=ft.Colors.with_opacity(0.12, COR_DESTAQUE_CLARA),
-                border_radius=6,
-                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-                width=46,
-                alignment=ft.Alignment.CENTER,
+    assunto = mapa.get("assunto") if mapa.get("assunto") not in (None, "—") else ""
+    colunas = [
+        ft.Container(
+            content=ft.Text(
+                str(mapa["nr"]),
+                size=12,
+                weight=ft.FontWeight.W_700,
+                color=COR_DESTAQUE_SUAVE,
             ),
+            bgcolor=ft.Colors.with_opacity(0.12, COR_DESTAQUE_CLARA),
+            border_radius=6,
+            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+            width=46,
+            alignment=ft.Alignment.CENTER,
+        ),
+        ft.Text(
+            mapa["titulo"],
+            size=13,
+            color=TEXTO_PRIMARIO,
+            expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    # A coluna de assunto rouba largura no celular e empurra o "Nunca" para
+    # fora da tela; mostra só no desktop.
+    if not eh_mobile():
+        colunas.append(
             ft.Text(
-                mapa["titulo"],
-                size=13,
-                color=TEXTO_PRIMARIO,
-                expand=True,
-                max_lines=1,
-                overflow=ft.TextOverflow.ELLIPSIS,
-            ),
-            ft.Text(
-                mapa.get("assunto") if mapa.get("assunto") not in (None, "—") else "",
+                assunto,
                 size=11,
                 color=TEXTO_SECUNDARIO,
                 width=180,
                 max_lines=1,
                 overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    colunas.append(
+        ft.Container(
+            content=ft.Text(
+                ultimo,
+                size=11,
+                weight=ft.FontWeight.W_600,
+                color=COR_AVISO if ultimo == "Nunca" else TEXTO_SECUNDARIO,
+                no_wrap=True,
             ),
-            ft.Container(
-                content=ft.Text(
-                    ultimo,
-                    size=11,
-                    weight=ft.FontWeight.W_600,
-                    color=COR_AVISO if ultimo == "Nunca" else TEXTO_SECUNDARIO,
-                ),
-                width=64,
-                alignment=ft.Alignment.CENTER_RIGHT,
-            ),
-        ],
+            width=64,
+            alignment=ft.Alignment.CENTER_RIGHT,
+        )
+    )
+    return ft.Row(
+        colunas,
         spacing=10,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
@@ -2144,8 +2370,7 @@ def tela_inicio(
         if navegar:
             navegar(indice)
 
-    kpis = ft.Row(
-        [
+    _cards_kpi = [
             _card_kpi_inicio(
                 "Semanas com orador",
                 str(resumo["cobertas"]),
@@ -2174,9 +2399,17 @@ def tela_inicio(
                 COR_AVISO if nunca_feitos else COR_SUCESSO,
                 ft.Icons.MENU_BOOK_OUTLINED,
             ),
-        ],
-        spacing=12,
-    )
+    ]
+    if eh_mobile():
+        kpis = ft.Column(
+            [
+                ft.Row(_cards_kpi[:2], spacing=10),
+                ft.Row(_cards_kpi[2:], spacing=10),
+            ],
+            spacing=10,
+        )
+    else:
+        kpis = ft.Row(_cards_kpi, spacing=12)
 
     proximas = _proximas_datas_reuniao(5)
     card_destaque = (
@@ -2259,12 +2492,15 @@ def tela_inicio(
 
     def exportar_quadro_atual(_=None):
         try:
-            caminho, erro = gerar_quadro_anuncios(ano, mes)
+            caminho, erro = executar_com_progresso(
+                page, "Gerando PDF...", lambda: gerar_quadro_anuncios(ano, mes)
+            )
             if erro:
                 mostrar_aviso(page, "Não foi possível exportar", erro)
                 return
-            abrir_arquivo(caminho)
-            mostrar_sucesso(page, f"Quadro exportado: {caminho}")
+            entregar_arquivo(page, caminho, abrir_arquivo)
+            if not eh_mobile():
+                mostrar_sucesso(page, f"Quadro exportado: {caminho}")
         except Exception as exc:
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
@@ -2339,8 +2575,10 @@ def tela_inicio(
                             size=14,
                             weight=ft.FontWeight.W_600,
                             color=TEXTO_PRIMARIO,
+                            expand=True,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
                         ),
-                        ft.Container(expand=True),
                         ft.TextButton(
                             "Ver catálogo",
                             icon=ft.Icons.ARROW_FORWARD,
@@ -2429,19 +2667,28 @@ def tela_inicio(
     )
 
     blocos: list[ft.Control] = [
-        criar_cabecalho_tela(f"{NOMES_MESES[mes]} de {ano}", subtitulo),
+        criar_cabecalho_tela(f"{NOMES_MESES[mes]} de {ano}", subtitulo, subtitulo_no_celular=True),
         ft.Container(height=20),
     ]
     if card_primeiros_passos is not None:
         blocos += [card_primeiros_passos, ft.Container(height=12)]
-    blocos += [
-        kpis,
-        ft.Container(height=12),
-        ft.Row(
+    if eh_mobile():
+        secao_colunas = ft.Column(
+            [c for c in (card_destaque, card_agenda, card_pendencias, card_acoes) if c is not None],
+            spacing=12,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+    else:
+        secao_colunas = ft.Row(
             [coluna_principal, coluna_lateral],
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
-        ),
+        )
+    blocos += [
+        kpis,
+        ft.Container(height=12),
+        secao_colunas,
     ]
     if card_sugestoes is not None:
         blocos += [ft.Container(height=12), card_sugestoes]
@@ -2451,6 +2698,7 @@ def tela_inicio(
         spacing=0,
         expand=True,
         scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH if eh_mobile() else ft.CrossAxisAlignment.START,
     )
 
 
@@ -2511,73 +2759,144 @@ def _criar_lista_oradores(
             else:
                 estado_selecao["ids"].discard(rid)
 
+        chip = ft.Container(
+            content=ft.Text(chip_texto, size=11, weight=ft.FontWeight.W_600, color=chip_cor),
+            bgcolor=ft.Colors.with_opacity(0.13, chip_cor),
+            border_radius=9,
+            padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+        )
+        avatar = ft.Container(
+            content=ft.Text(
+                _iniciais_nome(nome),
+                size=12,
+                weight=ft.FontWeight.W_600,
+                color=COR_DESTAQUE_SUAVE,
+            ),
+            width=36,
+            height=36,
+            border_radius=18,
+            bgcolor=ft.Colors.with_opacity(0.16, COR_DESTAQUE_CLARA),
+            alignment=ft.Alignment.CENTER,
+        )
+        checkbox = ft.Checkbox(
+            value=orador_id in estado_selecao["ids"],
+            on_change=alternar_selecao,
+            tooltip="Selecionar para o PDF de envio",
+        )
+        botao_editar = ft.IconButton(
+            icon=ft.Icons.EDIT_OUTLINED,
+            icon_size=17,
+            tooltip="Editar",
+            icon_color=TEXTO_SECUNDARIO,
+            on_click=lambda e, rid=orador_id: on_editar(rid),
+        )
+        botao_excluir = ft.IconButton(
+            icon=ft.Icons.DELETE_OUTLINE,
+            icon_size=17,
+            tooltip="Excluir",
+            icon_color=COR_ERRO,
+            on_click=lambda e, rid=orador_id: on_excluir(rid),
+        )
+        borda_linha = ft.Border(
+            ft.BorderSide(0, BORDA_SUAVE),
+            ft.BorderSide(0, BORDA_SUAVE),
+            ft.BorderSide(1 if indice < len(registros) - 1 else 0, BORDA_SUAVE),
+            ft.BorderSide(0, BORDA_SUAVE),
+        )
+
+        if eh_mobile():
+            # Card empilhado: nome com linha inteira garantida (a categoria ao
+            # lado roubava a largura e o nome sumia), detalhes abaixo.
+            detalhes = " · ".join(p for p in (categoria, telefone) if p)
+            conteudo = ft.Column(
+                [
+                    ft.Row(
+                        [
+                            checkbox,
+                            avatar,
+                            ft.Text(
+                                nome,
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                color=TEXTO_PRIMARIO,
+                                expand=True,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            botao_editar,
+                            botao_excluir,
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Text(
+                                detalhes,
+                                size=12,
+                                color=TEXTO_SECUNDARIO,
+                                expand=True,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            chip,
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ],
+                spacing=6,
+                tight=True,
+            )
+            linhas.append(
+                ft.Container(
+                    content=conteudo,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    border=borda_linha,
+                )
+            )
+            continue
+
+        info_orador = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text(
+                            nome, size=14, weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO, no_wrap=True,
+                            overflow=ft.TextOverflow.ELLIPSIS, expand=True,
+                        ),
+                        ft.Text(
+                            f"· {categoria}" if categoria else "", size=12,
+                            color=TEXTO_SECUNDARIO, no_wrap=True,
+                        ),
+                    ],
+                    spacing=6,
+                ),
+                ft.Text(
+                    telefone, size=12, color=TEXTO_SECUNDARIO,
+                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+            spacing=2,
+            expand=True,
+        )
         linhas.append(
             ft.Container(
                 content=ft.Row(
                     [
-                        ft.Checkbox(
-                            value=orador_id in estado_selecao["ids"],
-                            on_change=alternar_selecao,
-                            tooltip="Selecionar para o PDF de envio",
-                        ),
-                        ft.Container(
-                            content=ft.Text(
-                                _iniciais_nome(nome),
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                color=COR_DESTAQUE_SUAVE,
-                            ),
-                            width=36,
-                            height=36,
-                            border_radius=18,
-                            bgcolor=ft.Colors.with_opacity(0.16, COR_DESTAQUE_CLARA),
-                            alignment=ft.Alignment.CENTER,
-                        ),
-                        ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Text(nome, size=14, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
-                                        ft.Text(f"· {categoria}" if categoria else "", size=12, color=TEXTO_SECUNDARIO),
-                                    ],
-                                    spacing=6,
-                                ),
-                                ft.Text(telefone, size=12, color=TEXTO_SECUNDARIO),
-                            ],
-                            spacing=2,
-                            expand=True,
-                        ),
-                        ft.Container(
-                            content=ft.Text(chip_texto, size=11, weight=ft.FontWeight.W_600, color=chip_cor),
-                            bgcolor=ft.Colors.with_opacity(0.13, chip_cor),
-                            border_radius=9,
-                            padding=ft.Padding.symmetric(horizontal=9, vertical=3),
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.EDIT_OUTLINED,
-                            icon_size=17,
-                            tooltip="Editar",
-                            icon_color=TEXTO_SECUNDARIO,
-                            on_click=lambda e, rid=orador_id: on_editar(rid),
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINE,
-                            icon_size=17,
-                            tooltip="Excluir",
-                            icon_color=COR_ERRO,
-                            on_click=lambda e, rid=orador_id: on_excluir(rid),
-                        ),
+                        checkbox,
+                        avatar,
+                        info_orador,
+                        chip,
+                        botao_editar,
+                        botao_excluir,
                     ],
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-                border=ft.Border(
-                    ft.BorderSide(0, BORDA_SUAVE),
-                    ft.BorderSide(0, BORDA_SUAVE),
-                    ft.BorderSide(1 if indice < len(registros) - 1 else 0, BORDA_SUAVE),
-                    ft.BorderSide(0, BORDA_SUAVE),
-                ),
+                border=borda_linha,
             )
         )
 
@@ -2633,8 +2952,17 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         allow_empty_selection=False,
         on_change=ao_mudar_filtro,
         segments=[
-            ft.Segment(value="minha", label=ft.Text("Minha congregação")),
-            ft.Segment(value="outras", label=ft.Text("Outras congregações")),
+            # Rótulos curtos no celular: os longos quebravam em duas linhas
+            ft.Segment(
+                value="minha",
+                label=ft.Text("Minha" if eh_mobile() else "Minha congregação"),
+                icon=ft.Icon(ft.Icons.HOME_OUTLINED) if eh_mobile() else None,
+            ),
+            ft.Segment(
+                value="outras",
+                label=ft.Text("Outras" if eh_mobile() else "Outras congregações"),
+                icon=ft.Icon(ft.Icons.GROUPS_OUTLINED) if eh_mobile() else None,
+            ),
         ],
     )
 
@@ -2873,7 +3201,7 @@ def abrir_dialog_tema(
                     ],
                     spacing=12,
                     tight=True,
-                    width=520,
+                    width=_largura_dialog(page, 520),
                     scroll=ft.ScrollMode.AUTO,
                 ),
                 padding=ft.Padding.only(top=8),
@@ -3040,7 +3368,7 @@ def abrir_dialog_gerenciar_anos(page: ft.Page, recarregar: Callable[[], None]) -
                         texto_erro,
                     ],
                     tight=True,
-                    width=420,
+                    width=_largura_dialog(page, 420),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -3104,11 +3432,31 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     botao_pag_proxima = ft.IconButton(
         icon=ft.Icons.CHEVRON_RIGHT, tooltip="Próxima página", icon_size=20
     )
-    linha_paginacao = ft.Row(
-        [texto_contagem, ft.Container(expand=True), botao_pag_anterior, texto_pagina, botao_pag_proxima],
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=4,
-    )
+    if eh_mobile():
+        # No celular a contagem longa empurrava as setas para fora da tela e
+        # não dava para passar da página 1 — contagem em cima, setas embaixo.
+        texto_contagem.size = 12
+        texto_contagem.max_lines = 1
+        texto_contagem.overflow = ft.TextOverflow.ELLIPSIS
+        linha_paginacao = ft.Column(
+            [
+                texto_contagem,
+                ft.Row(
+                    [botao_pag_anterior, texto_pagina, botao_pag_proxima],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
+                ),
+            ],
+            spacing=0,
+            tight=True,
+        )
+    else:
+        linha_paginacao = ft.Row(
+            [texto_contagem, ft.Container(expand=True), botao_pag_anterior, texto_pagina, botao_pag_proxima],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=4,
+        )
 
     def _df_temas() -> pd.DataFrame:
         if estado_temas["df"] is None:
@@ -3200,7 +3548,9 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         erros: list[str] = []
         for arquivo in arquivos:
             try:
-                resultado = importar_temas_pdf(arquivo.path)
+                resultado = executar_com_progresso(
+                    page, "Lendo PDF...", lambda: importar_temas_pdf(arquivo.path)
+                )
             except Exception as exc:
                 erros.append(f"{arquivo.name}: {exc}")
                 continue
@@ -3233,30 +3583,46 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     atualizar_view()
     estado_temas["montado"] = True
 
-    return ft.Column(
-        [
-            criar_cabecalho_tela(
-                "Temas",
-                "Colunas por ano conforme a planilha — temas com observações aparecem destacados em azul",
-            ),
-            ft.Container(height=28),
-            criar_secao_titulo("Catálogo"),
-            ft.Container(height=12),
-            ft.Row(
-                [
-                    campo_busca,
-                    ft.FilledButton(
-                        "Importar S-99/S-99a",
-                        icon=ft.Icons.UPLOAD_FILE,
-                        on_click=abrir_importar,
-                        tooltip="Preenche os temas a partir dos formulários oficiais em PDF",
-                    ),
-                    ft.OutlinedButton(
-                        "Gerenciar",
-                        icon=ft.Icons.CALENDAR_MONTH,
-                        on_click=abrir_anos,
+    botao_importar = ft.FilledButton(
+        "Importar S-99/S-99a",
+        icon=ft.Icons.UPLOAD_FILE,
+        on_click=abrir_importar,
+        tooltip="Preenche os temas a partir dos formulários oficiais em PDF",
+    )
+    botao_gerenciar = ft.OutlinedButton(
+        "Gerenciar",
+        icon=ft.Icons.CALENDAR_MONTH,
+        on_click=abrir_anos,
+    )
+
+    if eh_mobile():
+        # Celular: busca em cima; botões e filtros dentro de um painel
+        # recolhido — sobra altura para a tabela, que ficava minúscula.
+        for filtro in (filtro_assunto, filtro_uso, filtro_ordem):
+            filtro.width = None
+        controles_topo = [
+            ft.Row([campo_busca]),
+            ft.Container(height=8),
+            ft.ExpansionTile(
+                title=ft.Text("Ações e filtros", size=13, weight=ft.FontWeight.W_600),
+                leading=ft.Icon(ft.Icons.TUNE, size=18, color=COR_DESTAQUE_SUAVE),
+                tile_padding=ft.Padding.symmetric(horizontal=8),
+                controls_padding=ft.Padding.only(left=8, right=8, bottom=12),
+                controls=[
+                    ft.Row([botao_importar, botao_gerenciar], spacing=8, wrap=True),
+                    ft.Container(height=12),
+                    ft.Column(
+                        [filtro_assunto, filtro_uso, filtro_ordem],
+                        spacing=12,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
                 ],
+            ),
+        ]
+    else:
+        controles_topo = [
+            ft.Row(
+                [campo_busca, botao_importar, botao_gerenciar],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -3266,12 +3632,152 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
+        ]
+
+    if eh_mobile():
+        return ft.Column(
+            [
+                criar_cabecalho_tela("Temas"),
+                ft.Container(height=8),
+                *controles_topo,
+                ft.Container(height=4),
+                linha_paginacao,
+                ft.Container(height=4),
+                area_tabela,
+            ],
+            spacing=0,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+
+    return ft.Column(
+        [
+            criar_cabecalho_tela(
+                "Temas",
+                "Colunas por ano conforme a planilha — temas com observações aparecem destacados em azul",
+            ),
+            ft.Container(height=28),
+            criar_secao_titulo("Catálogo"),
+            ft.Container(height=12),
+            *controles_topo,
             ft.Container(height=8),
             linha_paginacao,
             ft.Container(height=8),
             area_tabela,
         ],
         spacing=0,
+        expand=True,
+    )
+
+
+def _criar_lista_congregacoes_mobile(
+    df: pd.DataFrame,
+    on_editar: Callable[[int], None],
+    on_excluir: Callable[[int], None],
+) -> ft.Control:
+    """Lista de congregações em cards empilhados (a tabela não cabe no celular)."""
+    if df.empty:
+        return ft.Container(
+            content=ft.Text("Nenhuma congregação encontrada.", size=13, color=TEXTO_SECUNDARIO),
+            padding=32,
+            alignment=ft.Alignment.CENTER,
+        )
+
+    linhas: list[ft.Control] = []
+    registros = list(df.itertuples(index=False, name=None))
+    colunas = list(df.columns)
+    for indice, linha in enumerate(registros):
+        mapa = dict(zip(colunas, linha))
+        cong_id = int(mapa["id"])
+        nome = formatar_valor(mapa.get("nome"))
+        responsavel = formatar_valor(mapa.get("responsavel"))
+        telefone = formatar_valor(mapa.get("telefone"))
+        endereco = formatar_valor(mapa.get("endereco"))
+        reuniao = " ".join(
+            p for p in (formatar_valor(mapa.get("dia_semana")), formatar_valor(mapa.get("horario"))) if p
+        )
+
+        detalhes: list[ft.Control] = []
+        contato = " · ".join(p for p in (responsavel, telefone) if p)
+        if contato:
+            detalhes.append(
+                ft.Text(contato, size=12, color=TEXTO_SECUNDARIO,
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+            )
+        if reuniao:
+            detalhes.append(
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.SCHEDULE, size=13, color=TEXTO_SECUNDARIO),
+                        ft.Text(reuniao, size=12, color=TEXTO_SECUNDARIO,
+                                expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                    ],
+                    spacing=6,
+                )
+            )
+        if endereco:
+            detalhes.append(
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.PLACE_OUTLINED, size=13, color=TEXTO_SECUNDARIO),
+                        ft.Text(endereco, size=12, color=TEXTO_SECUNDARIO,
+                                expand=True, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                )
+            )
+
+        linhas.append(
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    nome, size=14, weight=ft.FontWeight.W_600,
+                                    color=TEXTO_PRIMARIO, expand=True,
+                                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.EDIT_OUTLINED,
+                                    icon_size=17,
+                                    tooltip="Editar",
+                                    icon_color=TEXTO_SECUNDARIO,
+                                    on_click=lambda e, rid=cong_id: on_editar(rid),
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.DELETE_OUTLINE,
+                                    icon_size=17,
+                                    tooltip="Excluir",
+                                    icon_color=COR_ERRO,
+                                    on_click=lambda e, rid=cong_id: on_excluir(rid),
+                                ),
+                            ],
+                            spacing=4,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        *detalhes,
+                    ],
+                    spacing=4,
+                    tight=True,
+                ),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                border=ft.Border(
+                    ft.BorderSide(0, BORDA_SUAVE),
+                    ft.BorderSide(0, BORDA_SUAVE),
+                    ft.BorderSide(1 if indice < len(registros) - 1 else 0, BORDA_SUAVE),
+                    ft.BorderSide(0, BORDA_SUAVE),
+                ),
+            )
+        )
+
+    return ft.Container(
+        content=ft.Column(linhas, spacing=0, tight=True, scroll=ft.ScrollMode.AUTO),
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=14,
+        bgcolor=FUNDO_CARD,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         expand=True,
     )
 
@@ -3287,6 +3793,11 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
 
     def abrir_excluir(congregacao_id: int):
         confirmar_exclusao_congregacao(page, recarregar, congregacao_id)
+
+    renderizador = None
+    if eh_mobile():
+        def renderizador(df_filtrado: pd.DataFrame) -> ft.Control:
+            return _criar_lista_congregacoes_mobile(df_filtrado, abrir_editar, abrir_excluir)
 
     return criar_tela_padrao(
         page=page,
@@ -3304,6 +3815,7 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
         on_editar=abrir_editar,
         on_excluir=abrir_excluir,
         config_tabela=CONFIG_TABELA_CONGREGACOES,
+        renderizador_tabela=renderizador,
     )
 
 
@@ -3426,7 +3938,8 @@ def _criar_cabecalho_tabela_oradores() -> ft.Container:
                 ),
                 ft.Text(
                     "Tema",
-                    expand=True,
+                    width=LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    expand=None if eh_mobile() else True,
                     size=12,
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
@@ -3479,7 +3992,10 @@ def _criar_linha_orador_arranjo(
                     tema,
                     size=13,
                     color=TEXTO_SECUNDARIO,
-                    expand=True,
+                    width=LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    expand=None if eh_mobile() else True,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.Row(
                     [
@@ -3531,6 +4047,20 @@ def _criar_linha_orador_arranjo(
     )
 
 
+def _largura_dialog(page: ft.Page, largura_desktop: int) -> int:
+    """Largura do conteúdo de um dialog/cartão, adaptada ao celular.
+
+    No desktop devolve a largura desejada. No celular, limita à largura útil
+    da tela (descontando as margens do próprio dialog) para o conteúdo não ser
+    espremido a ponto de o texto quebrar letra a letra.
+    """
+    if not eh_mobile():
+        return largura_desktop
+    if page is not None and page.width:
+        return max(240, min(largura_desktop, int(page.width) - 64))
+    return min(largura_desktop, 320)
+
+
 def _altura_conteudo_dialog_mes(page: ft.Page) -> int:
     """Altura máxima do conteúdo rolável conforme o tamanho da janela."""
     if page.window and page.window.height:
@@ -3544,23 +4074,27 @@ def _criar_rodape_dialog_mes(
     on_excluir: Callable,
 ) -> ft.Container:
     """Barra fixa de ações na parte inferior do dialog."""
+    mobile = eh_mobile()
+    botoes = [
+        ft.TextButton("Fechar", on_click=on_fechar),
+        ft.OutlinedButton(
+            # Rótulos curtos no celular para os três botões caberem
+            content="Editar" if mobile else "Editar arranjo",
+            icon=ft.Icons.EDIT_OUTLINED,
+            on_click=on_editar,
+        ),
+        ft.OutlinedButton(
+            content="Excluir" if mobile else "Excluir arranjo",
+            icon=ft.Icons.DELETE_OUTLINE,
+            on_click=on_excluir,
+        ),
+    ]
     return ft.Container(
         content=ft.Row(
-            [
-                ft.TextButton("Fechar", on_click=on_fechar),
-                ft.OutlinedButton(
-                    content="Editar arranjo",
-                    icon=ft.Icons.EDIT_OUTLINED,
-                    on_click=on_editar,
-                ),
-                ft.OutlinedButton(
-                    content="Excluir arranjo",
-                    icon=ft.Icons.DELETE_OUTLINE,
-                    on_click=on_excluir,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.END,
-            spacing=12,
+            botoes,
+            alignment=ft.MainAxisAlignment.START if mobile else ft.MainAxisAlignment.END,
+            spacing=8 if mobile else 12,
+            wrap=mobile,
         ),
         padding=ft.Padding.symmetric(horizontal=4, vertical=4),
         border=ft.Border(top=ft.BorderSide(1, BORDA_SUAVE)),
@@ -3595,18 +4129,21 @@ def _montar_tabela_secao(
         )
         for indice, item in enumerate(registros)
     ]
-    return [
-        ft.Container(
-            content=ft.Column(
-                [_criar_cabecalho_tabela_oradores(), *linhas],
-                spacing=0,
-                tight=True,
-            ),
-            border=ft.Border.all(1, BORDA_SUAVE),
-            border_radius=8,
-            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        )
-    ]
+    tabela = ft.Container(
+        content=ft.Column(
+            [_criar_cabecalho_tabela_oradores(), *linhas],
+            spacing=0,
+            tight=True,
+        ),
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=8,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+    )
+    if eh_mobile():
+        # No celular as colunas têm largura fixa; a tabela rola na horizontal
+        # para o texto não ser espremido.
+        return [ft.Row([tabela], scroll=ft.ScrollMode.AUTO, tight=True)]
+    return [tabela]
 
 
 def abrir_dialog_editar_orador_arranjo(
@@ -3759,7 +4296,7 @@ def abrir_seletor_oradores(
     area_novo = ft.Column(
         [
             campo_nome_novo,
-            ft.Row([campo_categoria_novo, campo_congregacao_novo], spacing=12),
+            linha_campos(campo_categoria_novo, campo_congregacao_novo),
         ],
         spacing=12,
         tight=True,
@@ -3955,7 +4492,7 @@ def abrir_seletor_oradores(
                         conteudo,
                         spacing=12,
                         tight=True,
-                        width=560,
+                        width=_largura_dialog(page, 560),
                         scroll=ft.ScrollMode.AUTO,
                     ),
                     padding=ft.Padding.only(top=8),
@@ -4069,20 +4606,27 @@ def abrir_dialog_selecao_exportacao_png(
             return
 
         try:
-            pasta = await file_picker.get_directory_path(
-                dialog_title="Escolha a pasta para salvar a imagem",
-                initial_directory=str(Path("exports").resolve()),
-            )
-            if not pasta:
-                return
+            if eh_mobile():
+                pasta = None  # gera em exports/ e depois oferece "salvar em..."
+            else:
+                pasta = await file_picker.get_directory_path(
+                    dialog_title="Escolha a pasta para salvar a imagem",
+                    initial_directory=str(EXPORTS_DIR.resolve()),
+                )
+                if not pasta:
+                    return
 
-            caminho, erro = gerar_png_oradores(
-                arranjo,
-                reunioes,
-                selecionados,
-                pasta_destino=pasta,
-                titulo_secao=titulo_secao,
-                prefixo_arquivo=prefixo_arquivo,
+            caminho, erro = executar_com_progresso(
+                page,
+                "Gerando imagem...",
+                lambda: gerar_png_oradores(
+                    arranjo,
+                    reunioes,
+                    selecionados,
+                    pasta_destino=pasta,
+                    titulo_secao=titulo_secao,
+                    prefixo_arquivo=prefixo_arquivo,
+                ),
             )
             if erro:
                 texto_erro.value = erro
@@ -4091,12 +4635,13 @@ def abrir_dialog_selecao_exportacao_png(
                 return
 
             fechar()
-            abrir_pasta_do_arquivo(caminho)
-            mostrar_aviso(
-                page,
-                "Imagem exportada",
-                f"A imagem foi salva em:\n{caminho}",
-            )
+            entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
+            if not eh_mobile():
+                mostrar_aviso(
+                    page,
+                    "Imagem exportada",
+                    f"A imagem foi salva em:\n{caminho}",
+                )
         except Exception as exc:
             texto_erro.value = f"Não foi possível gerar a imagem. Detalhes: {exc}"
             texto_erro.visible = True
@@ -4126,7 +4671,7 @@ def abrir_dialog_selecao_exportacao_png(
                     ],
                     spacing=0,
                     tight=True,
-                    width=520,
+                    width=_largura_dialog(page, 520),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -4145,55 +4690,34 @@ def abrir_dialog_selecao_exportacao_png(
     page.update()
 
 
-def _chave_data_br(data_str: str) -> tuple[str, str, str]:
-    return (data_str[6:10], data_str[3:5], data_str[0:2])
-
-
 def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
     """Preenche as semanas sem presidente do mês por rodízio justo.
 
-    Para cada data vazia, escolhe quem presidiu há mais tempo (ou nunca),
-    desempatando pela ordem do rodízio. Assim respeita a sequência inicial
-    quando está tudo vazio, mas se adapta a mudanças manuais — evitando
-    repetir alguém recém-designado. Pula datas especiais e respeita as
-    atribuições já feitas. Retorna quantas semanas foram preenchidas.
+    Carrega o cadastro, as datas especiais e o histórico, delega a decisão para
+    ``servicos.escolher_rodizio_presidentes`` (lógica pura, testada) e persiste
+    as escolhas. Retorna quantas semanas foram preenchidas.
     """
     cadastro = listar_presidentes_cadastro()
     if not cadastro:
         return 0
-    ordem_pos = {item["id"]: indice for indice, item in enumerate(cadastro)}
-    ids = [item["id"] for item in cadastro]
 
-    especiais = listar_datas_especiais_por_ano(ano)
     datas = _semanas_reuniao_mes(ano, mes)
     if not datas:
         return 0
 
-    # Histórico completo (todos os anos), como {chave ordenável: presidente_id}
-    designacoes = {
-        _chave_data_br(data_str): pid
-        for data_str, pid in carregar_todas_designacoes_presidente().items()
-    }
+    especiais = set(listar_datas_especiais_por_ano(ano))
+    designacoes = carregar_todas_designacoes_presidente()
+    datas_alvo = [_formatar_data_arranjo(data_ref) for data_ref in datas]
 
-    preenchidas = 0
-    for data_ref in datas:
-        data_str = _formatar_data_arranjo(data_ref)
-        chave = _chave_data_br(data_str)
-        if data_str in especiais or chave in designacoes:
-            continue
-
-        # Última vez que cada candidato presidiu antes desta data
-        ultima: dict[int, tuple] = {}
-        for k, pid in designacoes.items():
-            if k < chave and pid in ordem_pos and k > ultima.get(pid, ()):
-                ultima[pid] = k
-
-        # Quem presidiu há mais tempo (ou nunca); desempate pela ordem do rodízio
-        escolhido = min(ids, key=lambda pid: (ultima.get(pid, ()), ordem_pos[pid]))
-        salvar_presidente(data_str, escolhido)
-        designacoes[chave] = escolhido
-        preenchidas += 1
-    return preenchidas
+    escolhas = escolher_rodizio_presidentes(
+        [item["id"] for item in cadastro],
+        datas_alvo,
+        especiais,
+        designacoes,
+    )
+    for data_str, presidente_id in escolhas:
+        salvar_presidente(data_str, presidente_id)
+    return len(escolhas)
 
 
 def abrir_dialog_gerenciar_tipos_evento(
@@ -4275,7 +4799,7 @@ def abrir_dialog_gerenciar_tipos_evento(
                     ],
                     spacing=8,
                     tight=True,
-                    width=420,
+                    width=_largura_dialog(page, 420),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -4418,18 +4942,40 @@ def abrir_dialog_data_especial(
             content=ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row(
+                        # No celular, Data e Tipo empilhados (lado a lado com o
+                        # botão de engrenagem sobrava só um filete para o valor).
+                        *(
                             [
                                 campo_data,
-                                campo_tipo,
-                                ft.IconButton(
-                                    icon=ft.Icons.SETTINGS_OUTLINED,
-                                    tooltip="Gerenciar tipos de evento",
-                                    on_click=abrir_gerenciar_tipos,
+                                ft.Row(
+                                    [
+                                        campo_tipo,
+                                        ft.IconButton(
+                                            icon=ft.Icons.SETTINGS_OUTLINED,
+                                            tooltip="Gerenciar tipos de evento",
+                                            on_click=abrir_gerenciar_tipos,
+                                        ),
+                                    ],
+                                    spacing=4,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
-                            ],
-                            spacing=12,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ]
+                            if eh_mobile()
+                            else [
+                                ft.Row(
+                                    [
+                                        campo_data,
+                                        campo_tipo,
+                                        ft.IconButton(
+                                            icon=ft.Icons.SETTINGS_OUTLINED,
+                                            tooltip="Gerenciar tipos de evento",
+                                            on_click=abrir_gerenciar_tipos,
+                                        ),
+                                    ],
+                                    spacing=12,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                            ]
                         ),
                         campo_orador,
                         campo_tema,
@@ -4446,7 +4992,7 @@ def abrir_dialog_data_especial(
                     ],
                     spacing=12,
                     tight=True,
-                    width=520,
+                    width=_largura_dialog(page, 520),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -4460,7 +5006,64 @@ def abrir_dialog_data_especial(
 
 
 async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
-    """Gera o PNG da designação enviada e oferece compartilhar no WhatsApp."""
+    """Oferece salvar ou enviar por WhatsApp a imagem da designação.
+
+    No celular a imagem só é gerada quando o usuário escolhe uma ação — sem
+    diálogo intermediário mostrando o caminho interno do arquivo.
+    """
+    if eh_mobile():
+        def fechar_dialog(_=None):
+            page.pop_dialog()
+
+        async def _salvar():
+            caminho, erro = gerar_png_designacao_envio(designacao)
+            if erro:
+                mostrar_aviso(page, "Erro ao gerar imagem", erro)
+                return
+            fechar_dialog()
+            entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
+
+        async def _enviar_whatsapp():
+            caminho, erro = gerar_png_designacao_envio(designacao)
+            if erro:
+                mostrar_aviso(page, "Erro ao gerar imagem", erro)
+                return
+            fechar_dialog()
+            if _share_global is not None:
+                try:
+                    await _share_global.share_files([ft.ShareFile.from_path(caminho)])
+                except Exception as exc:  # noqa: BLE001
+                    mostrar_aviso(page, "Não foi possível compartilhar", f"Detalhes: {exc}")
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Enviar designação"),
+                content=ft.Text(
+                    "Gere a imagem da designação para salvar ou enviar pelo WhatsApp.",
+                    size=13,
+                    color=TEXTO_SECUNDARIO,
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=fechar_dialog),
+                    ft.OutlinedButton(
+                        "Salvar arquivo",
+                        icon=ft.Icons.SAVE_ALT,
+                        on_click=lambda _: page.run_task(_salvar),
+                    ),
+                    ft.FilledButton(
+                        "Enviar pelo WhatsApp",
+                        icon=ft.Icons.CHAT,
+                        style=ft.ButtonStyle(bgcolor="#25D366", color="#FFFFFF"),
+                        on_click=lambda _: page.run_task(_enviar_whatsapp),
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+        page.update()
+        return
+
     try:
         caminho, erro = gerar_png_designacao_envio(designacao)
         if erro:
@@ -4491,6 +5094,23 @@ async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
                 f"☎️ *Contato:* {contato}\n\n"
                 f"_Enviado via Gestão de Arranjo_"
             )
+            # No celular: compartilhamento nativo somente com a IMAGEM —
+            # sem texto junto (a imagem já traz todas as informações).
+            if eh_mobile() and _share_global is not None:
+                async def _compartilhar():
+                    try:
+                        await _share_global.share_files(
+                            [ft.ShareFile.from_path(caminho)],
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        mostrar_aviso(page, "Não foi possível compartilhar",
+                                      f"Detalhes: {exc}")
+
+                page.run_task(_compartilhar)
+                fechar_dialog()
+                return
+
+            # No PC: abre o WhatsApp Web com o texto (a imagem é anexada à parte).
             config = carregar_configuracao()
             tel = config.get("telefone_coordenador", "")
             if tel:
@@ -4501,7 +5121,7 @@ async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
             fechar_dialog()
 
         def abrir_pasta(_=None):
-            abrir_pasta_do_arquivo(caminho)
+            entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
             fechar_dialog()
 
         page.show_dialog(
@@ -4511,7 +5131,7 @@ async def _dialog_whatsapp_designacao_envio(page: ft.Page, designacao: dict):
                 content=ft.Text(f"A imagem foi salva em:\n{caminho}", size=13, color=TEXTO_SECUNDARIO),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar_dialog),
-                    ft.OutlinedButton("Abrir pasta", icon=ft.Icons.FOLDER_OPEN, on_click=abrir_pasta),
+                    ft.OutlinedButton(_rotulo_entrega(), icon=_icone_entrega(), on_click=abrir_pasta),
                     ft.FilledButton(
                         "Enviar pelo WhatsApp",
                         icon=ft.Icons.CHAT,
@@ -4645,6 +5265,68 @@ def abrir_dialog_oradores_mes(
                 if parte
             ) or "sem orador nem presidente"
 
+            chip_tipo_especial = ft.Container(
+                content=ft.Text(
+                    registro["tipo"],
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=COR_AVISO,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                bgcolor=ft.Colors.with_opacity(0.13, COR_AVISO),
+                border_radius=8,
+                padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+            )
+            if eh_mobile():
+                # Duas linhas no celular: data + tipo + ações, detalhes abaixo.
+                return ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        registro["data"][:5],
+                                        size=13,
+                                        weight=ft.FontWeight.W_600,
+                                        color=TEXTO_PRIMARIO,
+                                    ),
+                                    ft.Container(content=chip_tipo_especial, expand=True,
+                                                 alignment=ft.Alignment.CENTER_LEFT),
+                                    ft.IconButton(
+                                        icon=ft.Icons.EDIT_OUTLINED,
+                                        icon_size=17,
+                                        tooltip="Editar",
+                                        icon_color=COR_DESTAQUE,
+                                        on_click=editar,
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.DELETE_OUTLINE,
+                                        icon_size=17,
+                                        tooltip="Excluir",
+                                        icon_color=COR_ERRO,
+                                        on_click=excluir,
+                                    ),
+                                ],
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Text(
+                                detalhes,
+                                size=12,
+                                color=TEXTO_SECUNDARIO,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                    ),
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+                    border=ft.Border.all(1, BORDA_SUAVE),
+                    border_radius=8,
+                )
+
             return ft.Container(
                 content=ft.Row(
                     [
@@ -4655,17 +5337,7 @@ def abrir_dialog_oradores_mes(
                             color=TEXTO_PRIMARIO,
                             width=52,
                         ),
-                        ft.Container(
-                            content=ft.Text(
-                                registro["tipo"],
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                color=COR_AVISO,
-                            ),
-                            bgcolor=ft.Colors.with_opacity(0.13, COR_AVISO),
-                            border_radius=8,
-                            padding=ft.Padding.symmetric(horizontal=9, vertical=3),
-                        ),
+                        chip_tipo_especial,
                         ft.Text(
                             detalhes,
                             size=12,
@@ -4744,31 +5416,48 @@ def abrir_dialog_oradores_mes(
                 campo.value = None
                 page.update()
 
-            linhas.append(
-                ft.Row(
-                    [
-                        ft.Container(
-                            content=ft.Text(
-                                f"{_rotulo_weekday(data_ref.weekday())}, "
-                                f"{data_ref.day:02d}/{data_ref.month:02d}",
-                                size=13,
-                                weight=ft.FontWeight.W_600,
-                            ),
-                            width=170,
-                        ),
-                        campo,
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINE,
-                            icon_size=18,
-                            icon_color=COR_ERRO,
-                            tooltip="Remover presidente desta data",
-                            on_click=ao_remover,
-                        ),
-                    ],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                )
+            rotulo_data = ft.Text(
+                f"{_rotulo_weekday(data_ref.weekday())}, "
+                f"{data_ref.day:02d}/{data_ref.month:02d}",
+                size=13,
+                weight=ft.FontWeight.W_600,
             )
+            botao_remover = ft.IconButton(
+                icon=ft.Icons.DELETE_OUTLINE,
+                icon_size=18,
+                icon_color=COR_ERRO,
+                tooltip="Remover presidente desta data",
+                on_click=ao_remover,
+            )
+            if eh_mobile():
+                # Data em cima, dropdown em largura total embaixo — com a
+                # data ao lado o dropdown ficava estreito demais para o nome.
+                linhas.append(
+                    ft.Column(
+                        [
+                            rotulo_data,
+                            ft.Row(
+                                [campo, botao_remover],
+                                spacing=4,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                    )
+                )
+            else:
+                linhas.append(
+                    ft.Row(
+                        [
+                            ft.Container(content=rotulo_data, width=170),
+                            campo,
+                            botao_remover,
+                        ],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    )
+                )
         lista_presidentes.controls = linhas
 
     def atualizar_listas():
@@ -4837,16 +5526,48 @@ def abrir_dialog_oradores_mes(
         fechar()
         on_excluir_arranjo(arranjo_id)
 
-    def _cabecalho_secao(titulo: str, on_exportar, on_adicionar) -> ft.Row:
+    def _cabecalho_secao(titulo: str, on_exportar, on_adicionar) -> ft.Control:
+        texto = ft.Text(
+            titulo, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+            expand=True, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        botao_exportar = ft.OutlinedButton(
+            content="Exportar PNG", icon=ft.Icons.IMAGE_OUTLINED, on_click=on_exportar,
+        )
+        botao_adicionar = ft.FilledButton(
+            content="Adicionar", icon=ft.Icons.ADD, on_click=on_adicionar,
+        )
+        if eh_mobile():
+            # No celular título e botões não cabem lado a lado: empilha.
+            return ft.Column(
+                [
+                    texto,
+                    ft.Row([botao_exportar, botao_adicionar], spacing=8, wrap=True),
+                ],
+                spacing=8,
+                tight=True,
+            )
+        return ft.Row(
+            [texto, botao_exportar, botao_adicionar],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _cabecalho_secao_desc(descricao: str, *botoes: ft.Control) -> ft.Control:
+        """Cabeçalho com descrição longa + botões. No celular empilha."""
+        if eh_mobile():
+            return ft.Column(
+                [
+                    ft.Text(descricao, size=13, color=TEXTO_SECUNDARIO),
+                    ft.Row(list(botoes), spacing=8, wrap=True),
+                ],
+                spacing=8,
+                tight=True,
+            )
         return ft.Row(
             [
-                ft.Text(titulo, size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO, expand=True),
-                ft.OutlinedButton(
-                    content="Exportar PNG",
-                    icon=ft.Icons.IMAGE_OUTLINED,
-                    on_click=on_exportar,
-                ),
-                ft.FilledButton(content="Adicionar", icon=ft.Icons.ADD, on_click=on_adicionar),
+                ft.Text(descricao, size=13, color=TEXTO_SECUNDARIO, expand=True),
+                *botoes,
             ],
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -4918,27 +5639,18 @@ def abrir_dialog_oradores_mes(
 
     secao_presidentes = ft.Column(
         [
-            ft.Row(
-                [
-                    ft.Text(
-                        "Quem preside a reunião de fim de semana em cada data",
-                        size=13,
-                        color=TEXTO_SECUNDARIO,
-                        expand=True,
-                    ),
-                    ft.TextButton(
-                        content="Refazer",
-                        icon=ft.Icons.RESTART_ALT,
-                        on_click=refazer_rodizio,
-                    ),
-                    ft.OutlinedButton(
-                        content="Preencher em rodízio",
-                        icon=ft.Icons.AUTORENEW,
-                        on_click=preencher_rodizio,
-                    ),
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            _cabecalho_secao_desc(
+                "Quem preside a reunião de fim de semana em cada data",
+                ft.TextButton(
+                    content="Refazer",
+                    icon=ft.Icons.RESTART_ALT,
+                    on_click=refazer_rodizio,
+                ),
+                ft.OutlinedButton(
+                    content="Preencher em rodízio",
+                    icon=ft.Icons.AUTORENEW,
+                    on_click=preencher_rodizio,
+                ),
             ),
             ft.Container(height=12),
             lista_presidentes,
@@ -4953,23 +5665,14 @@ def abrir_dialog_oradores_mes(
 
     secao_especiais = ft.Column(
         [
-            ft.Row(
-                [
-                    ft.Text(
-                        "Assembleias, congressos, visitas e outros eventos que "
-                        "substituem a reunião normal",
-                        size=13,
-                        color=TEXTO_SECUNDARIO,
-                        expand=True,
-                    ),
-                    ft.FilledButton(
-                        content="Adicionar",
-                        icon=ft.Icons.ADD,
-                        on_click=abrir_adicionar_especial,
-                    ),
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            _cabecalho_secao_desc(
+                "Assembleias, congressos, visitas e outros eventos que "
+                "substituem a reunião normal",
+                ft.FilledButton(
+                    content="Adicionar",
+                    icon=ft.Icons.ADD,
+                    on_click=abrir_adicionar_especial,
+                ),
             ),
             ft.Container(height=12),
             lista_especiais,
@@ -4979,25 +5682,84 @@ def abrir_dialog_oradores_mes(
         visible=False,
     )
 
-    def mudar_aba(e):
-        selecionada = e.control.selected[0] if e.control.selected else "recebidos"
+    def aplicar_aba(selecionada: str):
         secao_recebidos.visible = selecionada == "recebidos"
         secao_enviados.visible = selecionada == "enviados"
         secao_presidentes.visible = selecionada == "presidentes"
         secao_especiais.visible = selecionada == "especiais"
-        page.update()
 
-    alternador_abas = ft.SegmentedButton(
-        selected=["recebidos"],
-        allow_empty_selection=False,
-        on_change=mudar_aba,
-        segments=[
-            ft.Segment(value="recebidos", label=ft.Text("Oradores")),
-            ft.Segment(value="enviados", label=ft.Text("Designações")),
-            ft.Segment(value="presidentes", label=ft.Text("Presidentes")),
-            ft.Segment(value="especiais", label=ft.Text("Especiais")),
-        ],
-    )
+    ROTULOS_ABAS = [
+        ("recebidos", "Oradores"),
+        ("enviados", "Designações"),
+        ("presidentes", "Presidentes"),
+        ("especiais", "Especiais"),
+    ]
+
+    if eh_mobile():
+        # As 4 abas não cabem lado a lado no celular (o SegmentedButton quebra
+        # o texto letra a letra) — usa chips numa linha com rolagem horizontal.
+        chips_abas: dict[str, tuple[ft.Container, ft.Text]] = {}
+
+        def selecionar_aba(valor: str):
+            aplicar_aba(valor)
+            for v, (chip, texto) in chips_abas.items():
+                ativo = v == valor
+                chip.bgcolor = (
+                    ft.Colors.with_opacity(0.18, COR_DESTAQUE_CLARA)
+                    if ativo else ft.Colors.TRANSPARENT
+                )
+                chip.border = ft.Border.all(
+                    1, COR_DESTAQUE if ativo else BORDA_SUAVE
+                )
+                texto.color = COR_DESTAQUE_SUAVE if ativo else TEXTO_SECUNDARIO
+                texto.weight = ft.FontWeight.W_700 if ativo else ft.FontWeight.W_500
+            page.update()
+
+        def _chip_aba(valor: str, rotulo: str) -> ft.Container:
+            ativo = valor == "recebidos"
+            texto = ft.Text(
+                rotulo,
+                size=13,
+                no_wrap=True,
+                color=COR_DESTAQUE_SUAVE if ativo else TEXTO_SECUNDARIO,
+                weight=ft.FontWeight.W_700 if ativo else ft.FontWeight.W_500,
+            )
+            chip = ft.Container(
+                content=texto,
+                padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+                border_radius=18,
+                bgcolor=(
+                    ft.Colors.with_opacity(0.18, COR_DESTAQUE_CLARA)
+                    if ativo else ft.Colors.TRANSPARENT
+                ),
+                border=ft.Border.all(1, COR_DESTAQUE if ativo else BORDA_SUAVE),
+                on_click=lambda e, v=valor: selecionar_aba(v),
+                ink=True,
+            )
+            chips_abas[valor] = (chip, texto)
+            return chip
+
+        alternador_abas = ft.Row(
+            [_chip_aba(valor, rotulo) for valor, rotulo in ROTULOS_ABAS],
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+            tight=True,
+        )
+    else:
+        def mudar_aba(e):
+            selecionada = e.control.selected[0] if e.control.selected else "recebidos"
+            aplicar_aba(selecionada)
+            page.update()
+
+        alternador_abas = ft.SegmentedButton(
+            selected=["recebidos"],
+            allow_empty_selection=False,
+            on_change=mudar_aba,
+            segments=[
+                ft.Segment(value=valor, label=ft.Text(rotulo))
+                for valor, rotulo in ROTULOS_ABAS
+            ],
+        )
 
     dialog_mes = ft.AlertDialog(
         modal=True,
@@ -5025,18 +5787,22 @@ def abrir_dialog_oradores_mes(
                 ],
                 spacing=0,
                 tight=True,
-                width=LARGURA_DIALOG_MES,
+                width=_largura_dialog(page, LARGURA_DIALOG_MES),
                 scroll=ft.ScrollMode.AUTO,
             ),
             height=altura_conteudo,
             padding=ft.Padding.symmetric(horizontal=4, vertical=8),
         ),
-        content_padding=ft.Padding.symmetric(horizontal=32, vertical=24),
-        inset_padding=ft.Padding.all(40),
+        content_padding=ft.Padding.symmetric(
+            horizontal=12 if eh_mobile() else 32, vertical=16 if eh_mobile() else 24
+        ),
+        inset_padding=ft.Padding.all(12 if eh_mobile() else 40),
         actions=[
             _criar_rodape_dialog_mes(fechar, editar_arranjo, excluir_arranjo),
         ],
-        actions_padding=ft.Padding.symmetric(horizontal=32, vertical=16),
+        actions_padding=ft.Padding.symmetric(
+            horizontal=12 if eh_mobile() else 32, vertical=16
+        ),
     )
     preencher_listas()
     page.show_dialog(dialog_mes)
@@ -5188,16 +5954,16 @@ def abrir_dialog_arranjo(
             content=ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row([campo_ano, campo_mes], spacing=12),
+                        linha_campos(campo_ano, campo_mes),
                         campo_congregacao,
-                        ft.Row([campo_responsavel, campo_telefone], spacing=12),
-                        ft.Row([campo_dia, campo_horario], spacing=12),
+                        linha_campos(campo_responsavel, campo_telefone),
+                        linha_campos(campo_dia, campo_horario),
                         campo_endereco,
                         texto_erro,
                     ],
                     spacing=12,
                     tight=True,
-                    width=520,
+                    width=_largura_dialog(page, 520),
                     scroll=ft.ScrollMode.AUTO,
                 ),
                 padding=ft.Padding.only(top=8),
@@ -5279,7 +6045,9 @@ def _criar_card_mes_programacao(
             bgcolor=ft.Colors.TRANSPARENT,
             border=ft.Border.all(1, BORDA_SUAVE),
             border_radius=14,
-            expand=True,
+            # No celular o card fica um por linha dentro de coluna rolável;
+            # expand ali seria vertical (e inválido em scroll).
+            expand=None if eh_mobile() else True,
             on_click=lambda e: on_cadastrar(mes),
             ink=True,
         )
@@ -5346,7 +6114,7 @@ def _criar_card_mes_programacao(
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=14,
         shadow=_sombra_card(0.2),
-        expand=True,
+        expand=None if eh_mobile() else True,
         on_click=lambda e: on_abrir(dict(arranjo)),
         ink=True,
         tooltip="Clique para abrir o mês",
@@ -5395,30 +6163,37 @@ def tela_programacao(
         contagens_ano = contar_designacoes_por_mes(ano)
         especiais = listar_datas_especiais_por_ano(ano)
 
-        linhas: list[ft.Control] = []
-        for indice in range(0, len(MESES_ANO), 2):
-            par = MESES_ANO[indice : indice + 2]
-            linhas.append(
-                ft.Row(
-                    [
-                        _criar_card_mes_programacao(
-                            rotulo,
-                            numero_mes,
-                            mapa.get(numero_mes),
-                            _resumo_mes_programacao(
-                                ano, numero_mes, recebidos, presidentes, contagens_ano, especiais
-                            ),
-                            on_abrir=abrir_oradores_mes,
-                            on_cadastrar=cadastrar_mes,
-                        )
-                        for numero_mes, rotulo in par
-                    ],
-                    spacing=16,
-                    expand=True,
-                )
+        def card_mes(numero_mes: int, rotulo: str) -> ft.Control:
+            return _criar_card_mes_programacao(
+                rotulo,
+                numero_mes,
+                mapa.get(numero_mes),
+                _resumo_mes_programacao(
+                    ano, numero_mes, recebidos, presidentes, contagens_ano, especiais
+                ),
+                on_abrir=abrir_oradores_mes,
+                on_cadastrar=cadastrar_mes,
             )
-            if indice + 2 < len(MESES_ANO):
-                linhas.append(ft.Container(height=16))
+
+        linhas: list[ft.Control] = []
+        if eh_mobile():
+            # Um card por linha: com dois lado a lado o nome do mês quebrava.
+            for posicao, (numero_mes, rotulo) in enumerate(MESES_ANO):
+                linhas.append(card_mes(numero_mes, rotulo))
+                if posicao < len(MESES_ANO) - 1:
+                    linhas.append(ft.Container(height=12))
+        else:
+            for indice in range(0, len(MESES_ANO), 2):
+                par = MESES_ANO[indice : indice + 2]
+                linhas.append(
+                    ft.Row(
+                        [card_mes(numero_mes, rotulo) for numero_mes, rotulo in par],
+                        spacing=16,
+                        expand=True,
+                    )
+                )
+                if indice + 2 < len(MESES_ANO):
+                    linhas.append(ft.Container(height=16))
 
         texto_contagem.value = (
             f"{len(arranjos)} de {len(MESES_ANO)} meses cadastrados em {ano}"
@@ -5585,9 +6360,9 @@ def tela_ajustes(
                 ft.Container(height=8),
                 campo_nome,
                 campo_endereco,
-                ft.Row([campo_cidade, campo_cep], spacing=12),
-                ft.Row([campo_coordenador, campo_telefone], spacing=12),
-                ft.Row([campo_dia, campo_horario], spacing=12),
+                linha_campos(campo_cidade, campo_cep),
+                linha_campos(campo_coordenador, campo_telefone),
+                linha_campos(campo_dia, campo_horario),
                 campo_circuito,
                 ft.Container(height=8),
                 ft.Row(
@@ -5600,6 +6375,7 @@ def tela_ajustes(
                         texto_sucesso,
                     ],
                     spacing=16,
+                    wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Divider(height=1, color=BORDA_SUAVE),
@@ -5623,12 +6399,12 @@ def tela_ajustes(
             spacing=16,
             tight=True,
         ),
-        padding=28,
+        padding=16 if eh_mobile() else 28,
         bgcolor=FUNDO_CARD,
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=14,
         shadow=_sombra_card(),
-        width=560,
+        width=_largura_dialog(page, 560),
     )
 
     def exportar_backup_click(_=None):
@@ -5642,7 +6418,7 @@ def tela_ajustes(
             page.pop_dialog()
 
         def abrir_pasta(_=None):
-            abrir_pasta_do_arquivo(caminho)
+            entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
             fechar()
 
         resumo_contagens = (
@@ -5671,7 +6447,7 @@ def tela_ajustes(
                 ),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar),
-                    ft.FilledButton("Abrir pasta", icon=ft.Icons.FOLDER_OPEN, on_click=abrir_pasta),
+                    ft.FilledButton(_rotulo_entrega(), icon=_icone_entrega(), on_click=abrir_pasta),
                 ],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
@@ -5724,7 +6500,9 @@ def tela_ajustes(
 
     def baixar_modelo_click(_=None):
         try:
-            caminho = gerar_planilha_modelo()
+            caminho = executar_com_progresso(
+                page, "Gerando planilha...", gerar_planilha_modelo
+            )
         except Exception as exc:
             mostrar_aviso(page, "Erro ao gerar", f"Não foi possível criar a planilha: {exc}")
             return
@@ -5733,7 +6511,7 @@ def tela_ajustes(
             page.pop_dialog()
 
         def abrir_pasta(_=None):
-            abrir_pasta_do_arquivo(caminho)
+            entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
             fechar()
 
         page.show_dialog(
@@ -5749,7 +6527,7 @@ def tela_ajustes(
                 ),
                 actions=[
                     ft.TextButton("Fechar", on_click=fechar),
-                    ft.FilledButton("Abrir pasta", icon=ft.Icons.FOLDER_OPEN, on_click=abrir_pasta),
+                    ft.FilledButton(_rotulo_entrega(), icon=_icone_entrega(), on_click=abrir_pasta),
                 ],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
@@ -5783,7 +6561,11 @@ def tela_ajustes(
         if not arquivos:
             return
         try:
-            resumo = importar_planilha_dados(arquivos[0].path)
+            resumo = executar_com_progresso(
+                page,
+                "Importando planilha...",
+                lambda: importar_planilha_dados(arquivos[0].path),
+            )
         except Exception as exc:
             mostrar_aviso(page, "Não foi possível importar", str(exc))
             return
@@ -5823,17 +6605,18 @@ def tela_ajustes(
                         ),
                     ],
                     spacing=12,
+                    wrap=True,
                 ),
             ],
             spacing=0,
             tight=True,
         ),
-        padding=28,
+        padding=16 if eh_mobile() else 28,
         bgcolor=FUNDO_CARD,
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=14,
         shadow=_sombra_card(),
-        width=560,
+        width=_largura_dialog(page, 560),
     )
 
     secao_backup = ft.Container(
@@ -5865,18 +6648,27 @@ def tela_ajustes(
                         ),
                     ],
                     spacing=12,
+                    wrap=True,
                 ),
             ],
             spacing=0,
             tight=True,
         ),
-        padding=28,
+        padding=16 if eh_mobile() else 28,
         bgcolor=FUNDO_CARD,
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=14,
         shadow=_sombra_card(),
-        width=560,
+        width=_largura_dialog(page, 560),
     )
+
+    painel_uso = criar_painel_informativo(
+        "Uso nas exportações",
+        "Estas informações serão utilizadas na geração do PDF de envio "
+        "de discursos públicos ao superintendente de circuito.",
+    )
+    if eh_mobile():
+        painel_uso.width = _largura_dialog(page, 560)
 
     return ft.Column(
         [
@@ -5884,22 +6676,126 @@ def tela_ajustes(
                 "Ajustes",
                 "Dados da congregação, presidentes, backup e exportações",
             ),
-            ft.Container(height=24),
+            ft.Container(height=12 if eh_mobile() else 24),
             formulario,
             ft.Container(height=24),
             secao_backup,
             ft.Container(height=24),
             secao_planilha,
             ft.Container(height=24),
-            criar_painel_informativo(
-                "Uso nas exportações",
-                "Estas informações serão utilizadas na geração do PDF de envio "
-                "de discursos públicos ao superintendente de circuito.",
-            ),
+            painel_uso,
         ],
         spacing=0,
         expand=True,
         scroll=ft.ScrollMode.AUTO,
+        # No celular os cards têm largura fixa; centralizar deixa as margens
+        # iguais dos dois lados.
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER if eh_mobile() else ft.CrossAxisAlignment.START,
+    )
+
+
+def _preview_quadro_mobile(
+    ano: int, mes: int, dados: list[dict], nome_congregacao: str
+) -> ft.Control:
+    """Prévia do quadro em componentes nativos do Flet (texto grande e legível
+    no celular). A imagem/PDF fiéis continuam disponíveis em "Exportar PDF" —
+    aqui o objetivo é só conseguir LER quem está designado em cada semana, algo
+    impossível encaixando a tabela larga do PDF na largura de um celular.
+    """
+    # Mesmas cores e estrutura do PDF/imagem (gerar_preview_quadro_mes): faixas
+    # vermelha/cinza com texto PRETO, Data e Presidente lado a lado, e a grade
+    # preta aparecendo nos vãos de 1px entre as células.
+    COR_RED = "#C84040"
+    COR_GRAY = "#757070"
+    BRANCO = "#FFFFFF"
+    PRETO = "#000000"
+    GRADE = "#000000"
+
+    def faixa(texto: str, cor: str, tamanho: int = 13):
+        return ft.Container(
+            content=ft.Text(
+                texto, size=tamanho, weight=ft.FontWeight.W_700,
+                color=PRETO, text_align=ft.TextAlign.CENTER,
+            ),
+            bgcolor=cor,
+            padding=ft.Padding.symmetric(horizontal=10, vertical=7),
+            alignment=ft.Alignment.CENTER,
+        )
+
+    def linha_data_presidente(rotulo_data: str, presidente: str):
+        # Data (vermelho) à esquerda e Presidente (cinza) à direita, ~50/50,
+        # exatamente como a primeira linha de cada semana no PDF.
+        texto_pres = f"PRESIDENTE:  {presidente}" if presidente else "PRESIDENTE:"
+        # Altura fixa nas duas células para elas ficarem do mesmo tamanho SEM
+        # usar CrossAxisAlignment.STRETCH (que, num Row dentro de coluna
+        # rolável, gera erro de layout e deixa a prévia em branco). Presidente
+        # em até 2 linhas para o nome não ser cortado na metade da largura.
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(
+                        rotulo_data, size=12, weight=ft.FontWeight.W_700,
+                        color=PRETO, text_align=ft.TextAlign.CENTER,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    bgcolor=COR_RED, alignment=ft.Alignment.CENTER,
+                    padding=ft.Padding.symmetric(horizontal=6),
+                    height=54, expand=True,
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        texto_pres, size=12, weight=ft.FontWeight.W_600, color=PRETO,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    bgcolor=COR_GRAY, alignment=ft.Alignment.CENTER_LEFT,
+                    padding=ft.Padding.symmetric(horizontal=8),
+                    height=54, expand=True,
+                ),
+            ],
+            spacing=1,
+            tight=True,
+        )
+
+    def linha_campo(rotulo: str, valor: str):
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text(rotulo, size=13, weight=ft.FontWeight.W_700, color=PRETO,
+                            width=110),
+                    ft.Text(valor or "", size=14, color=PRETO, expand=True),
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            bgcolor=BRANCO,
+            padding=ft.Padding.symmetric(horizontal=10, vertical=9),
+        )
+
+    itens: list[ft.Control] = [
+        faixa(f"Conferência Pública - {nome_congregacao}", COR_RED, tamanho=14),
+        faixa(f"{NOMES_MESES[mes]}/{ano}", COR_GRAY, tamanho=13),
+    ]
+    for indice, item in enumerate(dados):
+        data = item.get("data")
+        dia = data.day if hasattr(data, "day") else ""
+        presidente = item.get("presidente") or ""
+        itens.append(
+            linha_data_presidente(f"SÁBADO, {dia} DE {NOMES_MESES[mes].upper()}", presidente)
+        )
+        itens.append(linha_campo("Orador:", item.get("orador")))
+        itens.append(linha_campo("Tema:", item.get("tema")))
+        itens.append(linha_campo("Congregação:", item.get("congregacao")))
+        if indice < len(dados) - 1:
+            # Faixa cinza separando as semanas, como no PDF.
+            itens.append(ft.Container(bgcolor=COR_GRAY, height=10))
+
+    return ft.Container(
+        content=ft.Column(itens, spacing=1, tight=True),
+        bgcolor=GRADE,
+        border=ft.Border.all(1, GRADE),
+        border_radius=6,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        margin=ft.Margin.only(bottom=16),
     )
 
 
@@ -5926,31 +6822,84 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
         nome_congregacao = config.get("nome_congregacao") or "Minha congregação"
         inicio = estado["mes_inicial"]
         blocos = []
-        for mes in (inicio, inicio + 1):
-            dados = carregar_dados_mes_quadro(estado["ano"], mes)
-            png_bytes = gerar_preview_quadro_mes(estado["ano"], mes, dados, nome_congregacao)
+        mobile = eh_mobile()
+        if mobile:
             blocos.append(
-                ft.Container(
-                    content=ft.Image(src=png_bytes, fit=ft.BoxFit.CONTAIN),
-                    padding=ft.Padding.only(bottom=24),
+                ft.Text(
+                    "Prévia dos dois meses. O PDF exportado tem o layout de impressão.",
+                    size=12, color=TEXTO_SECUNDARIO, italic=True,
                 )
             )
-        area_preview.content = ft.Column(blocos, scroll=ft.ScrollMode.AUTO, expand=True)
+        for mes in (inicio, inicio + 1):
+            dados = carregar_dados_mes_quadro(estado["ano"], mes)
+            if mobile:
+                # No celular a tabela larga do PDF fica ilegível ao encaixar na
+                # largura da tela. Mostramos a prévia com componentes nativos
+                # (texto grande de verdade). O PDF exportado é o layout fiel.
+                blocos.append(
+                    _preview_quadro_mobile(estado["ano"], mes, dados, nome_congregacao)
+                )
+            else:
+                png_bytes = gerar_preview_quadro_mes(estado["ano"], mes, dados, nome_congregacao)
+                imagem = ft.Image(src=png_bytes, fit=ft.BoxFit.CONTAIN)
+                blocos.append(
+                    ft.Container(content=imagem, padding=ft.Padding.only(bottom=24))
+                )
+        area_preview.content = ft.Column(
+            blocos,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH if mobile else ft.CrossAxisAlignment.START,
+        )
 
     def exportar(_=None):
         try:
-            caminho, erro = gerar_quadro_anuncios(estado["ano"], estado["mes_inicial"])
+            caminho, erro = executar_com_progresso(
+                page,
+                "Gerando PDF...",
+                lambda: gerar_quadro_anuncios(estado["ano"], estado["mes_inicial"]),
+            )
             if erro:
                 mostrar_aviso(page, "Erro ao gerar PDF", erro)
                 return
-            abrir_arquivo(caminho)
-            mostrar_aviso(
-                page,
-                "PDF gerado com sucesso",
-                f"O quadro de anúncios foi salvo em:\n{caminho}",
-            )
+            entregar_arquivo(page, caminho, abrir_arquivo)
+            if not eh_mobile():
+                mostrar_aviso(
+                    page,
+                    "PDF gerado com sucesso",
+                    f"O quadro de anúncios foi salvo em:\n{caminho}",
+                )
         except Exception as exc:
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
+
+    def abrir_pdf(_=None):
+        # Gera o PDF REAL do quadro e abre a folha do Android para visualizá-lo
+        # num leitor de PDF (zoom/arraste perfeitos, layout exato) — melhor do
+        # que qualquer visualizador que a gente faça dentro do app.
+        try:
+            caminho, erro = executar_com_progresso(
+                page,
+                "Gerando PDF...",
+                lambda: gerar_quadro_anuncios(estado["ano"], estado["mes_inicial"]),
+            )
+            if erro:
+                mostrar_aviso(page, "Erro ao gerar PDF", erro)
+                return
+        except Exception as exc:  # noqa: BLE001
+            mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
+            return
+
+        if _share_global is not None:
+            async def _abrir():
+                try:
+                    await _share_global.share_files([ft.ShareFile.from_path(caminho)])
+                except Exception as exc:  # noqa: BLE001
+                    mostrar_aviso(page, "Não foi possível abrir o PDF", f"Detalhes: {exc}")
+
+            page.run_task(_abrir)
+        else:
+            # Desktop: abre o arquivo direto.
+            entregar_arquivo(page, caminho, abrir_arquivo)
 
     def atualizar(_=None):
         try:
@@ -5994,6 +6943,55 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
 
     montar_preview()
 
+    botao_adicionar_ano = ft.IconButton(
+        icon=ft.Icons.ADD,
+        tooltip="Adicionar ano",
+        on_click=abrir_adicionar_ano,
+    )
+    botao_exportar = ft.FilledButton(
+        "Exportar PDF",
+        icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
+        on_click=exportar,
+    )
+    botao_ver_imagem = ft.OutlinedButton(
+        "Abrir PDF",
+        icon=ft.Icons.OPEN_IN_NEW,
+        on_click=abrir_pdf,
+    )
+
+    if eh_mobile():
+        # Cada seletor em sua própria linha, em largura total: assim "Meses"
+        # mostra "Julho-Agosto" inteiro (antes era cortado por dividir a linha
+        # com o seletor de Ano). Botão de exportar em linha própria.
+        seletor_ano.width = None
+        seletor_ano.expand = True
+        seletor_par.width = None
+        controles = ft.Column(
+            [
+                ft.Row(
+                    [seletor_ano, botao_adicionar_ano],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                seletor_par,
+                ft.Row([botao_exportar, botao_ver_imagem], spacing=8, wrap=True),
+            ],
+            spacing=8,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+        return ft.Column(
+            [
+                criar_cabecalho_tela("Quadro de Anúncios"),
+                ft.Container(height=8),
+                controles,
+                ft.Container(height=8),
+                area_preview,
+            ],
+            spacing=0,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+
     return ft.Column(
         [
             criar_cabecalho_tela(
@@ -6004,18 +7002,10 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
             ft.Row(
                 [
                     seletor_ano,
-                    ft.IconButton(
-                        icon=ft.Icons.ADD,
-                        tooltip="Adicionar ano",
-                        on_click=abrir_adicionar_ano,
-                    ),
+                    botao_adicionar_ano,
                     seletor_par,
                     ft.Container(expand=True),
-                    ft.FilledButton(
-                        "Exportar PDF",
-                        icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
-                        on_click=exportar,
-                    ),
+                    botao_exportar,
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.END,
@@ -6202,7 +7192,7 @@ def abrir_dialog_gerenciar_presidentes(
                     ],
                     spacing=12,
                     tight=True,
-                    width=560,
+                    width=_largura_dialog(page, 560),
                 ),
                 padding=ft.Padding.only(top=8),
             ),
@@ -6296,9 +7286,83 @@ def criar_barra_lateral(
     )
 
 
+def _auto_backup_diario() -> None:
+    """Faz, no máximo, uma cópia de segurança automática por dia.
+
+    Silenciosa e defensiva: nunca interrompe a abertura do app. Não faz backup
+    de banco vazio (instalação nova) e nunca apaga backups existentes — só cria
+    o do dia se ainda não houver. Reaproveita ``exportar_backup`` do database.
+    """
+    try:
+        from armazenamento import BACKUPS_DIR
+
+        hoje = date.today().strftime("%Y-%m-%d")
+        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        ja_tem_hoje = any(
+            arquivo.name.startswith(f"backup_gestao_arranjo_{hoje}")
+            for arquivo in BACKUPS_DIR.glob("*.json")
+        )
+        if ja_tem_hoje:
+            return
+        total = int(carregar_dados("SELECT COUNT(*) AS n FROM oradores")["n"].iloc[0])
+        if total == 0:
+            return
+        exportar_backup()
+    except Exception:  # noqa: BLE001 — backup automático nunca deve quebrar o app
+        pass
+
+
+def _verificar_atualizacao(page: ft.Page) -> None:
+    """Avisa (snackbar) se houver versão mais nova no GitHub. Só no desktop.
+
+    A busca de rede roda fora da thread da UI (``asyncio.to_thread``) e o aviso é
+    exibido pelo laço do Flet — mesmo padrão de ``entregar_arquivo``. Qualquer
+    erro (offline, timeout) é ignorado silenciosamente.
+    """
+    if eh_mobile():
+        return
+
+    async def _checar():
+        import asyncio
+        import json
+        import urllib.request
+
+        def _buscar_tag() -> str:
+            req = urllib.request.Request(
+                URL_API_RELEASE, headers={"Accept": "application/vnd.github+json"}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resposta:
+                dados = json.load(resposta)
+            return (dados.get("tag_name") or "").strip()
+
+        try:
+            tag = await asyncio.to_thread(_buscar_tag)
+        except Exception:  # noqa: BLE001 — offline/erro de rede: ignora
+            return
+        if not ha_versao_mais_nova(tag, VERSAO_APP):
+            return
+        page.show_dialog(
+            ft.SnackBar(
+                content=ft.Text(
+                    f"Nova versão {tag.lstrip('v')} disponível.",
+                    color="#04342C",
+                    weight=ft.FontWeight.W_600,
+                ),
+                bgcolor=COR_DESTAQUE_CLARA,
+                action="Abrir",
+                on_action=lambda _: webbrowser.open(URL_RELEASES),
+                duration=8000,
+            )
+        )
+        page.update()
+
+    page.run_task(_checar)
+
+
 def main(page: ft.Page):
     """Configura a janela e monta o layout principal."""
     garantir_tabelas()
+    _auto_backup_diario()
 
     page.title = "Gestão de Arranjo"
     aplicar_tema(page)
@@ -6350,34 +7414,101 @@ def main(page: ft.Page):
     def navegar(indice: int):
         estado["indice"] = indice
         atualizar_menu_lateral(itens_menu, indice)
+        titulo_topo = estado.get("titulo_topo")
+        if titulo_topo is not None:
+            titulo_topo.value = SECOES[indice]["nome"]
         telas[indice]()
         page.update()
 
-    recarregar = lambda: navegar(estado["indice"])
-
-    barra_lateral = criar_barra_lateral(navegar, itens_menu)
-
-    page.add(
-        ft.Container(
-            content=ft.Row(
-                [
-                    barra_lateral,
-                    area_conteudo,
-                ],
-                expand=True,
-                spacing=0,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
-            expand=True,
-            bgcolor=FUNDO_APP,
-        )
-    )
+    def recarregar():
+        navegar(estado["indice"])
 
     file_picker = ft.FilePicker()
+    servico_share = ft.Share()
+    global _file_picker_global, _share_global
+    _file_picker_global = file_picker
+    _share_global = servico_share
+
+    if eh_mobile():
+        # Layout de celular: barra superior com menu que abre a lista de seções;
+        # conteúdo em largura total (sem barra lateral fixa).
+        area_conteudo.padding = ft.Padding.symmetric(horizontal=16, vertical=16)
+        titulo_topo = ft.Text(
+            SECOES[0]["nome"], size=18, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+        )
+        estado["titulo_topo"] = titulo_topo
+
+        def abrir_menu(_=None):
+            def escolher(indice):
+                page.pop_dialog()
+                navegar(indice)
+
+            itens = [
+                ft.ListTile(
+                    leading=ft.Icon(secao["icone"], color=TEXTO_SECUNDARIO),
+                    title=ft.Text(secao["nome"]),
+                    on_click=lambda e, i=indice: escolher(i),
+                )
+                for indice, secao in enumerate(SECOES)
+            ]
+            rodape_versao = ft.Container(
+                content=ft.Text(
+                    f"Gestão de Arranjo · v{VERSAO_APP}",
+                    size=12, color=TEXTO_SECUNDARIO,
+                ),
+                padding=ft.Padding.only(left=16, top=12, bottom=4),
+            )
+            page.show_dialog(
+                ft.AlertDialog(
+                    content=ft.Column([*itens, rodape_versao], tight=True, spacing=0,
+                                      width=300, scroll=ft.ScrollMode.AUTO),
+                    content_padding=ft.Padding.symmetric(horizontal=0, vertical=8),
+                )
+            )
+
+        barra_superior = ft.Container(
+            content=ft.Row(
+                [
+                    ft.IconButton(ft.Icons.MENU, on_click=abrir_menu, icon_color=TEXTO_PRIMARIO),
+                    titulo_topo,
+                ],
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            bgcolor=FUNDO_SIDEBAR,
+            padding=ft.Padding.only(left=6, right=12, top=4, bottom=4),
+        )
+        page.add(
+            ft.SafeArea(
+                content=ft.Column(
+                    [barra_superior, area_conteudo],
+                    spacing=0,
+                    expand=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                expand=True,
+            )
+        )
+    else:
+        barra_lateral = criar_barra_lateral(navegar, itens_menu)
+        page.add(
+            ft.Container(
+                content=ft.Row(
+                    [barra_lateral, area_conteudo],
+                    expand=True,
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                expand=True,
+                bgcolor=FUNDO_APP,
+            )
+        )
+
     page.update()
-
     navegar(0)
+    _verificar_atualizacao(page)
 
 
-if __name__ == "__main__":
-    ft.app(target=main, view=ft.AppView.FLET_APP)
+# Ponto de entrada do flet build (mobile) e do `flet run` (desktop): o Flet
+# escolhe a janela/tela conforme a plataforma.
+ft.run(main)

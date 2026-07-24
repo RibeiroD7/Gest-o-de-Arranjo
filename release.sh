@@ -7,7 +7,7 @@
 # O commit sozinho NÃO gera instaladores — é a tag que dispara a compilação.
 #
 # Uso:
-#   ./release.sh            Usa a versão que está em mobile/pyproject.toml
+#   ./release.sh            Usa a versão que está em pyproject.toml
 #   ./release.sh 1.0.8      Grava 1.0.8 no pyproject.toml e commita antes
 #
 # Requer: git configurado com acesso ao repositório (o mesmo usado no push).
@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PYPROJECT="mobile/pyproject.toml"
+PYPROJECT="pyproject.toml"
 
 # 1) Descobre (ou define) a versão -----------------------------------------
 if [[ $# -ge 1 ]]; then
@@ -30,7 +30,7 @@ echo ">> Versão: $VERSAO   (tag $TAG)"
 # 2) Mantém a versão sincronizada: pyproject.toml e o VERSAO_APP mostrado
 #    dentro de cada app (PC e mobile).
 sed -i -E "s/^version = \".*\"/version = \"$VERSAO\"/" "$PYPROJECT"
-sed -i -E "s/^VERSAO_APP = \".*\"/VERSAO_APP = \"$VERSAO\"/" main.py mobile/src/main.py
+sed -i -E "s/^VERSAO_APP = \".*\"/VERSAO_APP = \"$VERSAO\"/" src/main.py
 
 # 3) Não sobrescreve uma tag/versão já publicada ---------------------------
 if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -39,8 +39,8 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
 fi
 
 # 4) Se a versão mudou em algum arquivo, commita ---------------------------
-if ! git diff --quiet -- "$PYPROJECT" main.py mobile/src/main.py; then
-    git add "$PYPROJECT" main.py mobile/src/main.py
+if ! git diff --quiet -- "$PYPROJECT" src/main.py; then
+    git add "$PYPROJECT" src/main.py
     git commit -m "Versão $VERSAO"
 fi
 

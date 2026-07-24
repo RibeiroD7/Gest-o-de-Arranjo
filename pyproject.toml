@@ -1,0 +1,69 @@
+[project]
+name = "gestao-arranjo"
+version = "1.0.18"
+description = "Gestão de Arranjo — coordenação de discursos públicos (Windows, Linux e Android)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "flet>=0.85.3",
+    "pandas",
+    "reportlab",
+    "Pillow",
+    "openpyxl",
+    "python-dateutil",
+    "pypdf",
+    # Só no desktop: leitura do Temas.xlsx (S-99) via engine calamine. No
+    # Android o app usa temas_seed.json, então este pacote nativo é excluído
+    # (o job Android do CI também remove esta linha por segurança).
+    "python-calamine ; sys_platform != 'android'",
+    # Windows: COM do Excel para o PDF de envio (opcional; degrada sem ele).
+    "pywin32>=306 ; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "flet-cli>=0.85.3",
+    "flet-desktop>=0.85.3",
+    "flet-web>=0.85.3",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+# ---------------------------------------------------------------------------
+# Ferramentas de qualidade (lint). Ruff substitui flake8/isort/black.
+#   ruff check src tests        # lint
+#   ruff format src tests       # formatação (opcional; não aplicada no legado)
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Conjunto focado em correção: erros de sintaxe/estilo (E/W), pyflakes (F,
+# imports/nomes não usados) e ordenação de imports (I). O comprimento de linha
+# (E501) não é bloqueante no código legado.
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]
+
+[tool.flet]
+org = "br.com.iontech"
+product = "Gestão de Arranjo"
+company = "Gestão de Arranjo"
+copyright = "Copyright (C) 2026"
+# build_version é sobrescrito no CI por --build-version (vem da tag vX.Y.Z);
+# build_number é o versionCode do Android (deve só crescer entre releases).
+build_version = "1.0.18"
+build_number = 18
+
+[tool.flet.app]
+path = "src"
+
+[tool.flet.android]
+bundle_id = "br.com.iontech.gestaoarranjo"
+
+# O app grava o banco na área privada e não pede permissões especiais.
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true

@@ -61,11 +61,14 @@ Requisitos: Python 3.11 ou mais novo e as dependências de
 [requirements.txt](requirements.txt). Para a geração do PDF de envio:
 Microsoft Excel (Windows, opcional) ou LibreOffice (Linux/macOS).
 
+O código do app é único e fica em [`src/`](src/) — os builds de Windows, Linux e
+Android compilam todos dessa mesma pasta.
+
 ### Windows
 
 ```bat
 python -m venv venv
-venv\Scripts\pip install -r requirements.txt
+venv\Scripts\pip install -r src\requirements.txt
 run.bat
 ```
 
@@ -73,12 +76,27 @@ run.bat
 
 ```bash
 python3 -m venv venv-linux
-venv-linux/bin/pip install -r requirements.txt
+venv-linux/bin/pip install -r src/requirements.txt
 ./run.sh
 ```
 
 No primeiro uso, o banco de dados é criado em `data/` e os temas são
 importados de `data/Temas.xlsx`.
+
+### Testes e lint
+
+A lógica pura (datas, rodízio de presidentes, backup) tem testes em
+[`tests/`](tests/). Rodam sem Flet — bastam `pandas`, `python-dateutil`,
+`pytest` e `ruff`:
+
+```bash
+pip install pandas python-dateutil pytest ruff
+ruff check src tests
+pytest -q
+```
+
+O GitHub Actions roda lint + testes em cada push/PR
+([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ### Testar o layout de celular no computador
 
@@ -101,7 +119,7 @@ Fluxo recomendado, com o script [`release.sh`](release.sh) (rode no Git Bash):
 # 1) Commite normalmente as suas alterações e faça o push do main.
 # 2) Publique a versão (cria e envia a tag que dispara a compilação):
 ./release.sh 1.0.8     # grava a versão no pyproject, commita e envia a tag
-# ou, se a versão em mobile/pyproject.toml já for a desejada:
+# ou, se a versão em pyproject.toml já for a desejada:
 ./release.sh           # usa a versão atual do pyproject e só cria/envia a tag
 ```
 
@@ -145,17 +163,23 @@ migrar os dados entre computadores.
 
 ## Estrutura do projeto
 
+Todo o código do app vive em [`src/`](src/) — **fonte única** para os três
+sistemas. As diferenças de plataforma são resolvidas em tempo de execução por
+`src/armazenamento.py` (`eh_mobile()`), sem cópias paralelas.
+
 | Arquivo | Papel |
 | --- | --- |
-| `main.py` | Interface (Flet): telas, dialogs e navegação |
-| `database.py` | Esquema SQLite, migrações, consultas e backup |
-| `pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
-| `pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
-| `pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
-| `png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
-| `planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
-| `models/` | Templates Excel dos documentos |
-| `assets/` | Ícones do aplicativo |
+| `src/main.py` | Interface (Flet): telas, dialogs e navegação; layout responsivo (PC/celular) |
+| `src/database.py` | Esquema SQLite, migrações, consultas e backup |
+| `src/armazenamento.py` | Resolução de caminhos de dados (desktop vs. área privada do celular) |
+| `src/pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
+| `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
+| `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
+| `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
+| `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
+| `src/assets/` | Ícones, fontes e a carga inicial de temas (`temas_seed.json`) |
+| `pyproject.toml` | Configuração do `flet build` (Windows, Linux e Android) |
+| `assets/` | Ícone do instalador Windows (`icon_windows.ico`) |
 
 ## Privacidade
 

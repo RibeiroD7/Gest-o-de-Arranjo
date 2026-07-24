@@ -1,10 +1,15 @@
 venv/
 venv-linux/
+venv-test/
 __pycache__/
 *.pyc
 .claude/
 terminals/
 backups/
+
+# Ferramentas de teste/lint
+.pytest_cache/
+.ruff_cache/
 
 # Dados pessoais (nomes/telefones) ficam fora do repositório
 data/gestao_arranjo.db
