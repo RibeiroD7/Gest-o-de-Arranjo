@@ -29,6 +29,7 @@ from database import (
     adicionar_ano_planejamento,
     adicionar_orador_arranjo,
     adicionar_tipo_evento,
+    atualizar_data_designacao,
     atualizar_orador_arranjo,
     atualizar_status_orador_arranjo,
     carregar_arranjo,
@@ -73,6 +74,7 @@ from database import (
     salvar_presidente,
     salvar_presidente_cadastro,
     salvar_tema,
+    trocar_datas_designacoes,
     ultima_data_discurso_por_orador,
 )
 from log_app import configurar_log, logger
@@ -4070,6 +4072,7 @@ def _criar_linha_orador_arranjo(
     ultima_linha: bool = False,
     on_whatsapp: Callable[[dict], None] | None = None,
     on_status: Callable[[int, str], None] | None = None,
+    on_mover: Callable[[dict], None] | None = None,
 ) -> ft.Container:
     """Linha da tabela: Data | Orador | Tema | Ações."""
     tema = _rotulo_tema_orador_arranjo(registro)
@@ -4125,6 +4128,20 @@ def _criar_linha_orador_arranjo(
                             if on_whatsapp
                             else []
                         ),
+                        *(
+                            [
+                                ft.IconButton(
+                                    icon=ft.Icons.EVENT_REPEAT_OUTLINED,
+                                    icon_size=17,
+                                    tooltip="Trocar/mover a data",
+                                    icon_color=COR_DESTAQUE_SUAVE,
+                                    style=ft.ButtonStyle(padding=4),
+                                    on_click=lambda e, item=dict(registro): on_mover(item),
+                                )
+                            ]
+                            if on_mover
+                            else []
+                        ),
                         ft.IconButton(
                             icon=ft.Icons.EDIT_OUTLINED,
                             icon_size=17,
@@ -4145,7 +4162,8 @@ def _criar_linha_orador_arranjo(
                     spacing=0,
                     width=LARGURA_COL_ACOES_MES
                     + (34 if on_whatsapp else 0)
-                    + (34 if on_status else 0),
+                    + (34 if on_status else 0)
+                    + (34 if on_mover else 0),
                 ),
             ],
             spacing=ESPACO_COLUNAS_MES,
@@ -4222,6 +4240,7 @@ def _montar_tabela_secao(
     on_remover: Callable[[int], None],
     on_whatsapp: Callable[[dict], None] | None = None,
     on_status: Callable[[int, str], None] | None = None,
+    on_mover: Callable[[dict], None] | None = None,
 ) -> list[ft.Control]:
     """Monta tabela simples com cabeçalho e linhas."""
     if not registros:
@@ -4242,6 +4261,7 @@ def _montar_tabela_secao(
             ultima_linha=indice == len(registros) - 1,
             on_whatsapp=on_whatsapp,
             on_status=on_status,
+            on_mover=on_mover,
         )
         for indice, item in enumerate(registros)
     ]
@@ -5334,6 +5354,108 @@ def _abrir_whatsapp_designacao_envio(page: ft.Page, registro: dict) -> None:
     page.run_task(_dialog_whatsapp_designacao_envio, page, designacao)
 
 
+def abrir_dialog_trocar_data(
+    page: ft.Page,
+    registro: dict,
+    arranjo: dict,
+    arranjo_id: int,
+    atualizar_listas: Callable[[], None],
+) -> None:
+    """Troca ou move a data de uma designação sem abrir o editor completo.
+
+    Escolher a data de outro orador TROCA as duas (swap); escolher uma data
+    livre sugerida do mês apenas MOVE o registro.
+    """
+    tipo = registro["tipo"]
+    registros = carregar_oradores_arranjo(arranjo_id)
+    outros = [
+        r
+        for r in registros
+        if r["tipo"] == tipo and int(r["id"]) != int(registro["id"]) and r.get("data")
+    ]
+    sugestoes = _sugerir_datas_arranjo(arranjo, tipo, registros, quantidade=8)
+
+    def fechar(_=None):
+        page.pop_dialog()
+
+    def trocar(outro: dict):
+        trocar_datas_designacoes(int(registro["id"]), int(outro["id"]))
+        fechar()
+        atualizar_listas()
+
+    def mover(data_str: str):
+        atualizar_data_designacao(int(registro["id"]), data_str)
+        fechar()
+        atualizar_listas()
+
+    itens: list[ft.Control] = []
+    if outros:
+        itens.append(
+            ft.Text("Trocar com…", size=12, weight=ft.FontWeight.W_700,
+                    color=TEXTO_SECUNDARIO)
+        )
+        for outro in outros:
+            itens.append(
+                ft.ListTile(
+                    dense=True,
+                    leading=ft.Icon(ft.Icons.SWAP_HORIZ, size=18, color=COR_DESTAQUE),
+                    title=ft.Text(f"{outro.get('orador_nome', '')}", size=13),
+                    subtitle=ft.Text(
+                        _formatar_data_exibicao(outro.get("data")), size=12
+                    ),
+                    on_click=lambda e, o=dict(outro): trocar(o),
+                )
+            )
+    if sugestoes:
+        itens.append(
+            ft.Text("Mover para data livre…", size=12, weight=ft.FontWeight.W_700,
+                    color=TEXTO_SECUNDARIO)
+        )
+        for item in sugestoes:
+            itens.append(
+                ft.ListTile(
+                    dense=True,
+                    leading=ft.Icon(
+                        ft.Icons.EVENT_AVAILABLE, size=18, color=COR_SUCESSO
+                    ),
+                    title=ft.Text(item["rotulo"], size=13),
+                    on_click=lambda e, d=item["data"]: mover(d),
+                )
+            )
+    if not itens:
+        itens = [
+            ft.Text(
+                "Não há outras datas neste mês para trocar ou mover.",
+                size=13,
+                color=TEXTO_SECUNDARIO,
+                italic=True,
+            )
+        ]
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text(
+                f"Data de {registro.get('orador_nome', '')} — "
+                f"{_formatar_data_exibicao(registro.get('data'))}",
+                size=16,
+                weight=ft.FontWeight.W_600,
+            ),
+            content=ft.Container(
+                width=_largura_dialog(page, 420),
+                content=ft.Column(
+                    itens,
+                    spacing=2,
+                    tight=True,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+                height=min(420, 64 + 52 * max(1, len(itens))),
+            ),
+            actions=[ft.TextButton("Cancelar", on_click=fechar)],
+        )
+    )
+
+
 def abrir_dialog_oradores_mes(
     page: ft.Page,
     arranjo: dict,
@@ -5376,6 +5498,9 @@ def abrir_dialog_oradores_mes(
         atualizar_status_orador_arranjo(registro_id, novo_status)
         atualizar_listas()
 
+    def mover_data(item: dict):
+        abrir_dialog_trocar_data(page, item, arranjo, arranjo_id, atualizar_listas)
+
     def preencher_listas():
         registros = carregar_oradores_arranjo(arranjo_id)
         recebidos = [r for r in registros if r["tipo"] == "recebido"]
@@ -5387,6 +5512,7 @@ def abrir_dialog_oradores_mes(
             editar_orador,
             remover_orador,
             on_status=alterar_status,
+            on_mover=mover_data,
         )
         lista_enviados.controls = _montar_tabela_secao(
             enviados,
@@ -5395,6 +5521,7 @@ def abrir_dialog_oradores_mes(
             remover_orador,
             on_whatsapp=whatsapp_designacao,
             on_status=alterar_status,
+            on_mover=mover_data,
         )
         preencher_presidentes()
         preencher_especiais()

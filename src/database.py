@@ -643,6 +643,45 @@ def atualizar_orador_arranjo(
         conn.close()
 
 
+def trocar_datas_designacoes(id_a: int, id_b: int) -> None:
+    """Troca as datas entre dois registros de arranjo_oradores (swap).
+
+    Feito em três passos na mesma transação por causa da UNIQUE
+    (arranjo_id, tipo, orador_id, data).
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        linha_a = cursor.execute(
+            "SELECT data FROM arranjo_oradores WHERE id = ?", (id_a,)
+        ).fetchone()
+        linha_b = cursor.execute(
+            "SELECT data FROM arranjo_oradores WHERE id = ?", (id_b,)
+        ).fetchone()
+        if not linha_a or not linha_b:
+            return
+        data_a, data_b = linha_a[0], linha_b[0]
+        cursor.execute("UPDATE arranjo_oradores SET data = NULL WHERE id = ?", (id_a,))
+        cursor.execute("UPDATE arranjo_oradores SET data = ? WHERE id = ?", (data_a, id_b))
+        cursor.execute("UPDATE arranjo_oradores SET data = ? WHERE id = ?", (data_b, id_a))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def atualizar_data_designacao(registro_id: int, data: str | None) -> None:
+    """Move um registro de arranjo_oradores para outra data."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE arranjo_oradores SET data = ? WHERE id = ?",
+            (data, registro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 STATUS_DESIGNACAO = ("pendente", "confirmado", "recusado")
 
 
