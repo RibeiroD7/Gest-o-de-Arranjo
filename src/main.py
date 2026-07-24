@@ -7679,12 +7679,64 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
     )
 
 
-def _verificar_atualizacao(page: ft.Page) -> None:
-    """Avisa (snackbar) se houver versão mais nova no GitHub. Só no desktop.
+def _url_instalador_plataforma(assets: list[dict]) -> str | None:
+    """URL do instalador da release para o sistema atual (Windows/Linux)."""
+    import sys
 
-    A busca de rede roda fora da thread da UI (``asyncio.to_thread``) e o aviso é
-    exibido pelo laço do Flet — mesmo padrão de ``entregar_arquivo``. Qualquer
-    erro (offline, timeout) é ignorado silenciosamente.
+    if sys.platform.startswith("win"):
+        sufixo = "-windows-instalador.exe"
+    elif sys.platform.startswith("linux"):
+        sufixo = "-linux.tar.gz"
+    else:
+        return None
+    for asset in assets:
+        if (asset.get("name") or "").endswith(sufixo):
+            return asset.get("browser_download_url")
+    return None
+
+
+async def _baixar_e_abrir_instalador(page: ft.Page, url: str) -> None:
+    """Baixa o instalador da nova versão e o abre para o usuário instalar."""
+    import asyncio
+    import os
+    import sys
+    import tempfile
+    import urllib.request
+
+    def _baixar() -> str:
+        nome = url.rsplit("/", 1)[-1] or "GestaoArranjo-instalador"
+        destino = os.path.join(tempfile.gettempdir(), nome)
+        urllib.request.urlretrieve(url, destino)  # noqa: S310 — URL da release oficial
+        return destino
+
+    mostrar_sucesso(page, "Baixando atualização…")
+    try:
+        destino = await asyncio.to_thread(_baixar)
+    except Exception:  # noqa: BLE001
+        logger.exception("Falha ao baixar a atualização")
+        mostrar_aviso(page, "Erro", "Não foi possível baixar a atualização.")
+        return
+
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(destino)  # noqa: S606 — instalador oficial baixado
+        else:
+            import subprocess
+
+            subprocess.Popen(["xdg-open", destino])  # noqa: S603, S607
+        mostrar_sucesso(page, "Instalador baixado. Siga a instalação para atualizar.")
+    except Exception:  # noqa: BLE001
+        logger.exception("Falha ao abrir o instalador baixado")
+        entregar_arquivo(page, destino, abrir_arquivo)
+
+
+def _verificar_atualizacao(page: ft.Page) -> None:
+    """Avisa e oferece baixar a nova versão do GitHub. Só no desktop.
+
+    A rede roda fora da thread da UI (``asyncio.to_thread``) e o aviso é exibido
+    pelo laço do Flet — mesmo padrão de ``entregar_arquivo``. Erros (offline,
+    timeout) são ignorados silenciosamente. O download só ocorre se o usuário
+    clicar, e vem da release oficial do projeto.
     """
     if eh_mobile():
         return
@@ -7694,20 +7746,29 @@ def _verificar_atualizacao(page: ft.Page) -> None:
         import json
         import urllib.request
 
-        def _buscar_tag() -> str:
+        def _buscar() -> dict:
             req = urllib.request.Request(
                 URL_API_RELEASE, headers={"Accept": "application/vnd.github+json"}
             )
-            with urllib.request.urlopen(req, timeout=6) as resposta:
-                dados = json.load(resposta)
-            return (dados.get("tag_name") or "").strip()
+            with urllib.request.urlopen(req, timeout=6) as resposta:  # noqa: S310
+                return json.load(resposta)
 
         try:
-            tag = await asyncio.to_thread(_buscar_tag)
+            dados = await asyncio.to_thread(_buscar)
         except Exception:  # noqa: BLE001 — offline/erro de rede: ignora
             return
+        tag = (dados.get("tag_name") or "").strip()
         if not ha_versao_mais_nova(tag, VERSAO_APP):
             return
+
+        url_instalador = _url_instalador_plataforma(dados.get("assets") or [])
+
+        def ao_clicar(_=None):
+            if url_instalador:
+                page.run_task(lambda: _baixar_e_abrir_instalador(page, url_instalador))
+            else:
+                webbrowser.open(URL_RELEASES)
+
         page.show_dialog(
             ft.SnackBar(
                 content=ft.Text(
@@ -7716,9 +7777,9 @@ def _verificar_atualizacao(page: ft.Page) -> None:
                     weight=ft.FontWeight.W_600,
                 ),
                 bgcolor=COR_DESTAQUE_CLARA,
-                action="Abrir",
-                on_action=lambda _: webbrowser.open(URL_RELEASES),
-                duration=8000,
+                action="Baixar e instalar" if url_instalador else "Abrir",
+                on_action=ao_clicar,
+                duration=10000,
             )
         )
         page.update()
