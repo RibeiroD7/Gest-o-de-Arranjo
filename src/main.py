@@ -9,6 +9,7 @@ Execute com: python src/main.py
 
 from __future__ import annotations
 
+import calendar
 import re
 import webbrowser
 from datetime import date, timedelta
@@ -152,6 +153,7 @@ SECOES = [
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
     {"nome": "Quadro de Anúncios", "icone": ft.Icons.CAMPAIGN},
     {"nome": "Ajustes", "icone": ft.Icons.SETTINGS},
+    {"nome": "Calendário", "icone": ft.Icons.CALENDAR_TODAY},
 ]
 
 SQL_ORADORES = """
@@ -7472,6 +7474,153 @@ def _auto_backup_diario() -> None:
         pass
 
 
+def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
+    """Calendário mensal: reuniões, oradores recebidos e eventos especiais."""
+    hoje = date.today()
+    estado = {"ano": hoje.year, "mes": hoje.month}
+    corpo = ft.Column(spacing=6, tight=True)
+    titulo_mes = ft.Text("", size=16, weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO)
+    dias_semana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+
+    def render():
+        ano, mes = estado["ano"], estado["mes"]
+        titulo_mes.value = f"{NOMES_MESES[mes]} de {ano}"
+        recebidos = carregar_recebidos_por_ano(ano)
+        presidentes = carregar_presidentes_por_ano(ano)
+        especiais = listar_datas_especiais_por_ano(ano)
+
+        semanas = calendar.Calendar(firstweekday=6).monthdayscalendar(ano, mes)
+        altura = 64 if eh_mobile() else 82
+
+        def celula(dia: int) -> ft.Control:
+            if dia == 0:
+                return ft.Container(expand=True)
+            data_str = f"{dia:02d}/{mes:02d}/{ano}"
+            esp = especiais.get(data_str)
+            rec = recebidos.get(data_str)
+            pres = presidentes.get(data_str)
+            eh_hoje = (ano, mes, dia) == (hoje.year, hoje.month, hoje.day)
+
+            marcadores: list[ft.Control] = []
+            if esp:
+                marcadores.append(
+                    ft.Text(
+                        esp.get("tipo") or "Evento",
+                        size=10,
+                        color=COR_AVISO,
+                        weight=ft.FontWeight.W_600,
+                        max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                )
+            elif rec:
+                marcadores.append(
+                    ft.Text(
+                        rec.get("orador") or "",
+                        size=10,
+                        color=TEXTO_PRIMARIO,
+                        max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                )
+            if pres and not esp:
+                marcadores.append(
+                    ft.Text(
+                        f"P: {pres['nome']}",
+                        size=9,
+                        color=TEXTO_SECUNDARIO,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                )
+            tem_conteudo = bool(esp or rec or pres)
+            return ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            str(dia),
+                            size=12,
+                            weight=ft.FontWeight.W_700 if eh_hoje else ft.FontWeight.W_500,
+                            color=COR_DESTAQUE if eh_hoje else TEXTO_PRIMARIO,
+                        ),
+                        *marcadores,
+                    ],
+                    spacing=1,
+                    tight=True,
+                ),
+                bgcolor=ft.Colors.with_opacity(0.08, COR_DESTAQUE)
+                if tem_conteudo
+                else FUNDO_CARD,
+                border=ft.Border.all(
+                    2 if eh_hoje else 1, COR_DESTAQUE if eh_hoje else BORDA_SUAVE
+                ),
+                border_radius=8,
+                padding=6,
+                expand=True,
+                height=altura,
+            )
+
+        cabecalho = ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(
+                        d,
+                        size=11,
+                        weight=ft.FontWeight.W_600,
+                        color=TEXTO_SECUNDARIO,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    expand=True,
+                )
+                for d in dias_semana
+            ],
+            spacing=6,
+        )
+        corpo.controls = [
+            cabecalho,
+            *[ft.Row([celula(d) for d in semana], spacing=6) for semana in semanas],
+        ]
+        page.update()
+
+    def mudar_mes(delta: int):
+        m, a = estado["mes"] + delta, estado["ano"]
+        if m < 1:
+            m, a = 12, a - 1
+        elif m > 12:
+            m, a = 1, a + 1
+        estado["mes"], estado["ano"] = m, a
+        render()
+
+    def ir_hoje(_=None):
+        estado["ano"], estado["mes"] = hoje.year, hoje.month
+        render()
+
+    barra = ft.Row(
+        [
+            ft.IconButton(ft.Icons.CHEVRON_LEFT, on_click=lambda _: mudar_mes(-1)),
+            titulo_mes,
+            ft.IconButton(ft.Icons.CHEVRON_RIGHT, on_click=lambda _: mudar_mes(1)),
+            ft.Container(expand=True),
+            ft.TextButton("Hoje", icon=ft.Icons.TODAY, on_click=ir_hoje),
+        ],
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    render()
+    return ft.Column(
+        [
+            criar_cabecalho_tela(
+                "Calendário", "Reuniões, oradores recebidos e eventos do mês"
+            ),
+            barra,
+            corpo,
+        ],
+        spacing=12,
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+    )
+
+
 def _verificar_atualizacao(page: ft.Page) -> None:
     """Avisa (snackbar) se houver versão mais nova no GitHub. Só no desktop.
 
@@ -7561,6 +7710,9 @@ def main(page: ft.Page):
     def mostrar_ajustes():
         area_conteudo.content = tela_ajustes(page, recarregar, file_picker)
 
+    def mostrar_calendario():
+        area_conteudo.content = tela_calendario(page, recarregar)
+
     telas = [
         mostrar_inicio,
         mostrar_programacao,
@@ -7569,6 +7721,7 @@ def main(page: ft.Page):
         mostrar_temas,
         mostrar_quadro_anuncios,
         mostrar_ajustes,
+        mostrar_calendario,
     ]
 
     def navegar(indice: int):
