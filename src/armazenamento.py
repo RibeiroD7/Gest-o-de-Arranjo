@@ -52,12 +52,27 @@ def caminho_temas_seed_json() -> Path | None:
     return next((p for p in candidatos if p.exists()), None)
 
 
-def eh_mobile() -> bool:
-    """True quando rodando empacotado num celular (área de storage definida).
+# Layout da interface: definido pelo main a partir de `page.platform`.
+# ATENÇÃO: não dá para deduzir do FLET_APP_STORAGE_DATA — o Flet também define
+# essa variável no DESKTOP empacotado, então usá-la aqui fazia o app de PC
+# instalado abrir com o layout de celular.
+_LAYOUT_MOBILE: bool | None = None
 
-    Pode ser forçado com a variável de ambiente GA_FORCAR_MOBILE=1 para ver o
-    layout de celular rodando o app no computador (sem esperar o build do APK).
+
+def definir_layout_mobile(mobile: bool) -> None:
+    """Define se a interface deve usar o layout de celular (Android/iOS)."""
+    global _LAYOUT_MOBILE
+    _LAYOUT_MOBILE = bool(mobile)
+
+
+def eh_mobile() -> bool:
+    """True quando a INTERFACE deve usar o layout de celular.
+
+    Vem da plataforma real (definida por ``definir_layout_mobile`` no main).
+    GA_FORCAR_MOBILE=1 força o layout de celular no computador, para testes.
+    Não confundir com a área de armazenamento: o desktop empacotado também
+    grava em FLET_APP_STORAGE_DATA, mas continua sendo desktop.
     """
     if os.environ.get("GA_FORCAR_MOBILE") == "1":
         return True
-    return _STORAGE is not None
+    return bool(_LAYOUT_MOBILE)

@@ -18,7 +18,12 @@ from typing import Callable
 import flet as ft
 import pandas as pd
 
-from armazenamento import EXPORTS_DIR, eh_mobile, garantir_pastas
+from armazenamento import (
+    EXPORTS_DIR,
+    definir_layout_mobile,
+    eh_mobile,
+    garantir_pastas,
+)
 from database import (
     adicionar_ano_coluna,
     adicionar_ano_planejamento,
@@ -7627,7 +7632,7 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
 
     passos = [
         ("1. Sua congregação", "Preencha os dados em Ajustes → Minha Congregação."),
-        ("2. Congregações do circuito", "Cadastre as demais congregações."),
+        ("2. Congregações", "Cadastre as congregações com que você faz arranjos."),
         ("3. Oradores e temas", "Adicione oradores e importe os temas (S-99/S-99a)."),
         ("4. Programação", "Monte os arranjos do mês — ou importe tudo de uma planilha."),
     ]
@@ -7785,8 +7790,24 @@ def _verificar_atualizacao(page: ft.Page) -> None:
 
 def main(page: ft.Page):
     """Configura a janela e monta o layout principal."""
+    # Layout pela plataforma REAL: só Android/iOS usam a interface de celular.
+    # (O desktop empacotado também define FLET_APP_STORAGE_DATA, por isso não
+    # dá para deduzir o layout a partir da área de armazenamento.)
+    definir_layout_mobile(
+        page.platform
+        in (
+            ft.PagePlatform.ANDROID,
+            ft.PagePlatform.ANDROID_TV,
+            ft.PagePlatform.IOS,
+        )
+    )
     configurar_log()
-    logger.info("Aplicativo iniciado (v%s)", VERSAO_APP)
+    logger.info(
+        "Aplicativo iniciado (v%s) — plataforma=%s, layout_celular=%s",
+        VERSAO_APP,
+        page.platform,
+        eh_mobile(),
+    )
     garantir_tabelas()
     _auto_backup_diario()
 
