@@ -1,5 +1,9 @@
 name: Gerar instaladores
 
+# Cada job compila e sobe o instalador DIRETO como asset da Release (não usa
+# actions/upload-artifact). Assets de Release não contam na cota de
+# armazenamento de artefatos do Actions — por isso a publicação não falha
+# quando essa cota se esgota.
 on:
   push:
     tags:
@@ -13,6 +17,8 @@ jobs:
   windows:
     name: Windows (.exe)
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -53,14 +59,17 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ env.VERSAO }} installer.iss
 
-      - uses: actions/upload-artifact@v4
+      - name: Publicar instalador na Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          name: windows
-          path: GestaoArranjo-*-windows-instalador.exe
+          files: GestaoArranjo-*-windows-instalador.exe
 
   linux:
     name: Linux
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -95,14 +104,17 @@ jobs:
       - name: Compactar
         run: tar -czf GestaoArranjo-${{ env.VERSAO }}-linux.tar.gz -C build/linux .
 
-      - uses: actions/upload-artifact@v4
+      - name: Publicar instalador na Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          name: linux
-          path: GestaoArranjo-*-linux.tar.gz
+          files: GestaoArranjo-*-linux.tar.gz
 
   android:
     name: Android (.apk)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -149,28 +161,16 @@ jobs:
             cp build/apk/*armeabi-v7a*.apk GestaoArranjo-${{ env.VERSAO }}-android-32bits.apk
           fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android
-          path: GestaoArranjo-*-android*.apk
-
-  release:
-    name: Publicar release
-    needs: [windows, linux, android]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artefatos
-          merge-multiple: true
-
-      - uses: softprops/action-gh-release@v2
+      # O Android é o último a terminar, então define aqui o nome e o corpo da
+      # Release (os jobs de desktop só anexam seus arquivos). Se rodar antes dos
+      # outros, cria a Release; se rodar depois, apenas atualiza — em qualquer
+      # ordem o estado final é o mesmo.
+      - name: Publicar instalador na Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
           name: Gestão de Arranjo ${{ github.ref_name }}
-          files: artefatos/*
+          files: GestaoArranjo-*-android*.apk
           body: |
             ## Downloads
 
