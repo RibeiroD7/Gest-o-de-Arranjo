@@ -887,6 +887,47 @@ def carregar_recebidos_por_ano(ano: int) -> dict[str, dict]:
         conn.close()
 
 
+def carregar_enviados_por_ano(ano: int) -> dict[str, list[dict]]:
+    """Designações enviadas no ano, indexadas por data (DD/MM/AAAA).
+
+    Cada data pode ter mais de um envio (oradores em congregações diferentes),
+    por isso o valor é uma lista.
+    """
+    conn = get_connection()
+    try:
+        linhas = conn.execute(
+            """
+            SELECT ao.data,
+                   COALESCE(o.nome, '') AS orador,
+                   ao.tema_nr,
+                   COALESCE(t.titulo, '') AS tema,
+                   COALESCE(c.nome, '') AS congregacao,
+                   COALESCE(ao.status, 'pendente') AS status
+            FROM arranjo_oradores ao
+            JOIN oradores o ON ao.orador_id = o.id
+            LEFT JOIN temas t ON ao.tema_nr = t.nr
+            LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
+            WHERE ao.tipo = 'enviado' AND substr(ao.data, 7, 4) = ?
+            ORDER BY o.nome
+            """,
+            (str(ano),),
+        ).fetchall()
+        resultado: dict[str, list[dict]] = {}
+        for data, orador, tema_nr, tema, congregacao, status in linhas:
+            resultado.setdefault(data, []).append(
+                {
+                    "orador": orador,
+                    "tema_nr": tema_nr,
+                    "tema": tema,
+                    "congregacao": congregacao,
+                    "status": status,
+                }
+            )
+        return resultado
+    finally:
+        conn.close()
+
+
 def contar_designacoes_por_mes(ano: int) -> dict[int, dict[str, int]]:
     """Contagem de recebidos/enviados por mês do ano: {mes: {"recebidos", "enviados"}}."""
     conn = get_connection()

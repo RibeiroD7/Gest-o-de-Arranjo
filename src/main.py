@@ -36,6 +36,7 @@ from database import (
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
     carregar_designacoes_ano,
+    carregar_enviados_por_ano,
     carregar_oradores_arranjo,
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
@@ -7624,11 +7625,112 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         ano, mes = estado["ano"], estado["mes"]
         titulo_mes.value = f"{NOMES_MESES[mes]} de {ano}"
         recebidos = carregar_recebidos_por_ano(ano)
+        enviados = carregar_enviados_por_ano(ano)
         presidentes = carregar_presidentes_por_ano(ano)
         especiais = listar_datas_especiais_por_ano(ano)
 
         semanas = calendar.Calendar(firstweekday=6).monthdayscalendar(ano, mes)
-        altura = 64 if eh_mobile() else 82
+        altura = 72 if eh_mobile() else 96
+
+        def abrir_dia(data_str: str):
+            esp = especiais.get(data_str)
+            rec = recebidos.get(data_str)
+            envs = enviados.get(data_str) or []
+            pres = presidentes.get(data_str)
+
+            def linha_detalhe(icone, cor, titulo, texto):
+                return ft.Row(
+                    [
+                        ft.Icon(icone, size=16, color=cor),
+                        ft.Column(
+                            [
+                                ft.Text(titulo, size=11, color=TEXTO_SECUNDARIO),
+                                ft.Text(texto, size=13, color=TEXTO_PRIMARIO),
+                            ],
+                            spacing=0,
+                            tight=True,
+                            expand=True,
+                        ),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                )
+
+            detalhes: list[ft.Control] = []
+            if esp:
+                partes = " · ".join(
+                    p
+                    for p in (esp.get("orador") or "", esp.get("tema") or "")
+                    if p
+                )
+                detalhes.append(
+                    linha_detalhe(
+                        ft.Icons.STAR_OUTLINE, COR_AVISO,
+                        esp.get("tipo") or "Evento especial",
+                        partes or "—",
+                    )
+                )
+            if rec:
+                tema = rec.get("tema") or ""
+                if rec.get("tema_nr") and tema:
+                    tema = f"{rec['tema_nr']} - {tema}"
+                detalhes.append(
+                    linha_detalhe(
+                        ft.Icons.RECORD_VOICE_OVER_OUTLINED, COR_SUCESSO,
+                        "Orador recebido",
+                        f"{rec.get('orador', '')}\n{tema}".strip(),
+                    )
+                )
+            for env in envs:
+                tema = env.get("tema") or ""
+                if env.get("tema_nr") and tema:
+                    tema = f"{env['tema_nr']} - {tema}"
+                destino = env.get("congregacao") or "?"
+                rotulo_status = {
+                    "confirmado": " · confirmado",
+                    "recusado": " · recusado",
+                    "pendente": " · aguardando confirmação",
+                }.get(env.get("status") or "pendente", "")
+                detalhes.append(
+                    linha_detalhe(
+                        ft.Icons.SEND_OUTLINED, COR_DESTAQUE_CLARA,
+                        f"Enviado para {destino}{rotulo_status}",
+                        f"{env.get('orador', '')}\n{tema}".strip(),
+                    )
+                )
+            if pres:
+                detalhes.append(
+                    linha_detalhe(
+                        ft.Icons.CO_PRESENT_OUTLINED, COR_DESTAQUE,
+                        "Presidente", pres["nome"],
+                    )
+                )
+            if not detalhes:
+                detalhes = [
+                    ft.Text(
+                        "Nada agendado para este dia.",
+                        size=13,
+                        color=TEXTO_SECUNDARIO,
+                        italic=True,
+                    )
+                ]
+
+            page.show_dialog(
+                ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text(data_str, size=16, weight=ft.FontWeight.W_600),
+                    content=ft.Container(
+                        width=_largura_dialog(page, 380),
+                        content=ft.Column(
+                            detalhes, spacing=12, tight=True,
+                            scroll=ft.ScrollMode.AUTO,
+                        ),
+                    ),
+                    actions=[
+                        ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())
+                    ],
+                )
+            )
 
         def celula(dia: int) -> ft.Control:
             if dia == 0:
@@ -7636,6 +7738,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             data_str = f"{dia:02d}/{mes:02d}/{ano}"
             esp = especiais.get(data_str)
             rec = recebidos.get(data_str)
+            envs = enviados.get(data_str) or []
             pres = presidentes.get(data_str)
             eh_hoje = (ano, mes, dia) == (hoje.year, hoje.month, hoje.day)
 
@@ -7647,18 +7750,36 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                         size=10,
                         color=COR_AVISO,
                         weight=ft.FontWeight.W_600,
-                        max_lines=2,
+                        max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
                     )
                 )
-            elif rec:
+            if rec and not esp:
                 marcadores.append(
                     ft.Text(
                         rec.get("orador") or "",
                         size=10,
-                        color=TEXTO_PRIMARIO,
-                        max_lines=2,
+                        color=COR_SUCESSO,
+                        max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                )
+            for env in envs[:2]:
+                marcadores.append(
+                    ft.Text(
+                        f"→ {env.get('orador', '')}",
+                        size=10,
+                        color=COR_DESTAQUE_CLARA,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                )
+            if len(envs) > 2:
+                marcadores.append(
+                    ft.Text(
+                        f"+{len(envs) - 2} envio(s)",
+                        size=9,
+                        color=TEXTO_SECUNDARIO,
                     )
                 )
             if pres and not esp:
@@ -7671,7 +7792,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                         overflow=ft.TextOverflow.ELLIPSIS,
                     )
                 )
-            tem_conteudo = bool(esp or rec or pres)
+            tem_conteudo = bool(esp or rec or envs or pres)
             return ft.Container(
                 content=ft.Column(
                     [
@@ -7696,6 +7817,9 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 padding=6,
                 expand=True,
                 height=altura,
+                on_click=lambda e, d=data_str: abrir_dia(d),
+                ink=True,
+                tooltip="Ver detalhes do dia",
             )
 
         cabecalho = ft.Row(
@@ -7744,14 +7868,37 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
+    def item_legenda(cor: str, rotulo: str) -> ft.Control:
+        return ft.Row(
+            [
+                ft.Container(width=10, height=10, bgcolor=cor, border_radius=3),
+                ft.Text(rotulo, size=11, color=TEXTO_SECUNDARIO),
+            ],
+            spacing=5,
+            tight=True,
+        )
+
+    legenda = ft.Row(
+        [
+            item_legenda(COR_SUCESSO, "Orador recebido"),
+            item_legenda(COR_DESTAQUE_CLARA, "→ Enviado da minha congregação"),
+            item_legenda(COR_AVISO, "Evento especial"),
+            item_legenda(TEXTO_SECUNDARIO, "P: presidente"),
+        ],
+        spacing=16,
+        wrap=True,
+    )
+
     render()
     return ft.Column(
         [
             criar_cabecalho_tela(
-                "Calendário", "Reuniões, oradores recebidos e eventos do mês"
+                "Calendário",
+                "Recebidos, enviados e eventos do mês — clique num dia para os detalhes",
             ),
             barra,
             corpo,
+            legenda,
         ],
         spacing=12,
         expand=True,
