@@ -1061,22 +1061,41 @@ def criar_tabela(
                 expand=nome == "titulo",
             )
             # Tema prioritário para a minha congregação: estrela junto do título
-            # (em vez de expor a coluna 0/1 na tabela).
-            if nome == "titulo" and int(mapa.get("prioritario", 0) or 0) == 1:
-                controle_celula = ft.Row(
-                    [
-                        ft.Icon(
-                            ft.Icons.STAR,
-                            size=14,
-                            color=COR_AVISO,
-                            tooltip="Tema prioritário para a minha congregação",
+            # (em vez de expor a coluna 0/1 na tabela). Com `on_prioritario`
+            # na config, a estrela vira botão e alterna direto na lista.
+            if nome == "titulo" and "prioritario" in mapa:
+                eh_prioritario = int(mapa.get("prioritario", 0) or 0) == 1
+                ao_alternar = config.get("on_prioritario")
+                estrela: ft.Control | None = None
+                if ao_alternar and registro_id is not None:
+                    estrela = ft.IconButton(
+                        icon=ft.Icons.STAR if eh_prioritario else ft.Icons.STAR_BORDER,
+                        icon_size=16,
+                        icon_color=COR_AVISO if eh_prioritario else TEXTO_SECUNDARIO,
+                        tooltip=(
+                            "Tema prioritário — clique para desmarcar"
+                            if eh_prioritario
+                            else "Marcar como prioritário para a minha congregação"
                         ),
-                        controle_celula,
-                    ],
-                    spacing=6,
-                    tight=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                )
+                        style=ft.ButtonStyle(padding=2),
+                        on_click=lambda e, rid=registro_id, atual=eh_prioritario: (
+                            ao_alternar(rid, not atual)
+                        ),
+                    )
+                elif eh_prioritario:
+                    estrela = ft.Icon(
+                        ft.Icons.STAR,
+                        size=14,
+                        color=COR_AVISO,
+                        tooltip="Tema prioritário para a minha congregação",
+                    )
+                if estrela is not None:
+                    controle_celula = ft.Row(
+                        [estrela, controle_celula],
+                        spacing=4,
+                        tight=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    )
             celulas.append(ft.DataCell(controle_celula))
         if registro_id is not None:
             if acoes_separadas:
@@ -3570,6 +3589,15 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
             estado_temas["df"] = carregar_dataframe_temas(apenas_anos_visiveis=True)
         return estado_temas["df"]
 
+    def alternar_prioritario(tema_nr: int, novo: bool):
+        """Marca/desmarca o tema como prioritário direto na lista."""
+        definir_tema_prioritario(tema_nr, novo)
+        df_cache = estado_temas.get("df")
+        if df_cache is not None:
+            # Atualiza o cache em memória em vez de recarregar todos os temas.
+            df_cache.loc[df_cache["nr"] == tema_nr, "prioritario"] = 1 if novo else 0
+        atualizar_view(manter_pagina=True)
+
     def atualizar_view(_=None, manter_pagina: bool = False):
         if not manter_pagina:
             estado_temas["pagina"] = 0
@@ -3602,7 +3630,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
             df_pagina,
             on_editar=abrir_editar,
             on_excluir=abrir_excluir,
-            config=CONFIG_TABELA_TEMAS,
+            config={**CONFIG_TABELA_TEMAS, "on_prioritario": alternar_prioritario},
         )
         if total > TEMAS_POR_PAGINA:
             fim = min(inicio + TEMAS_POR_PAGINA, total)
