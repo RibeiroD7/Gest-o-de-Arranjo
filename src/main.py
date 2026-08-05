@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import calendar
 import re
+import time
 import webbrowser
 from datetime import date, timedelta
 from typing import Callable
@@ -18,7 +19,7 @@ from typing import Callable
 import flet as ft
 import pandas as pd
 
-import tema
+import tema as _tema  # apelidado: `tema` é usado como variável local (título) em várias telas
 from armazenamento import (
     EXPORTS_DIR,
     definir_layout_mobile,
@@ -175,6 +176,20 @@ URL_API_RELEASE = (
     "https://api.github.com/repos/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
 )
 URL_RELEASES = "https://github.com/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
+
+# Zoom "Ctrl + roda do mouse" na prévia do quadro: o ScrollEvent do Flet não
+# traz os modificadores, então rastreamos o Ctrl pelo teclado e o consideramos
+# "ativo" por um curto intervalo após a tecla ser vista pressionada.
+_TECLADO = {"ctrl_ate": 0.0}
+
+
+def _registrar_teclado(e) -> None:
+    if getattr(e, "ctrl", False):
+        _TECLADO["ctrl_ate"] = time.monotonic() + 1.5
+
+
+def _ctrl_ativo() -> bool:
+    return time.monotonic() < _TECLADO["ctrl_ate"]
 
 SECOES = [
     {"nome": "Início", "icone": ft.Icons.HOME},
@@ -3914,21 +3929,21 @@ def _criar_cabecalho_tabela_oradores() -> ft.Container:
             [
                 ft.Text(
                     "Data",
-                    width=tema.LARGURA_COL_DATA_MES,
+                    width=_tema.LARGURA_COL_DATA_MES,
                     size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Text(
                     "Orador",
-                    width=tema.LARGURA_COL_ORADOR_MES,
+                    width=_tema.LARGURA_COL_ORADOR_MES,
                     size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
                 ),
                 ft.Text(
                     "Tema",
-                    width=tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    width=_tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
                     expand=None if eh_mobile() else True,
                     size=fonte(12),
                     weight=ft.FontWeight.W_700,
@@ -3936,7 +3951,7 @@ def _criar_cabecalho_tabela_oradores() -> ft.Container:
                 ),
                 ft.Text(
                     "Ações",
-                    width=tema.LARGURA_COL_ACOES_MES,
+                    width=_tema.LARGURA_COL_ACOES_MES,
                     size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
@@ -3967,7 +3982,7 @@ def _criar_linha_orador_arranjo(
             [
                 ft.Text(
                     data,
-                    width=tema.LARGURA_COL_DATA_MES,
+                    width=_tema.LARGURA_COL_DATA_MES,
                     size=fonte(13),
                     weight=ft.FontWeight.W_600,
                     color=TEXTO_PRIMARIO,
@@ -3976,7 +3991,7 @@ def _criar_linha_orador_arranjo(
                     registro.get("orador_nome", ""),
                     size=fonte(13),
                     color=TEXTO_PRIMARIO,
-                    width=tema.LARGURA_COL_ORADOR_MES,
+                    width=_tema.LARGURA_COL_ORADOR_MES,
                     max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
@@ -3984,7 +3999,7 @@ def _criar_linha_orador_arranjo(
                     tema,
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
-                    width=tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
+                    width=_tema.LARGURA_COL_TEMA_MES if eh_mobile() else None,
                     expand=None if eh_mobile() else True,
                     max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS,
@@ -4042,7 +4057,7 @@ def _criar_linha_orador_arranjo(
                         ),
                     ],
                     spacing=0,
-                    width=tema.LARGURA_COL_ACOES_MES
+                    width=_tema.LARGURA_COL_ACOES_MES
                     + (34 if on_whatsapp else 0)
                     + (34 if on_status else 0)
                     + (34 if on_mover else 0),
@@ -4065,7 +4080,7 @@ def _altura_conteudo_dialog_mes(page: ft.Page) -> int:
     """Altura máxima do conteúdo rolável conforme o tamanho da janela."""
     if page.window and page.window.height:
         return max(280, min(560, int(page.window.height * 0.52)))
-    return tema.ALTURA_CONTEUDO_DIALOG_MES
+    return _tema.ALTURA_CONTEUDO_DIALOG_MES
 
 
 def _criar_rodape_dialog_mes(
@@ -6957,14 +6972,14 @@ def tela_ajustes(
             nova = float(seletor_escala.value)
         except (TypeError, ValueError):
             nova = 1.0
-        tema.definir_escala(nova)
-        salvar_escala_fonte(tema.escala_atual())
+        _tema.definir_escala(nova)
+        salvar_escala_fonte(_tema.escala_atual())
         recarregar()
 
     seletor_escala = ft.Dropdown(
         label="Tamanho do texto",
         width=None if eh_mobile() else 220,
-        value=f"{tema.escala_atual():.2f}",
+        value=f"{_tema.escala_atual():.2f}",
         options=[
             ft.dropdown.Option(key="0.90", text="Pequeno (90%)"),
             ft.dropdown.Option(key="1.00", text="Padrão (100%)"),
@@ -7173,7 +7188,14 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
             page.update()
 
     def ao_rolar_preview(e):
-        """Roda do mouse sobre a prévia: para cima amplia, para baixo reduz."""
+        """Ctrl + roda do mouse sobre a prévia: para cima amplia, para baixo reduz.
+
+        Sem Ctrl, ignora — deixando a rolagem normal da página. O Ctrl é
+        rastreado pelo teclado (ver _registrar_teclado), pois o ScrollEvent não
+        traz modificadores.
+        """
+        if not _ctrl_ativo():
+            return
         delta = getattr(getattr(e, "scroll_delta", None), "y", 0) or 0
         if not delta:
             return
@@ -7399,7 +7421,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                 on_click=lambda _: mudar_mes_preview(1),
             ),
             ft.Container(expand=True),
-            ft.Text("Zoom (roda do mouse)", size=fonte(12), color=TEXTO_SECUNDARIO),
+            ft.Text("Zoom (Ctrl + roda)", size=fonte(12), color=TEXTO_SECUNDARIO),
             ft.IconButton(
                 ft.Icons.ZOOM_OUT,
                 tooltip="Reduzir",
@@ -7672,7 +7694,7 @@ def criar_barra_lateral(
     for indice, secao in enumerate(SECOES):
         selecionado = indice == 0
         cor = COR_DESTAQUE_SUAVE if selecionado else TEXTO_SECUNDARIO
-        icone = ft.Icon(secao["icone"], size=tema.ICON_SIZE_MENU, color=cor)
+        icone = ft.Icon(secao["icone"], size=_tema.ICON_SIZE_MENU, color=cor)
         rotulo = ft.Text(
             secao["nome"],
             size=fonte(13),
@@ -7693,7 +7715,7 @@ def criar_barra_lateral(
         itens_coluna.append(wrapper)
 
     return ft.Container(
-        width=tema.LARGURA_BARRA_LATERAL,
+        width=_tema.LARGURA_BARRA_LATERAL,
         bgcolor=FUNDO_SIDEBAR,
         border=ft.Border.only(right=ft.BorderSide(1, "#1E2942")),
         padding=ft.Padding.symmetric(vertical=20, horizontal=10),
@@ -8212,10 +8234,11 @@ def main(page: ft.Page):
     )
     garantir_tabelas()
     # Escala de fonte escolhida pelo usuário (acessibilidade), antes de montar a UI.
-    tema.definir_escala(carregar_escala_fonte())
+    _tema.definir_escala(carregar_escala_fonte())
     _auto_backup_diario()
 
     page.title = "Gestão de Arranjo"
+    page.on_keyboard_event = _registrar_teclado  # rastreia Ctrl p/ o zoom do quadro
     aplicar_tema(page)
     page.padding = 0
     page.window.width = 1150

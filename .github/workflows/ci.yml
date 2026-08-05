@@ -20,8 +20,9 @@ jobs:
           python-version: "3.12"
 
       - name: Instalar dependências de teste
-        # Só o necessário para a lógica pura e o banco (sem Flet/GUI).
-        run: pip install pandas python-dateutil pytest ruff
+        # Flet + libs de exportação permitem o smoke de UI (construir as telas
+        # sem abrir janela), que pega regressões como o crash de layout.
+        run: pip install pandas python-dateutil pytest ruff flet reportlab Pillow openpyxl pypdf
 
       - name: Ruff (lint)
         run: ruff check src tests
