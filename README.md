@@ -161,6 +161,43 @@ Na aba **Minha Congregação**:
 O formato JSON é autodescritivo e independente de plataforma — use-o para
 migrar os dados entre computadores.
 
+### Backup na nuvem (Google Drive)
+
+O app pode enviar o backup automático para a sua conta do Google e restaurá-lo
+em outro aparelho (PC ou celular) — assim os dados acompanham você.
+
+**Privacidade:** o app usa o escopo `drive.appdata`, ou seja, enxerga apenas a
+**pasta oculta dele mesmo** no seu Drive; nunca os seus outros arquivos. O
+login é feito na página oficial do Google — o app não vê a sua senha, só
+recebe um token guardado na área privada do próprio aplicativo (o arquivo
+`nuvem_google.json`, que nunca vai para o repositório).
+
+**Como o app não vem com credenciais embutidas** (não é seguro publicá-las num
+projeto aberto), cada pessoa cria as suas, uma única vez e de graça:
+
+1. Acesse o [Google Cloud Console](https://console.cloud.google.com/) e crie um
+   projeto (ex.: "Gestão de Arranjo").
+2. Em **APIs e serviços → Biblioteca**, ative a **Google Drive API**.
+3. Em **APIs e serviços → Tela de permissão OAuth**, configure a tela: tipo
+   **Externo**, preencha nome e e-mail e, em **Usuários de teste**, adicione a
+   sua própria conta do Google. (Como o app só acessa a pasta privada dele, não
+   é preciso passar pela verificação do Google.)
+4. Em **APIs e serviços → Credenciais → Criar credenciais → ID do cliente
+   OAuth**, escolha o tipo **TVs e dispositivos com entrada limitada**.
+5. Copie o **Client ID** e o **Client Secret**.
+6. No app, vá em **Ajustes → Backup na nuvem**, cole os dois valores, toque em
+   **Salvar credenciais** e depois em **Conectar ao Google Drive**: o app mostra
+   um código e um link — abra o link em qualquer navegador, digite o código e
+   autorize.
+
+Feito isso, o backup diário passa a subir sozinho. Em outro aparelho, repita a
+conexão e use **Restaurar da nuvem** para trazer o backup mais recente.
+
+> **Como funciona no dia a dia:** trata-se de backup e restauração, não de
+> sincronização em tempo real. Use um aparelho por vez como o "principal": ao
+> trocar de aparelho, restaure antes de continuar o trabalho. Restaurar sempre
+> pede confirmação e salva uma cópia de segurança dos dados atuais antes.
+
 ## Estrutura do projeto
 
 Todo o código do app vive em [`src/`](src/) — **fonte única** para os três
@@ -172,6 +209,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/main.py` | Interface (Flet): telas, dialogs e navegação; layout responsivo (PC/celular) |
 | `src/database.py` | Esquema SQLite, migrações, consultas e backup |
 | `src/armazenamento.py` | Resolução de caminhos de dados (desktop vs. área privada do celular) |
+| `src/nuvem_drive.py` | Backup na nuvem: OAuth por dispositivo e arquivos na pasta do app no Drive |
 | `src/pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
 | `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
@@ -186,4 +224,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 Este repositório não contém dados de pessoas: o app é distribuído vazio. O
 banco de dados (`data/gestao_arranjo.db`), as exportações (`exports/`) e os
 backups (`backups/`) são criados localmente em cada instalação e nunca são
-enviados a lugar nenhum.
+enviados a lugar nenhum — **exceto** se você ativar o backup na nuvem, que
+envia os backups para a **sua própria** conta do Google, sob seu controle.
+As credenciais e tokens dessa conexão ficam apenas no seu aparelho
+(`nuvem_google.json`, fora do repositório).
