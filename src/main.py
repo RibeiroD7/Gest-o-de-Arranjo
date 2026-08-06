@@ -19,6 +19,7 @@ from typing import Callable
 import flet as ft
 import pandas as pd
 
+import nuvem_drive
 import tema as _tema  # apelidado: `tema` é usado como variável local (título) em várias telas
 from armazenamento import (
     EXPORTS_DIR,
@@ -6966,6 +6967,316 @@ def tela_ajustes(
         width=_largura_dialog(page, 560),
     )
 
+    # ---------------------------------------------------------------
+    # Backup na nuvem (Google Drive)
+    # ---------------------------------------------------------------
+    cred_nuvem = nuvem_drive.carregar_credenciais()
+    conectado_nuvem = nuvem_drive.esta_conectado(cred_nuvem)
+
+    campo_client_id = ft.TextField(
+        label="Client ID",
+        value=cred_nuvem.get("client_id", ""),
+        hint_text="123...apps.googleusercontent.com",
+        expand=True,
+    )
+    campo_client_secret = ft.TextField(
+        label="Client Secret",
+        value=cred_nuvem.get("client_secret", ""),
+        password=True,
+        can_reveal_password=True,
+        expand=True,
+    )
+
+    def salvar_credenciais_nuvem(_=None):
+        dados = nuvem_drive.carregar_credenciais()
+        dados["client_id"] = (campo_client_id.value or "").strip()
+        dados["client_secret"] = (campo_client_secret.value or "").strip()
+        nuvem_drive.salvar_credenciais(dados)
+        mostrar_sucesso(page, "Credenciais salvas.")
+        recarregar()
+
+    def conectar_nuvem(_=None):
+        """Fluxo de dispositivo: mostra o código e aguarda a autorização."""
+        dados = nuvem_drive.carregar_credenciais()
+        if not dados.get("client_id") or not dados.get("client_secret"):
+            mostrar_aviso(
+                page,
+                "Faltam as credenciais",
+                "Preencha o Client ID e o Client Secret e toque em Salvar. "
+                "O passo a passo para criá-los está no README do projeto.",
+            )
+            return
+        try:
+            inicio = executar_com_progresso(
+                page,
+                "Falando com o Google...",
+                lambda: nuvem_drive.iniciar_autorizacao(dados["client_id"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao iniciar autorização do Drive")
+            mostrar_aviso(page, "Não foi possível conectar", str(exc))
+            return
+
+        estado_conexao = {"cancelado": False}
+        url_verificacao = inicio.get("verification_url", "")
+
+        def fechar_conexao(_=None):
+            estado_conexao["cancelado"] = True
+            page.pop_dialog()
+
+        texto_status = ft.Text(
+            "Aguardando a autorização no navegador…", size=fonte(12),
+            color=TEXTO_SECUNDARIO,
+        )
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Conectar ao Google Drive"),
+                content=ft.Container(
+                    width=_largura_dialog(page, 420),
+                    content=ft.Column(
+                        [
+                            ft.Text("1. Abra o endereço abaixo:", size=fonte(13)),
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        url_verificacao, size=fonte(13),
+                                        weight=ft.FontWeight.W_600, color=COR_DESTAQUE,
+                                        selectable=True, expand=True,
+                                    ),
+                                    ft.IconButton(
+                                        ft.Icons.OPEN_IN_NEW,
+                                        tooltip="Abrir no navegador",
+                                        on_click=lambda _: webbrowser.open(url_verificacao),
+                                    ),
+                                ],
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Container(height=8),
+                            ft.Text("2. Digite este código:", size=fonte(13)),
+                            ft.Text(
+                                inicio.get("user_code", ""),
+                                size=fonte(26), weight=ft.FontWeight.BOLD,
+                                color=COR_DESTAQUE_CLARA, selectable=True,
+                            ),
+                            ft.Container(height=8),
+                            ft.Row(
+                                [
+                                    ft.ProgressRing(width=16, height=16, stroke_width=2),
+                                    texto_status,
+                                ],
+                                spacing=10,
+                            ),
+                        ],
+                        spacing=6,
+                        tight=True,
+                    ),
+                ),
+                actions=[ft.TextButton("Cancelar", on_click=fechar_conexao)],
+            )
+        )
+        page.update()
+
+        async def aguardar():
+            import asyncio
+
+            intervalo = max(5, int(inicio.get("interval", 5)))
+            limite = time.monotonic() + int(inicio.get("expires_in", 900))
+            while not estado_conexao["cancelado"] and time.monotonic() < limite:
+                await asyncio.sleep(intervalo)
+                if estado_conexao["cancelado"]:
+                    return
+                try:
+                    obtidas = await asyncio.to_thread(
+                        nuvem_drive.consultar_autorizacao,
+                        dados["client_id"], dados["client_secret"],
+                        inicio.get("device_code", ""),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    page.pop_dialog()
+                    mostrar_aviso(page, "Não foi possível conectar", str(exc))
+                    return
+                if obtidas:
+                    dados.update(obtidas)
+                    nuvem_drive.salvar_credenciais(dados)
+                    page.pop_dialog()
+                    mostrar_sucesso(page, "Conectado ao Google Drive.")
+                    recarregar()
+                    return
+            if not estado_conexao["cancelado"]:
+                page.pop_dialog()
+                mostrar_aviso(page, "Tempo esgotado",
+                              "O código expirou. Tente conectar novamente.")
+
+        page.run_task(aguardar)
+
+    def enviar_para_nuvem(_=None):
+        try:
+            def tarefa():
+                caminho, _ = exportar_backup()
+                dados = nuvem_drive.carregar_credenciais()
+                token = nuvem_drive.obter_access_token(dados)
+                return nuvem_drive.enviar_backup(token, caminho)
+
+            executar_com_progresso(page, "Enviando para o Google Drive...", tarefa)
+            mostrar_sucesso(page, "Backup enviado para o Google Drive.")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao enviar backup para o Drive")
+            mostrar_aviso(page, "Não foi possível enviar", str(exc))
+
+    def restaurar_da_nuvem(_=None):
+        """Baixa o backup mais recente da nuvem e restaura (com confirmação)."""
+        try:
+            def buscar():
+                dados = nuvem_drive.carregar_credenciais()
+                token = nuvem_drive.obter_access_token(dados)
+                return token, nuvem_drive.listar_backups(token)
+
+            token, arquivos = executar_com_progresso(
+                page, "Consultando o Google Drive...", buscar
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao listar backups do Drive")
+            mostrar_aviso(page, "Não foi possível consultar", str(exc))
+            return
+
+        mais_novo = nuvem_drive.escolher_mais_novo(arquivos)
+        if not mais_novo:
+            mostrar_aviso(page, "Nenhum backup na nuvem",
+                          "Envie um backup a partir de outro aparelho primeiro.")
+            return
+
+        quando = (mais_novo.get("modifiedTime") or "")[:16].replace("T", " ")
+
+        def confirmar(_=None):
+            page.pop_dialog()
+            try:
+                def tarefa():
+                    conteudo = nuvem_drive.baixar_backup(token, mais_novo["id"])
+                    from armazenamento import BACKUPS_DIR
+
+                    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+                    destino = BACKUPS_DIR / f"nuvem_{mais_novo.get('name', 'backup.json')}"
+                    destino.write_bytes(conteudo)
+                    return restaurar_backup(destino)
+
+                ok, mensagem = executar_com_progresso(
+                    page, "Restaurando da nuvem...", tarefa
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Falha ao restaurar backup da nuvem")
+                mostrar_aviso(page, "Não foi possível restaurar", str(exc))
+                return
+            if not ok:
+                mostrar_aviso(page, "Não foi possível restaurar", mensagem)
+                return
+            mostrar_sucesso(page, "Dados restaurados da nuvem.")
+            recarregar()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Restaurar da nuvem?"),
+                content=ft.Text(
+                    f"O backup mais recente da nuvem é de {quando} (UTC).\n\n"
+                    "Os dados atuais deste aparelho serão SUBSTITUÍDOS. Uma cópia "
+                    "de segurança do estado atual é salva antes, na pasta de backups.",
+                    size=fonte(13),
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=lambda _: page.pop_dialog()),
+                    ft.FilledButton("Restaurar", icon=ft.Icons.CLOUD_DOWNLOAD_OUTLINED,
+                                    on_click=confirmar),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+
+    def desconectar_nuvem(_=None):
+        nuvem_drive.esquecer_credenciais()
+        mostrar_sucesso(page, "Desconectado. Os backups na nuvem continuam lá.")
+        recarregar()
+
+    if conectado_nuvem:
+        controles_nuvem = [
+            ft.Row(
+                [
+                    ft.Icon(ft.Icons.CLOUD_DONE, color=COR_SUCESSO, size=fonte(18)),
+                    ft.Text("Conectado ao Google Drive", size=fonte(13),
+                            color=COR_SUCESSO, weight=ft.FontWeight.W_600),
+                ],
+                spacing=8,
+            ),
+            ft.Container(height=10),
+            ft.Row(
+                [
+                    ft.FilledButton("Enviar backup agora",
+                                    icon=ft.Icons.CLOUD_UPLOAD_OUTLINED,
+                                    on_click=enviar_para_nuvem),
+                    ft.OutlinedButton("Restaurar da nuvem",
+                                      icon=ft.Icons.CLOUD_DOWNLOAD_OUTLINED,
+                                      on_click=restaurar_da_nuvem),
+                    ft.TextButton("Desconectar", on_click=desconectar_nuvem),
+                ],
+                spacing=12,
+                wrap=True,
+            ),
+        ]
+    else:
+        controles_nuvem = [
+            ft.Text(
+                "Envie o backup automático para a sua conta do Google e restaure "
+                "em outro aparelho. O aplicativo só enxerga a pasta oculta dele "
+                "mesmo no Drive — nunca o restante dos seus arquivos.",
+                size=fonte(13),
+                color=TEXTO_SECUNDARIO,
+            ),
+            ft.Container(height=10),
+            ft.Text(
+                "Crie as credenciais no Google Cloud Console (tipo \"TV e "
+                "dispositivos com entrada limitada\") — o passo a passo está no "
+                "README do projeto.",
+                size=fonte(12),
+                color=TEXTO_SECUNDARIO,
+                italic=True,
+            ),
+            ft.Container(height=10),
+            campo_client_id,
+            ft.Container(height=8),
+            campo_client_secret,
+            ft.Container(height=10),
+            ft.Row(
+                [
+                    ft.OutlinedButton("Salvar credenciais", icon=ft.Icons.SAVE,
+                                      on_click=salvar_credenciais_nuvem),
+                    ft.FilledButton("Conectar ao Google Drive",
+                                    icon=ft.Icons.CLOUD_SYNC_OUTLINED,
+                                    on_click=conectar_nuvem),
+                ],
+                spacing=12,
+                wrap=True,
+            ),
+        ]
+
+    secao_nuvem = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text("Backup na nuvem (Google Drive)", size=fonte(16),
+                        weight=ft.FontWeight.W_600),
+                ft.Container(height=4),
+                *controles_nuvem,
+            ],
+            spacing=0,
+            tight=True,
+        ),
+        padding=16 if eh_mobile() else 28,
+        bgcolor=FUNDO_CARD,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=14,
+        shadow=_sombra_card(),
+        width=_largura_dialog(page, 560),
+    )
+
     def mudar_escala(e=None):
         """Aplica e salva a escala de fonte, remontando a tela."""
         try:
@@ -7037,6 +7348,8 @@ def tela_ajustes(
             secao_acessibilidade,
             ft.Container(height=24),
             secao_backup,
+            ft.Container(height=24),
+            secao_nuvem,
             ft.Container(height=24),
             secao_planilha,
             ft.Container(height=24),
@@ -7749,9 +8062,37 @@ def _auto_backup_diario() -> None:
         total = int(carregar_dados("SELECT COUNT(*) AS n FROM oradores")["n"].iloc[0])
         if total == 0:
             return
-        exportar_backup()
+        caminho, _ = exportar_backup()
+        return caminho
     except Exception:  # noqa: BLE001 — backup automático nunca deve quebrar o app
         logger.exception("Falha no backup automático diário")
+        return None
+
+
+def _enviar_backup_nuvem_em_segundo_plano(page: ft.Page, caminho: str) -> None:
+    """Sobe o backup do dia para o Drive, se o aparelho estiver conectado.
+
+    Silencioso e fora da thread da interface: é uma conveniência, não pode
+    atrasar nem quebrar a abertura do app. Falhas ficam no log.
+    """
+    if not nuvem_drive.esta_conectado():
+        return
+
+    async def _subir():
+        import asyncio
+
+        def tarefa():
+            credenciais = nuvem_drive.carregar_credenciais()
+            token = nuvem_drive.obter_access_token(credenciais)
+            nuvem_drive.enviar_backup(token, caminho)
+
+        try:
+            await asyncio.to_thread(tarefa)
+            logger.info("Backup do dia enviado ao Google Drive")
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao enviar o backup automático para a nuvem")
+
+    page.run_task(_subir)
 
 
 def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
@@ -8235,7 +8576,7 @@ def main(page: ft.Page):
     garantir_tabelas()
     # Escala de fonte escolhida pelo usuário (acessibilidade), antes de montar a UI.
     _tema.definir_escala(carregar_escala_fonte())
-    _auto_backup_diario()
+    backup_do_dia = _auto_backup_diario()
 
     page.title = "Gestão de Arranjo"
     page.on_keyboard_event = _registrar_teclado  # rastreia Ctrl p/ o zoom do quadro
@@ -8385,6 +8726,8 @@ def main(page: ft.Page):
     page.update()
     navegar(0)
     _verificar_atualizacao(page)
+    if backup_do_dia:
+        _enviar_backup_nuvem_em_segundo_plano(page, backup_do_dia)
 
     # Primeiro uso: se a congregação ainda não foi preenchida, orienta o usuário.
     if not carregar_configuracao().get("nome_congregacao", "").strip():
