@@ -16,6 +16,9 @@ data/gestao_arranjo.db
 exports/
 gestao_arranjo.log*
 
+# Credenciais/tokens do backup na nuvem — NUNCA versionar
+nuvem_google.json
+
 # Saída do flet build
 build/
 dist/
