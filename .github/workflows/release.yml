@@ -36,6 +36,32 @@ jobs:
           [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
 
+      - name: Injetar credenciais do Google (backup na nuvem)
+        # Vêm dos secrets do repositório: ficam nos instaladores, nunca no
+        # código publicado. Sem os secrets, o app pede as credenciais do
+        # próprio usuário em Ajustes (nada quebra).
+        shell: bash
+        env:
+          ID_DESKTOP: ${{ secrets.GOOGLE_CLIENT_ID_DESKTOP }}
+          SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
+          ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
+          SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
+        run: |
+          python - <<'EOF'
+          import os, pathlib
+          arquivo = pathlib.Path("src/credenciais_app.py")
+          texto = arquivo.read_text(encoding="utf-8")
+          for chave, variavel in (
+              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
+              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
+              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
+              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
+          ):
+              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
+          arquivo.write_text(texto, encoding="utf-8")
+          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
+          EOF
+
       - name: Compilar
         # UTF-8 evita o UnicodeEncodeError do console cp1252 do Windows;
         # --no-rich-output desliga o indicador de progresso com caracteres especiais.
@@ -91,6 +117,32 @@ jobs:
           [[ "$VERSAO" == "$GITHUB_REF_NAME" ]] && VERSAO="1.0.0"
           echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
 
+      - name: Injetar credenciais do Google (backup na nuvem)
+        # Vêm dos secrets do repositório: ficam nos instaladores, nunca no
+        # código publicado. Sem os secrets, o app pede as credenciais do
+        # próprio usuário em Ajustes (nada quebra).
+        shell: bash
+        env:
+          ID_DESKTOP: ${{ secrets.GOOGLE_CLIENT_ID_DESKTOP }}
+          SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
+          ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
+          SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
+        run: |
+          python - <<'EOF'
+          import os, pathlib
+          arquivo = pathlib.Path("src/credenciais_app.py")
+          texto = arquivo.read_text(encoding="utf-8")
+          for chave, variavel in (
+              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
+              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
+              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
+              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
+          ):
+              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
+          arquivo.write_text(texto, encoding="utf-8")
+          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
+          EOF
+
       - name: Compilar
         run: >
           flet build linux --yes
@@ -142,6 +194,32 @@ jobs:
         # inicial vem de temas_seed.json. Removemos a linha antes de compilar o
         # APK para não tentar instalá-la — a fonte .py continua única.
         run: sed -i '/python-calamine/d' pyproject.toml
+
+      - name: Injetar credenciais do Google (backup na nuvem)
+        # Vêm dos secrets do repositório: ficam nos instaladores, nunca no
+        # código publicado. Sem os secrets, o app pede as credenciais do
+        # próprio usuário em Ajustes (nada quebra).
+        shell: bash
+        env:
+          ID_DESKTOP: ${{ secrets.GOOGLE_CLIENT_ID_DESKTOP }}
+          SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
+          ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
+          SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
+        run: |
+          python - <<'EOF'
+          import os, pathlib
+          arquivo = pathlib.Path("src/credenciais_app.py")
+          texto = arquivo.read_text(encoding="utf-8")
+          for chave, variavel in (
+              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
+              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
+              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
+              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
+          ):
+              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
+          arquivo.write_text(texto, encoding="utf-8")
+          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
+          EOF
 
       - name: Compilar
         # --split-per-abi gera um APK por arquitetura (bem menor que o

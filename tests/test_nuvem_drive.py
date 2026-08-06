@@ -169,6 +169,96 @@ class TestListarEBaixar:
         assert "alt=media" in http.chamadas[0]["url"]
 
 
+class TestLoginNoPc:
+    """Fluxo de loopback: o navegador volta sozinho para o app."""
+
+    def test_pkce_gera_desafio_valido(self):
+        import base64
+        import hashlib
+
+        verificador, desafio = nd._gerar_pkce()
+        assert 43 <= len(verificador) <= 128
+        esperado = base64.urlsafe_b64encode(
+            hashlib.sha256(verificador.encode()).digest()
+        ).rstrip(b"=").decode()
+        assert desafio == esperado
+        assert "=" not in desafio  # base64url sem padding, como o Google exige
+
+    def test_url_de_autorizacao(self):
+        from urllib.parse import parse_qs, urlparse
+
+        url = nd.montar_url_autorizacao("meu-id", "http://127.0.0.1:9999", "DESAFIO")
+        partes = urlparse(url)
+        campos = {k: v[0] for k, v in parse_qs(partes.query).items()}
+        assert partes.netloc == "accounts.google.com"
+        assert campos["client_id"] == "meu-id"
+        assert campos["redirect_uri"] == "http://127.0.0.1:9999"
+        assert campos["code_challenge_method"] == "S256"
+        # offline + consent são o que garantem o refresh_token.
+        assert campos["access_type"] == "offline"
+        assert campos["prompt"] == "consent"
+        assert campos["scope"] == nd.ESCOPO
+
+    def test_servidor_captura_o_codigo(self):
+        """Sobe o servidor de verdade e simula o retorno do navegador."""
+        import urllib.request
+
+        with nd.ServidorRetorno() as servidor:
+            url = servidor.url_redirecionamento
+            assert url.startswith("http://127.0.0.1:")
+
+            with urllib.request.urlopen(f"{url}/?code=CODIGO-123&scope=x") as resposta:
+                pagina = resposta.read().decode("utf-8")
+            assert "Tudo certo" in pagina  # o usuário vê uma página amigável
+            assert servidor.aguardar_codigo(timeout=5) == "CODIGO-123"
+
+    def test_servidor_reporta_recusa(self):
+        import urllib.request
+
+        with nd.ServidorRetorno() as servidor:
+            with urllib.request.urlopen(
+                f"{servidor.url_redirecionamento}/?error=access_denied"
+            ) as resposta:
+                assert "Não foi possível" in resposta.read().decode("utf-8")
+            with pytest.raises(nd.ErroNuvem, match="access_denied"):
+                servidor.aguardar_codigo(timeout=5)
+
+    def test_troca_do_codigo_envia_pkce(self):
+        http = HttpFalso([_json(200, {"access_token": "AT", "refresh_token": "RT",
+                                      "expires_in": 3600})])
+        cred = nd.trocar_codigo_por_tokens(
+            "id", "seg", "CODIGO", "http://127.0.0.1:1234", "VERIF", http=http
+        )
+        assert cred["refresh_token"] == "RT"
+        enviado = _campos(http.chamadas[0]["corpo"])
+        assert enviado["grant_type"] == "authorization_code"
+        assert enviado["code_verifier"] == "VERIF"
+        assert enviado["redirect_uri"] == "http://127.0.0.1:1234"
+
+
+class TestEscolhaDeCredenciais:
+    def test_usuario_tem_prioridade_sobre_embutidas(self, monkeypatch):
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_ID_DESKTOP", "EMBUTIDO")
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_SECRET_DESKTOP", "S-EMB")
+        salvas = {"client_id": "MEU", "client_secret": "S-MEU"}
+        assert nd.credenciais_efetivas(False, salvas) == ("MEU", "S-MEU")
+
+    def test_usa_embutidas_por_plataforma(self, monkeypatch):
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_ID_DESKTOP", "PC")
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_SECRET_DESKTOP", "S-PC")
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_ID_DISPOSITIVO", "CEL")
+        monkeypatch.setattr(nd.credenciais_app, "CLIENT_SECRET_DISPOSITIVO", "S-CEL")
+        assert nd.credenciais_efetivas(False, {}) == ("PC", "S-PC")
+        assert nd.credenciais_efetivas(True, {}) == ("CEL", "S-CEL")
+        assert nd.ha_credenciais(True, {}) is True
+
+    def test_sem_credenciais(self, monkeypatch):
+        for nome in ("CLIENT_ID_DESKTOP", "CLIENT_SECRET_DESKTOP",
+                     "CLIENT_ID_DISPOSITIVO", "CLIENT_SECRET_DISPOSITIVO"):
+            monkeypatch.setattr(nd.credenciais_app, nome, "")
+        assert nd.ha_credenciais(False, {}) is False
+
+
 class TestCredenciaisLocais:
     def test_ida_e_volta_e_desconectar(self, tmp_path):
         destino = tmp_path / "cred.json"

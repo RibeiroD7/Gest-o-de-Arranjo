@@ -6995,17 +6995,112 @@ def tela_ajustes(
         mostrar_sucesso(page, "Credenciais salvas.")
         recarregar()
 
+    def conectar_pelo_navegador(client_id: str, client_secret: str):
+        """PC: abre o navegador e recebe o retorno automaticamente (loopback)."""
+        servidor = nuvem_drive.ServidorRetorno()
+        servidor.__enter__()
+        verificador, desafio = nuvem_drive._gerar_pkce()
+        url = nuvem_drive.montar_url_autorizacao(
+            client_id, servidor.url_redirecionamento, desafio
+        )
+        webbrowser.open(url)
+
+        estado_login = {"cancelado": False}
+
+        def cancelar(_=None):
+            estado_login["cancelado"] = True
+            servidor.encerrar()
+            page.pop_dialog()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Entrar com o Google"),
+                content=ft.Container(
+                    width=_largura_dialog(page, 420),
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                "Abrimos o navegador para você entrar na sua conta "
+                                "do Google e autorizar o aplicativo.",
+                                size=fonte(13),
+                            ),
+                            ft.Container(height=8),
+                            ft.Row(
+                                [
+                                    ft.ProgressRing(width=16, height=16, stroke_width=2),
+                                    ft.Text("Aguardando…", size=fonte(12),
+                                            color=TEXTO_SECUNDARIO),
+                                ],
+                                spacing=10,
+                            ),
+                            ft.Container(height=8),
+                            ft.TextButton(
+                                "Não abriu? Clique aqui",
+                                icon=ft.Icons.OPEN_IN_NEW,
+                                on_click=lambda _: webbrowser.open(url),
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                    ),
+                ),
+                actions=[ft.TextButton("Cancelar", on_click=cancelar)],
+            )
+        )
+        page.update()
+
+        async def aguardar_navegador():
+            import asyncio
+
+            try:
+                codigo = await asyncio.to_thread(servidor.aguardar_codigo, 300)
+                obtidas = await asyncio.to_thread(
+                    nuvem_drive.trocar_codigo_por_tokens,
+                    client_id, client_secret, codigo,
+                    servidor.url_redirecionamento, verificador,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if estado_login["cancelado"]:
+                    return
+                logger.exception("Falha no login pelo navegador")
+                page.pop_dialog()
+                mostrar_aviso(page, "Não foi possível conectar", str(exc))
+                return
+            finally:
+                servidor.encerrar()
+            if estado_login["cancelado"]:
+                return
+            dados = nuvem_drive.carregar_credenciais()
+            dados.update(obtidas)
+            dados["client_id"], dados["client_secret"] = client_id, client_secret
+            nuvem_drive.salvar_credenciais(dados)
+            page.pop_dialog()
+            mostrar_sucesso(page, "Conectado ao Google Drive.")
+            recarregar()
+
+        page.run_task(aguardar_navegador)
+
     def conectar_nuvem(_=None):
-        """Fluxo de dispositivo: mostra o código e aguarda a autorização."""
-        dados = nuvem_drive.carregar_credenciais()
-        if not dados.get("client_id") or not dados.get("client_secret"):
+        """Conecta ao Drive: navegador no PC, código no celular."""
+        salvas = nuvem_drive.carregar_credenciais()
+        client_id, client_secret = nuvem_drive.credenciais_efetivas(eh_mobile(), salvas)
+        if not client_id or not client_secret:
             mostrar_aviso(
                 page,
                 "Faltam as credenciais",
-                "Preencha o Client ID e o Client Secret e toque em Salvar. "
-                "O passo a passo para criá-los está no README do projeto.",
+                "Esta versão foi compilada sem as credenciais do Google. "
+                "Informe as suas em \"Usar minhas credenciais\" — o passo a "
+                "passo está no README do projeto.",
             )
             return
+
+        if not eh_mobile():
+            conectar_pelo_navegador(client_id, client_secret)
+            return
+
+        dados = dict(salvas)
+        dados["client_id"], dados["client_secret"] = client_id, client_secret
         try:
             inicio = executar_com_progresso(
                 page,
@@ -7223,39 +7318,48 @@ def tela_ajustes(
             ),
         ]
     else:
+        tem_credenciais = nuvem_drive.ha_credenciais(eh_mobile(), cred_nuvem)
+        area_avancado = ft.Column(
+            [
+                ft.Container(height=10),
+                campo_client_id,
+                ft.Container(height=8),
+                campo_client_secret,
+                ft.Container(height=10),
+                ft.OutlinedButton("Salvar credenciais", icon=ft.Icons.SAVE,
+                                  on_click=salvar_credenciais_nuvem),
+            ],
+            spacing=0,
+            tight=True,
+            visible=not tem_credenciais,
+        )
+
+        def alternar_avancado(_=None):
+            area_avancado.visible = not area_avancado.visible
+            page.update()
+
         controles_nuvem = [
             ft.Text(
                 "Envie o backup automático para a sua conta do Google e restaure "
-                "em outro aparelho. O aplicativo só enxerga a pasta oculta dele "
-                "mesmo no Drive — nunca o restante dos seus arquivos.",
+                "em outro aparelho. Cada pessoa entra na própria conta, e o "
+                "aplicativo só enxerga a pasta dele mesmo no Drive — nunca o "
+                "restante dos seus arquivos.",
                 size=fonte(13),
                 color=TEXTO_SECUNDARIO,
             ),
-            ft.Container(height=10),
-            ft.Text(
-                "Crie as credenciais no Google Cloud Console (tipo \"TV e "
-                "dispositivos com entrada limitada\") — o passo a passo está no "
-                "README do projeto.",
-                size=fonte(12),
-                color=TEXTO_SECUNDARIO,
-                italic=True,
+            ft.Container(height=12),
+            ft.FilledButton(
+                "Entrar com o Google",
+                icon=ft.Icons.CLOUD_SYNC_OUTLINED,
+                on_click=conectar_nuvem,
             ),
-            ft.Container(height=10),
-            campo_client_id,
-            ft.Container(height=8),
-            campo_client_secret,
-            ft.Container(height=10),
-            ft.Row(
-                [
-                    ft.OutlinedButton("Salvar credenciais", icon=ft.Icons.SAVE,
-                                      on_click=salvar_credenciais_nuvem),
-                    ft.FilledButton("Conectar ao Google Drive",
-                                    icon=ft.Icons.CLOUD_SYNC_OUTLINED,
-                                    on_click=conectar_nuvem),
-                ],
-                spacing=12,
-                wrap=True,
+            ft.Container(height=4),
+            ft.TextButton(
+                "Usar minhas credenciais (avançado)",
+                icon=ft.Icons.KEY_OUTLINED,
+                on_click=alternar_avancado,
             ),
+            area_avancado,
         ]
 
     secao_nuvem = ft.Container(

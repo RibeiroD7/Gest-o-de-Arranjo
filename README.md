@@ -172,26 +172,44 @@ login é feito na página oficial do Google — o app não vê a sua senha, só
 recebe um token guardado na área privada do próprio aplicativo (o arquivo
 `nuvem_google.json`, que nunca vai para o repositório).
 
-**Como o app não vem com credenciais embutidas** (não é seguro publicá-las num
-projeto aberto), cada pessoa cria as suas, uma única vez e de graça:
+**Para quem usa o app:** vá em **Ajustes → Backup na nuvem → Entrar com o
+Google**. No computador, o navegador abre, você escolhe a sua conta e o app
+conecta sozinho; no celular, aparece um código para digitar na página do
+Google. Cada pessoa entra na **própria** conta — os backups de uma nunca
+aparecem para a outra.
 
-1. Acesse o [Google Cloud Console](https://console.cloud.google.com/) e crie um
+Feito isso, o backup diário passa a subir sozinho. Em outro aparelho, entre com
+a mesma conta e use **Restaurar da nuvem** para trazer o backup mais recente.
+
+<details>
+<summary><b>Para quem publica o app</b> (criar as credenciais do Google, uma vez)</summary>
+
+Os instaladores das Releases levam as credenciais embutidas, injetadas pelo
+GitHub Actions a partir dos *secrets* — elas não ficam no código publicado.
+Para gerar as suas:
+
+1. No [Google Cloud Console](https://console.cloud.google.com/), crie um
    projeto (ex.: "Gestão de Arranjo").
 2. Em **APIs e serviços → Biblioteca**, ative a **Google Drive API**.
-3. Em **APIs e serviços → Tela de permissão OAuth**, configure a tela: tipo
-   **Externo**, preencha nome e e-mail e, em **Usuários de teste**, adicione a
-   sua própria conta do Google. (Como o app só acessa a pasta privada dele, não
-   é preciso passar pela verificação do Google.)
-4. Em **APIs e serviços → Credenciais → Criar credenciais → ID do cliente
-   OAuth**, escolha o tipo **TVs e dispositivos com entrada limitada**.
-5. Copie o **Client ID** e o **Client Secret**.
-6. No app, vá em **Ajustes → Backup na nuvem**, cole os dois valores, toque em
-   **Salvar credenciais** e depois em **Conectar ao Google Drive**: o app mostra
-   um código e um link — abra o link em qualquer navegador, digite o código e
-   autorize.
+3. Em **APIs e serviços → Tela de permissão OAuth**, configure: tipo
+   **Externo**, nome e e-mail de contato. Depois **publique** a tela (botão
+   *Publicar aplicativo*). Como o escopo usado (`drive.appdata`) é
+   **não sensível**, não é preciso passar pela verificação do Google — e,
+   publicada, a conexão não expira a cada 7 dias (limite do modo "Teste").
+4. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, crie **duas**,
+   porque o Google exige um tipo por fluxo:
+   - **App para computador** → usada no PC (login que volta sozinho ao app);
+   - **TVs e dispositivos com entrada limitada** → usada no Android (código).
+5. Em **Settings → Secrets and variables → Actions** do repositório no GitHub,
+   cadastre os quatro valores:
+   `GOOGLE_CLIENT_ID_DESKTOP`, `GOOGLE_CLIENT_SECRET_DESKTOP`,
+   `GOOGLE_CLIENT_ID_DISPOSITIVO`, `GOOGLE_CLIENT_SECRET_DISPOSITIVO`.
 
-Feito isso, o backup diário passa a subir sozinho. Em outro aparelho, repita a
-conexão e use **Restaurar da nuvem** para trazer o backup mais recente.
+A próxima Release já sai com o login pronto. Sem os secrets, nada quebra: o app
+apenas pede as credenciais em **Usar minhas credenciais (avançado)** — que é
+também o caminho de quem compila do código-fonte.
+
+</details>
 
 > **Como funciona no dia a dia:** trata-se de backup e restauração, não de
 > sincronização em tempo real. Use um aparelho por vez como o "principal": ao

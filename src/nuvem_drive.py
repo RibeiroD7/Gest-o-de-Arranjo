@@ -15,18 +15,24 @@ protocolo sem rede nem credenciais (ver ``tests/test_nuvem_drive.py``).
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import mimetypes
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Callable
 
+import credenciais_app
 from armazenamento import BASE_DIR
 
+URL_AUTORIZACAO = "https://accounts.google.com/o/oauth2/v2/auth"
 URL_DEVICE_CODE = "https://oauth2.googleapis.com/device/code"
 URL_TOKEN = "https://oauth2.googleapis.com/token"
 URL_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
@@ -84,6 +90,174 @@ def _json_ou_erro(resposta: Resposta, contexto: str) -> dict:
         )
         raise ErroNuvem(f"{contexto}: {detalhe}")
     return dados
+
+
+# ---------------------------------------------------------------------------
+# Quais credenciais usar
+# ---------------------------------------------------------------------------
+
+
+def credenciais_do_app(mobile: bool) -> tuple[str, str]:
+    """Client ID/Secret embutidos para a plataforma (vazios se não houver)."""
+    if mobile:
+        return (
+            credenciais_app.CLIENT_ID_DISPOSITIVO,
+            credenciais_app.CLIENT_SECRET_DISPOSITIVO,
+        )
+    return credenciais_app.CLIENT_ID_DESKTOP, credenciais_app.CLIENT_SECRET_DESKTOP
+
+
+def credenciais_efetivas(mobile: bool, salvas: dict | None = None) -> tuple[str, str]:
+    """As credenciais que devem ser usadas agora.
+
+    As do usuário (informadas em Ajustes) têm prioridade; senão, as embutidas
+    na compilação. Assim o app funciona "de fábrica", mas quem compila do
+    código-fonte pode usar as suas.
+    """
+    salvas = carregar_credenciais() if salvas is None else salvas
+    if salvas.get("client_id") and salvas.get("client_secret"):
+        return salvas["client_id"], salvas["client_secret"]
+    return credenciais_do_app(mobile)
+
+
+def ha_credenciais(mobile: bool, salvas: dict | None = None) -> bool:
+    client_id, client_secret = credenciais_efetivas(mobile, salvas)
+    return bool(client_id and client_secret)
+
+
+# ---------------------------------------------------------------------------
+# Autorização no PC: o navegador volta sozinho para o app (loopback + PKCE)
+# ---------------------------------------------------------------------------
+
+
+def _gerar_pkce() -> tuple[str, str]:
+    """Par (verificador, desafio) do PKCE, que protege a troca do código."""
+    verificador = secrets.token_urlsafe(64)[:128]
+    resumo = hashlib.sha256(verificador.encode("ascii")).digest()
+    desafio = base64.urlsafe_b64encode(resumo).rstrip(b"=").decode("ascii")
+    return verificador, desafio
+
+
+def montar_url_autorizacao(
+    client_id: str, redirect_uri: str, desafio: str, escopo: str = ESCOPO
+) -> str:
+    """Endereço da tela de login/consentimento do Google."""
+    parametros = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": escopo,
+        "code_challenge": desafio,
+        "code_challenge_method": "S256",
+        # offline + consent garantem o refresh_token (conexão duradoura).
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    return f"{URL_AUTORIZACAO}?{urllib.parse.urlencode(parametros)}"
+
+
+_PAGINA_OK = """<!doctype html><html lang="pt-BR"><meta charset="utf-8">
+<title>Gestão de Arranjo</title>
+<body style="font-family:system-ui;background:#0E1524;color:#E7ECF5;
+text-align:center;padding-top:80px">
+<h2 style="color:#2DD4BF">Tudo certo!</h2>
+<p>O Gestão de Arranjo está conectado ao seu Google Drive.</p>
+<p style="color:#7C89A6">Você já pode fechar esta aba e voltar ao aplicativo.</p>
+</body></html>"""
+
+_PAGINA_ERRO = """<!doctype html><html lang="pt-BR"><meta charset="utf-8">
+<title>Gestão de Arranjo</title>
+<body style="font-family:system-ui;background:#0E1524;color:#E7ECF5;
+text-align:center;padding-top:80px">
+<h2 style="color:#F87171">Não foi possível conectar</h2>
+<p style="color:#7C89A6">Volte ao aplicativo e tente novamente.</p>
+</body></html>"""
+
+
+class ServidorRetorno:
+    """Servidor local que recebe o retorno do Google após o login.
+
+    Sobe em 127.0.0.1 numa porta livre; o Google redireciona o navegador para
+    cá com o código de autorização. Use como gerenciador de contexto.
+    """
+
+    def __init__(self) -> None:
+        self._resultado: dict[str, str] = {}
+        pronto = threading.Event()
+        resultado = self._resultado
+
+        class Manipulador(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 — nome exigido pelo BaseHTTPRequestHandler
+                consulta = urllib.parse.urlparse(self.path).query
+                campos = urllib.parse.parse_qs(consulta)
+                if "code" in campos:
+                    resultado["code"] = campos["code"][0]
+                    corpo = _PAGINA_OK
+                else:
+                    resultado["erro"] = (campos.get("error") or ["desconhecido"])[0]
+                    corpo = _PAGINA_ERRO
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(corpo.encode("utf-8"))
+                pronto.set()
+
+            def log_message(self, *_):  # silencia o log no console
+                return
+
+        self._pronto = pronto
+        self._servidor = HTTPServer(("127.0.0.1", 0), Manipulador)
+        self._thread = threading.Thread(target=self._servidor.serve_forever, daemon=True)
+
+    @property
+    def url_redirecionamento(self) -> str:
+        return f"http://127.0.0.1:{self._servidor.server_address[1]}"
+
+    def __enter__(self) -> ServidorRetorno:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_) -> None:
+        self.encerrar()
+
+    def aguardar_codigo(self, timeout: float = 300) -> str:
+        """Espera o retorno do navegador e devolve o código de autorização."""
+        if not self._pronto.wait(timeout):
+            raise ErroNuvem("Tempo esgotado esperando a autorização no navegador.")
+        if "erro" in self._resultado:
+            raise ErroNuvem(f"Autorização não concluída ({self._resultado['erro']}).")
+        return self._resultado["code"]
+
+    def encerrar(self) -> None:
+        self._servidor.shutdown()
+        self._servidor.server_close()
+
+
+def trocar_codigo_por_tokens(
+    client_id: str,
+    client_secret: str,
+    codigo: str,
+    redirect_uri: str,
+    verificador: str,
+    http: Http = _http_padrao,
+) -> dict:
+    """Troca o código do navegador pelos tokens de acesso."""
+    corpo = urllib.parse.urlencode(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": codigo,
+            "code_verifier": verificador,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        }
+    ).encode()
+    dados = _json_ou_erro(
+        http("POST", URL_TOKEN, corpo,
+             {"Content-Type": "application/x-www-form-urlencoded"}),
+        "Não foi possível concluir o login",
+    )
+    return _credenciais_de_resposta(dados)
 
 
 # ---------------------------------------------------------------------------
