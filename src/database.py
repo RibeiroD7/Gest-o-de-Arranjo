@@ -374,6 +374,9 @@ def create_tables(conn):
     if "ordem" not in colunas_cadastro:
         cursor.execute("ALTER TABLE presidentes_cadastro ADD COLUMN ordem INTEGER")
         _semear_ordem_presidentes(conn)
+    # Telefone: usado para mandar a mensagem da presidência pelo WhatsApp.
+    if "telefone" not in colunas_cadastro:
+        cursor.execute("ALTER TABLE presidentes_cadastro ADD COLUMN telefone TEXT")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
@@ -1354,12 +1357,19 @@ def listar_presidentes_cadastro() -> list[dict]:
     try:
         linhas = conn.execute(
             """
-            SELECT id, nome, categoria, ordem FROM presidentes_cadastro
+            SELECT id, nome, categoria, ordem, COALESCE(telefone, '')
+            FROM presidentes_cadastro
             ORDER BY COALESCE(ordem, 999999), nome
             """
         ).fetchall()
         return [
-            {"id": linha[0], "nome": linha[1], "categoria": linha[2], "ordem": linha[3]}
+            {
+                "id": linha[0],
+                "nome": linha[1],
+                "categoria": linha[2],
+                "ordem": linha[3],
+                "telefone": linha[4],
+            }
             for linha in linhas
         ]
     finally:
@@ -1430,22 +1440,28 @@ def salvar_ordem_presidentes(ids_em_ordem: list[int]) -> None:
         conn.close()
 
 
-def salvar_presidente_cadastro(nome: str, categoria: str, cadastro_id: int | None = None) -> int:
+def salvar_presidente_cadastro(
+    nome: str,
+    categoria: str,
+    cadastro_id: int | None = None,
+    telefone: str = "",
+) -> int:
     """Cria ou atualiza um presidente no cadastro; retorna o ID."""
     conn = get_connection()
     try:
         if cadastro_id:
             conn.execute(
-                "UPDATE presidentes_cadastro SET nome = ?, categoria = ? WHERE id = ?",
-                (nome, categoria, cadastro_id),
+                "UPDATE presidentes_cadastro SET nome = ?, categoria = ?, telefone = ? "
+                "WHERE id = ?",
+                (nome, categoria, telefone, cadastro_id),
             )
         else:
             cursor = conn.execute(
                 """
-                INSERT INTO presidentes_cadastro (nome, categoria, ordem)
-                VALUES (?, ?, (SELECT COALESCE(MAX(ordem), 0) + 1 FROM presidentes_cadastro))
+                INSERT INTO presidentes_cadastro (nome, categoria, telefone, ordem)
+                VALUES (?, ?, ?, (SELECT COALESCE(MAX(ordem), 0) + 1 FROM presidentes_cadastro))
                 """,
-                (nome, categoria),
+                (nome, categoria, telefone),
             )
             cadastro_id = int(cursor.lastrowid)
         conn.commit()

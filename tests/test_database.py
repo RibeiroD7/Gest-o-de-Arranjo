@@ -193,3 +193,38 @@ class TestUsoDosTemas:
         database.adicionar_orador_arranjo(arranjo, "recebido", orador, 74, data="31/10/2026")
         anos = [a["ano"] for a in database.listar_anos_colunas(apenas_visiveis=False)]
         assert 2026 in anos
+
+
+class TestTelefoneDoPresidente:
+    """O telefone do presidente é o destino da mensagem da presidência."""
+
+    def _limpar(self):
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_salva_e_le_o_telefone(self):
+        self._limpar()
+        database.salvar_presidente_cadastro("Fábio Moreira", "Ancião", telefone="11999998888")
+        (item,) = database.listar_presidentes_cadastro()
+        assert item["telefone"] == "11999998888"
+
+    def test_edicao_atualiza_o_telefone(self):
+        self._limpar()
+        pid = database.salvar_presidente_cadastro("Fábio Moreira", "Ancião", telefone="1111")
+        database.salvar_presidente_cadastro(
+            "Fábio Moreira", "Servo Ministerial", cadastro_id=pid, telefone="2222"
+        )
+        (item,) = database.listar_presidentes_cadastro()
+        assert (item["categoria"], item["telefone"]) == ("Servo Ministerial", "2222")
+
+    def test_cadastro_antigo_sem_telefone_vira_string_vazia(self):
+        self._limpar()
+        database.salvar_presidente_cadastro("Sem Telefone", "Ancião")
+        (item,) = database.listar_presidentes_cadastro()
+        assert item["telefone"] == ""

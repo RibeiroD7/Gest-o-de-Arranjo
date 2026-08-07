@@ -41,12 +41,21 @@ uma planilha (veja abaixo).
   telefone, endereço, dia e horário da reunião).
 - **Arranjos** — a programação mensal: oradores recebidos e designações
   enviadas de cada mês, com sugestão automática de datas conforme o dia de
-  reunião da congregação e exportação de listas em PNG.
+  reunião da congregação e exportação de listas em PNG. Cada **orador
+  recebido** tem também o botão de WhatsApp, que gera a **designação avulsa**
+  dele (data, tema, sua congregação, reunião, endereço e contato) — é o que
+  usar quando o arranjo foi combinado direto com o orador, e não pela
+  congregação anfitriã do mês.
 - **Designações** — as designações enviadas organizadas por mês/ano, com
   geração de imagem individual da designação (modelo pronto para enviar ao
   orador pelo WhatsApp).
-- **Presidentes** — cadastro de quem pode presidir (nome + privilégio) e
-  atribuição semana a semana, por ano e mês.
+- **Presidentes** — cadastro de quem pode presidir (nome, telefone e
+  privilégio) e atribuição semana a semana, por ano e mês. Na aba
+  **Presidentes** de cada mês, o botão de WhatsApp monta a **mensagem da
+  presidência** daquele dia: você digita só o número do cântico e o app
+  completa com o título e o texto bíblico (catálogo do *Cante de Coração para
+  Jeová*, em [`src/canticos.py`](src/canticos.py)), mais o orador, a
+  congregação dele e o tema já programados.
 - **Quadro de Anúncios** — prévia fiel e exportação em PDF do quadro de
   conferência pública, publicado de 2 em 2 meses, no layout oficial usado no
   quadro de anúncios da congregação.

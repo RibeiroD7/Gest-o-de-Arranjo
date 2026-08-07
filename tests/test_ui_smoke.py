@@ -94,6 +94,36 @@ def test_linha_e_tabela_de_designacao(escala):
     assert itens
 
 
+@pytest.mark.parametrize("mobile", [False, True])
+def test_dialogos_de_presidentes_constroem(mobile):
+    """Os dois diálogos de presidente montam layouts diferentes por plataforma.
+
+    O layout de celular já tinha nascido quebrado uma vez (campos espremidos a
+    uma letra por linha), então construir os dois caminhos vira regressão.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        page = _page()
+        main.abrir_dialog_gerenciar_presidentes(page, lambda: None)
+        main.abrir_dialog_mensagem_presidencia(
+            page,
+            "31/10/2026",
+            {"id": 1, "nome": "Fábio Moreira", "telefone": "11999998888"},
+            {
+                "orador_nome": "Carlos Menezes",
+                "congregacao_nome": "Jardim Maria Sampaio",
+                "tema_titulo": "Ande no caminho da integridade",
+                "tema_nr": 34,
+            },
+        )
+        # Sem nada programado na data o diálogo ainda precisa abrir (com aviso).
+        main.abrir_dialog_mensagem_presidencia(page, "31/10/2026", {"nome": "X"}, None)
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
 class TestAbrirUrl:
     """page.launch_url é corrotina: precisa ir por run_task, senão não abre nada.
 

@@ -192,6 +192,35 @@ def sugerir_recebidos(
     return sugestoes
 
 
+def montar_mensagem_presidencia(
+    cantico: str,
+    orador: str,
+    congregacao: str,
+    tema: str,
+) -> str:
+    """Mensagem que o coordenador manda ao presidente da reunião do dia.
+
+    Formato combinado com o usuário — uma linha por informação, sem enfeites,
+    para o presidente copiar direto no anúncio:
+
+        Cântico: 34 - Andarei em integridade (Salmo 26)
+        Orador: Carlos Menezes
+        Congregação: Jardim Maria Sampaio
+        Tema: Ande no caminho da integridade
+
+    Campos vazios viram ``—`` para o presidente perceber o que ainda falta.
+    """
+    campos = (
+        ("Cântico", cantico),
+        ("Orador", orador),
+        ("Congregação", congregacao),
+        ("Tema", tema),
+    )
+    return "\n".join(
+        f"{rotulo}: {(valor or '').strip() or '—'}" for rotulo, valor in campos
+    )
+
+
 def detectar_conflitos_oradores(registros: list[dict]) -> list[dict]:
     """Detecta oradores designados mais de uma vez na mesma data.
 
