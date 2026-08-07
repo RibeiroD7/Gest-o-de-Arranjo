@@ -230,3 +230,46 @@ class TestCredenciaisLocais:
         destino = tmp_path / "cred.json"
         destino.write_text("não é json", encoding="utf-8")
         assert nd.carregar_credenciais(destino) == {}
+
+
+class TestExtrairCodigo:
+    """Conclusão manual do login (celular): o usuário cola o endereço."""
+
+    def test_url_completa(self):
+        url = "http://127.0.0.1:33123/?code=4/0AbC-xyz&scope=drive.appdata"
+        assert nd.extrair_codigo(url) == "4/0AbC-xyz"
+
+    def test_so_o_codigo(self):
+        assert nd.extrair_codigo("4/0AbC-xyz") == "4/0AbC-xyz"
+
+    def test_espacos_ao_redor(self):
+        assert nd.extrair_codigo("  4/0AbC  ") == "4/0AbC"
+
+    def test_erro_do_google_vira_mensagem(self):
+        with pytest.raises(nd.ErroNuvem, match="access_denied"):
+            nd.extrair_codigo("http://127.0.0.1:1/?error=access_denied&code=")
+
+    def test_vazio_e_endereco_sem_codigo(self):
+        with pytest.raises(nd.ErroNuvem, match="Cole o endereço"):
+            nd.extrair_codigo("   ")
+        with pytest.raises(nd.ErroNuvem, match="Não encontrei o código"):
+            nd.extrair_codigo("http://127.0.0.1:33123/")
+
+
+class TestLoginPendente:
+    """O PKCE precisa sobreviver ao app ser encerrado pelo Android."""
+
+    def test_salva_e_recupera(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nd, "ARQUIVO_CREDENCIAIS", tmp_path / "n.json")
+        nd.salvar_login_pendente({"verificador": "V", "redirect_uri": "http://x"})
+        assert nd.carregar_login_pendente()["verificador"] == "V"
+        nd.limpar_login_pendente()
+        assert nd.carregar_login_pendente() == {}
+
+    def test_nao_apaga_as_credenciais(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nd, "ARQUIVO_CREDENCIAIS", tmp_path / "n.json")
+        nd.salvar_credenciais({"client_id": "ID", "refresh_token": "RT"})
+        nd.salvar_login_pendente({"verificador": "V"})
+        nd.limpar_login_pendente()
+        assert nd.carregar_credenciais()["client_id"] == "ID"
+        assert nd.carregar_credenciais()["refresh_token"] == "RT"

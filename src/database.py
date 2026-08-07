@@ -620,8 +620,72 @@ def adicionar_orador_arranjo(
             (arranjo_id, tipo, orador_id, tema_nr, congregacao_id, data),
         )
         conn.commit()
+        sincronizar_uso_temas(conn)
     finally:
         conn.close()
+
+
+def sincronizar_uso_temas(conn=None) -> int:
+    """Reflete no catálogo de Temas os discursos RECEBIDOS já programados.
+
+    Um orador recebido apresenta o tema na nossa congregação, então a data
+    aparece na coluna do ano correspondente (formato MM/AAAA) — é o que o
+    coordenador vê em "Último uso". Designações enviadas não contam: o tema foi
+    apresentado em outra congregação.
+
+    Não apaga nada que já esteja preenchido (uso histórico importado da
+    planilha/S-99): só grava as datas vindas dos arranjos, mantendo a mais
+    recente quando há mais de uma no mesmo ano. Devolve quantas células gravou.
+    """
+    proprio = conn is None
+    conn = get_connection() if proprio else conn
+    try:
+        cursor = conn.cursor()
+        linhas = cursor.execute(
+            """
+            SELECT tema_nr, data
+            FROM arranjo_oradores
+            WHERE tipo = 'recebido' AND tema_nr IS NOT NULL
+              AND data IS NOT NULL AND length(data) = 10
+            """
+        ).fetchall()
+
+        # Por (tema, ano), guarda o mês mais recente.
+        melhor: dict[tuple[int, int], str] = {}
+        for tema_nr, data in linhas:
+            try:
+                mes, ano = int(data[3:5]), int(data[6:10])
+            except ValueError:
+                continue
+            chave = (int(tema_nr), ano)
+            if chave not in melhor or mes > int(melhor[chave][:2]):
+                melhor[chave] = f"{mes:02d}/{ano}"
+
+        gravadas = 0
+        for (tema_nr, ano), valor in melhor.items():
+            # A coluna do ano precisa existir para aparecer na tela de Temas.
+            cursor.execute(
+                """
+                INSERT INTO temas_anos_colunas (ano, visivel, ordem)
+                VALUES (?, 1, (SELECT COALESCE(MAX(ordem), -1) + 1 FROM temas_anos_colunas))
+                ON CONFLICT(ano) DO NOTHING
+                """,
+                (ano,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO tema_uso_por_ano (tema_nr, ano_coluna, data_uso)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tema_nr, ano_coluna) DO UPDATE SET data_uso = excluded.data_uso
+                """,
+                (tema_nr, ano, valor),
+            )
+            gravadas += 1
+        conn.commit()
+        return gravadas
+    finally:
+        if proprio:
+            conn.close()
 
 
 def remover_orador_arranjo(registro_id: int) -> None:
@@ -652,6 +716,7 @@ def atualizar_orador_arranjo(
             (tema_nr, congregacao_id, data, registro_id),
         )
         conn.commit()
+        sincronizar_uso_temas(conn)
     finally:
         conn.close()
 

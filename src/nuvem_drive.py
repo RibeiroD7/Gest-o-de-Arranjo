@@ -179,6 +179,54 @@ text-align:center;padding-top:80px">
 </body></html>"""
 
 
+def extrair_codigo(texto: str) -> str:
+    """Extrai o código de autorização de uma URL de retorno colada pelo usuário.
+
+    Aceita a URL inteira (``http://127.0.0.1:1234/?code=ABC&scope=...``) ou só
+    o código. Usado no celular, onde o Android pode encerrar o aplicativo
+    enquanto o navegador está aberto — aí o retorno automático não acontece e o
+    usuário conclui o login colando o endereço da barra.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        raise ErroNuvem("Cole o endereço que apareceu no navegador.")
+    if "code=" in texto:
+        consulta = urllib.parse.urlparse(texto).query or texto.split("?", 1)[-1]
+        campos = urllib.parse.parse_qs(consulta)
+        if campos.get("error"):
+            raise ErroNuvem(f"Autorização não concluída ({campos['error'][0]}).")
+        codigo = (campos.get("code") or [""])[0]
+        if not codigo:
+            raise ErroNuvem("Não encontrei o código nesse endereço.")
+        return codigo
+    # Um código do Google costuma ter barra ("4/0AbC..."), então barra sozinha
+    # não desqualifica: só recusamos o que é claramente um endereço sem code.
+    if texto.lower().startswith("http") or "?" in texto:
+        raise ErroNuvem("Não encontrei o código nesse endereço.")
+    return texto
+
+
+def salvar_login_pendente(dados: dict) -> None:
+    """Guarda o PKCE e a credencial do login em andamento.
+
+    No celular o app pode ser encerrado enquanto o navegador está aberto; sem
+    isso, ao voltar não haveria como concluir a troca do código por tokens.
+    """
+    atual = carregar_credenciais()
+    atual["login_pendente"] = dados
+    salvar_credenciais(atual)
+
+
+def carregar_login_pendente() -> dict:
+    return carregar_credenciais().get("login_pendente") or {}
+
+
+def limpar_login_pendente() -> None:
+    atual = carregar_credenciais()
+    atual.pop("login_pendente", None)
+    salvar_credenciais(atual)
+
+
 class ServidorRetorno:
     """Servidor local que recebe o retorno do Google após o login.
 

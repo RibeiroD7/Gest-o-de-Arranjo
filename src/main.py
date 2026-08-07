@@ -83,6 +83,7 @@ from database import (
     salvar_presidente,
     salvar_presidente_cadastro,
     salvar_tema,
+    sincronizar_uso_temas,
     trocar_datas_designacoes,
     ultima_data_discurso_por_orador,
 )
@@ -382,6 +383,9 @@ def garantir_tabelas() -> None:
     try:
         create_tables(conn)
         garantir_configuracao_inicial(conn)
+        # Traz para o catálogo de Temas o uso dos arranjos já cadastrados
+        # (quem instala uma versão nova já vê as datas preenchidas).
+        sincronizar_uso_temas(conn)
         # O app é distribuído vazio: os temas são preenchidos pelo próprio
         # usuário (Temas → Importar S-99/S-99a). Não semeamos nada aqui.
     finally:
@@ -723,14 +727,33 @@ def carregar_oradores_com_congregacao_opcoes(
     if congregacao_id is not None:
         query += " AND o.congregacao_id = ?"
         params.append(congregacao_id)
-    query += " ORDER BY o.nome"
+    # Agrupado por congregação: procurar "quem é da Vila Nova" fica direto,
+    # em vez de uma lista alfabética com todas as congregações misturadas.
+    query += " ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome"
     conn = get_connection()
     try:
         df = pd.read_sql_query(query, conn, params=params or None)
     finally:
         conn.close()
-    opcoes = []
+    opcoes: list[ft.dropdown.Option] = []
+    congregacao_atual = None
+    mostrar_grupos = congregacao_id is None  # filtrado por uma só: não agrupa
     for row in df.itertuples():
+        if mostrar_grupos and row.congregacao != congregacao_atual:
+            congregacao_atual = row.congregacao
+            titulo = congregacao_atual or "Sem congregação"
+            opcoes.append(
+                ft.dropdown.Option(
+                    key=f"__grupo__{titulo}",
+                    content=ft.Text(
+                        titulo.upper(),
+                        size=fonte(11),
+                        weight=ft.FontWeight.W_700,
+                        color=COR_DESTAQUE_SUAVE,
+                    ),
+                    disabled=True,
+                )
+            )
         texto = row.nome
         if row.congregacao:
             texto = f"{row.nome} — {row.congregacao}"
@@ -4155,15 +4178,23 @@ def abrir_dialog_editar_orador_arranjo(
     )
     campo_tema = ft.Dropdown(
         label="Tema",
+        hint_text="Digite o número ou parte do título",
         options=carregar_temas_opcoes(incluir_sem_tema=True),
         value=tema_atual,
         expand=True,
+        editable=True,
+        enable_filter=True,
+        enable_search=True,
+        menu_height=320,
     )
     campo_congregacao = ft.Dropdown(
         label=f"Congregação ({rotulo_cong.lower()})",
         options=carregar_congregacoes_opcoes(),
         value=str(registro["congregacao_id"]) if registro.get("congregacao_id") else None,
         expand=True,
+        editable=True,
+        enable_filter=True,
+        enable_search=True,
     )
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
@@ -4242,10 +4273,16 @@ def abrir_seletor_oradores(
     registros_mes = carregar_oradores_arranjo(arranjo_id)
     estado = {"modo": "existente", "checkboxes": [], "datas_checkbox": {}}
 
+    # Listas longas (oradores do circuito, 194 temas): digitar filtra a lista.
     campo_orador = ft.Dropdown(
         label="Orador",
+        hint_text="Digite para buscar pelo nome",
         options=carregar_oradores_com_congregacao_opcoes(congregacao_filtro),
         expand=True,
+        editable=True,
+        enable_filter=True,
+        enable_search=True,
+        menu_height=320,
     )
     campo_data_manual = ft.TextField(
         label="Data manual (opcional)",
@@ -4254,8 +4291,13 @@ def abrir_seletor_oradores(
     )
     campo_tema = ft.Dropdown(
         label="Tema",
+        hint_text="Digite o número ou parte do título",
         options=carregar_temas_opcoes(incluir_sem_tema=eh_oradores),
         expand=True,
+        editable=True,
+        enable_filter=True,
+        enable_search=True,
+        menu_height=320,
     )
     area_sugestoes = ft.Column(spacing=6, tight=True)
     texto_sugestoes = ft.Text(
@@ -4390,10 +4432,12 @@ def abrir_seletor_oradores(
     def montar_sugestoes_orador():
         if eh_oradores:
             return
-        ids = [int(o.key) for o in campo_orador.options]
+        # As opções incluem cabeçalhos de congregação (chave __grupo__): fora.
+        reais = [o for o in campo_orador.options if not str(o.key).startswith("__grupo__")]
+        ids = [int(o.key) for o in reais]
         if not ids:
             return
-        nomes = {int(o.key): o.text.split(" — ")[0] for o in campo_orador.options}
+        nomes = {int(o.key): (o.text or "").split(" — ")[0] for o in reais}
         ultima = ultima_data_discurso_por_orador()
         ordem = oradores_mais_tempo_sem_discurso(ids, ultima)
 
@@ -4434,45 +4478,28 @@ def abrir_seletor_oradores(
     montar_sugestoes_orador()
 
     def abrir_escolha_assistida(_=None):
-        """Ranqueia orador+tema da anfitriã por prioridade e tempo sem uso."""
+        """Ranqueia orador+tema por prioridade e tempo sem uso.
+
+        Começa pela congregação anfitriã do arranjo, mas dá para trocar: às
+        vezes o orador convidado é de outra congregação, e os temas que ELE tem
+        preparados também precisam entrar na conta.
+        """
+        opcoes_cong = carregar_congregacoes_opcoes()
+        if not opcoes_cong:
+            mostrar_aviso(page, "Sem congregações",
+                          "Cadastre as congregações para usar a escolha assistida.")
+            return
         host_id = dados_arranjo.get("congregacao_host_id")
-        if not host_id:
-            mostrar_aviso(
-                page,
-                "Congregação não definida",
-                "Defina a congregação anfitriã do arranjo para usar a escolha assistida.",
-            )
-            return
-        oradores_host = oradores_com_temas_da_congregacao(int(host_id))
-        if not oradores_host:
-            mostrar_aviso(
-                page,
-                "Sem oradores cadastrados",
-                "Cadastre os oradores da congregação anfitriã (com os temas que "
-                "podem fazer) para receber sugestões.",
-            )
-            return
-        for orador in oradores_host:
-            orador["qualquer_tema"] = obs_tem_qualquer_tema(
-                orador.get("observacoes", "")
-            )
+        inicial = str(host_id) if host_id else opcoes_cong[0].key
 
         df = carregar_dataframe_temas()
-        prioritarios = {
-            int(nr) for nr, p in zip(df["nr"], df["prioritario"]) if p
-        }
+        prioritarios = {int(nr) for nr, p in zip(df["nr"], df["prioritario"]) if p}
         uso = {int(nr): (c or "") for nr, c in zip(df["nr"], df["ultimo_uso_chave"])}
         titulos = {int(nr): (t or "") for nr, t in zip(df["nr"], df["titulo"])}
         ultimos = {int(nr): (u or "") for nr, u in zip(df["nr"], df["ultimo_uso"])}
 
-        sugestoes = sugerir_recebidos(oradores_host, prioritarios, uso, limite=15)
-        if not sugestoes:
-            mostrar_aviso(
-                page,
-                "Sem sugestões",
-                "Os oradores da anfitriã não têm temas cadastrados.",
-            )
-            return
+        lista = ft.Column(spacing=2, tight=True, scroll=ft.ScrollMode.AUTO,
+                          expand=True)
 
         def escolher_sugestao(s: dict):
             campo_orador.value = str(s["orador_id"])
@@ -4490,51 +4517,86 @@ def abrir_seletor_oradores(
                 uso_txt = f"último uso: {ultimos.get(nr) or '—'}"
             return f"{nr} - {titulo}\n{uso_txt}"
 
-        itens = [
-            ft.ListTile(
-                dense=True,
-                leading=ft.Icon(
-                    ft.Icons.STAR if s["prioritario"] else ft.Icons.MENU_BOOK_OUTLINED,
-                    size=fonte(20),
-                    color=COR_AVISO if s["prioritario"] else TEXTO_SECUNDARIO,
-                ),
-                title=ft.Text(
-                    s["orador_nome"]
-                    + ("  ·  tema prioritário" if s["prioritario"] else ""),
-                    size=fonte(13),
-                    weight=ft.FontWeight.W_600,
-                ),
-                subtitle=ft.Text(subtitulo_sugestao(s), size=fonte(12)),
-                on_click=lambda e, s=dict(s): escolher_sugestao(s),
-            )
-            for s in sugestoes
-        ]
+        def montar(cong_id: str):
+            oradores = oradores_com_temas_da_congregacao(int(cong_id))
+            for orador in oradores:
+                orador["qualquer_tema"] = obs_tem_qualquer_tema(
+                    orador.get("observacoes", "")
+                )
+            sugestoes = sugerir_recebidos(oradores, prioritarios, uso, limite=15)
+            if not sugestoes:
+                lista.controls = [
+                    ft.Container(
+                        content=ft.Text(
+                            "Nenhum orador desta congregação tem temas cadastrados. "
+                            "Cadastre os temas de cada orador em Oradores.",
+                            size=fonte(12), color=TEXTO_SECUNDARIO, italic=True,
+                        ),
+                        padding=12,
+                    )
+                ]
+                return
+            lista.controls = [
+                ft.ListTile(
+                    dense=True,
+                    leading=ft.Icon(
+                        ft.Icons.STAR if s["prioritario"] else ft.Icons.MENU_BOOK_OUTLINED,
+                        size=fonte(20),
+                        color=COR_AVISO if s["prioritario"] else TEXTO_SECUNDARIO,
+                    ),
+                    title=ft.Text(
+                        s["orador_nome"]
+                        + ("  ·  tema prioritário" if s["prioritario"] else ""),
+                        size=fonte(13), weight=ft.FontWeight.W_600,
+                    ),
+                    subtitle=ft.Text(subtitulo_sugestao(s), size=fonte(12)),
+                    on_click=lambda e, s=dict(s): escolher_sugestao(s),
+                )
+                for s in sugestoes
+            ]
+
+        seletor_cong = ft.Dropdown(
+            label="Oradores da congregação",
+            options=opcoes_cong,
+            value=inicial,
+            expand=True,
+            editable=True,
+            enable_filter=True,
+        )
+
+        def trocar_congregacao(_=None):
+            if seletor_cong.value:
+                montar(seletor_cong.value)
+                page.update()
+
+        seletor_cong.on_select = trocar_congregacao
+        montar(inicial)
 
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
                 title=ft.Text(
-                    "Escolha assistida — prioridades e temas há mais tempo sem fazer",
-                    size=fonte(15),
-                    weight=ft.FontWeight.W_600,
+                    "Escolha assistida",
+                    size=fonte(15), weight=ft.FontWeight.W_600,
                 ),
                 content=ft.Container(
                     width=_largura_dialog(page, 520),
-                    height=440,
+                    height=460,
                     content=ft.Column(
                         [
                             ft.Text(
-                                "Sugestões entre os oradores da anfitriã, começando "
-                                "pelos temas que você marcou como prioritários (★) e "
-                                "pelos há mais tempo sem uso. Toque para preencher.",
-                                size=fonte(12),
-                                color=TEXTO_SECUNDARIO,
+                                "Sugere orador + tema começando pelos que você marcou "
+                                "como prioritários (★) e pelos há mais tempo sem fazer. "
+                                "Toque para preencher.",
+                                size=fonte(12), color=TEXTO_SECUNDARIO,
                             ),
-                            *itens,
+                            ft.Container(height=8),
+                            seletor_cong,
+                            ft.Container(height=4),
+                            lista,
                         ],
-                        spacing=2,
+                        spacing=0,
                         tight=True,
-                        scroll=ft.ScrollMode.AUTO,
                     ),
                 ),
                 actions=[
@@ -4542,6 +4604,7 @@ def abrir_seletor_oradores(
                 ],
             )
         )
+
 
     def fechar(_=None):
         page.pop_dialog()
@@ -6342,6 +6405,26 @@ def _criar_card_mes_programacao(
         border_radius=8,
         padding=ft.Padding.symmetric(horizontal=8, vertical=2),
     )
+
+    # O selo diz o estado; esta linha diz o que fazer para fechar o mês.
+    faltas: list[str] = []
+    if semanas:
+        if cobertas < semanas:
+            faltam = semanas - cobertas
+            faltas.append(f"{faltam} semana(s) sem orador")
+        if presidentes < semanas:
+            faltam = semanas - presidentes
+            faltas.append(f"{faltam} sem presidente")
+    linha_falta = (
+        ft.Text(
+            "Falta: " + " · ".join(faltas),
+            size=fonte(11),
+            color=COR_AVISO,
+            max_lines=2,
+        )
+        if faltas
+        else None
+    )
     segmentos = ft.Row(
         [
             ft.Container(
@@ -6380,6 +6463,7 @@ def _criar_card_mes_programacao(
                     size=fonte(11),
                     color=TEXTO_SECUNDARIO,
                 ),
+                *([ft.Container(height=4), linha_falta] if linha_falta else []),
             ],
             spacing=0,
         ),
@@ -6970,6 +7054,16 @@ def tela_ajustes(
         url = nuvem_drive.montar_url_autorizacao(
             client_id, servidor.url_redirecionamento, desafio
         )
+        # O Android pode encerrar o app enquanto o navegador está aberto; com o
+        # PKCE salvo, dá para concluir depois colando o endereço de retorno.
+        nuvem_drive.salvar_login_pendente(
+            {
+                "verificador": verificador,
+                "redirect_uri": servidor.url_redirecionamento,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            }
+        )
         abrir_url(page, url)
 
         estado_login = {"cancelado": False}
@@ -6978,6 +7072,60 @@ def tela_ajustes(
             estado_login["cancelado"] = True
             servidor.encerrar()
             page.pop_dialog()
+
+        # No celular, o app pode ser encerrado enquanto o navegador está aberto
+        # e o retorno automático se perde. Aí o usuário cola o endereço que
+        # ficou na barra do navegador (ele contém o código).
+        campo_colar = ft.TextField(
+            label="Ou cole aqui o endereço do navegador",
+            hint_text="http://127.0.0.1:.../?code=...",
+            expand=True,
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+        )
+
+        def concluir_colando(_=None):
+            try:
+                codigo = nuvem_drive.extrair_codigo(campo_colar.value or "")
+                pend = nuvem_drive.carregar_login_pendente()
+                obtidas = executar_com_progresso(
+                    page,
+                    "Concluindo o login...",
+                    lambda: nuvem_drive.trocar_codigo_por_tokens(
+                        pend.get("client_id") or client_id,
+                        pend.get("client_secret") or client_secret,
+                        codigo,
+                        pend.get("redirect_uri") or servidor.url_redirecionamento,
+                        pend.get("verificador") or verificador,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Falha ao concluir o login colado")
+                mostrar_aviso(page, "Não foi possível concluir", str(exc))
+                return
+            estado_login["cancelado"] = True  # encerra a espera do servidor
+            servidor.encerrar()
+            dados = nuvem_drive.carregar_credenciais()
+            dados.update(obtidas)
+            dados["client_id"], dados["client_secret"] = client_id, client_secret
+            nuvem_drive.salvar_credenciais(dados)
+            nuvem_drive.limpar_login_pendente()
+            page.pop_dialog()
+            mostrar_sucesso(page, "Conectado ao Google Drive.")
+            recarregar()
+
+        campos_colar = (
+            [
+                ft.Container(height=4),
+                campo_colar,
+                ft.FilledButton(
+                    "Concluir login", icon=ft.Icons.CHECK, on_click=concluir_colando
+                ),
+            ]
+            if eh_mobile()
+            else []
+        )
 
         page.show_dialog(
             ft.AlertDialog(
@@ -7007,6 +7155,7 @@ def tela_ajustes(
                                 icon=ft.Icons.OPEN_IN_NEW,
                                 on_click=lambda _: abrir_url(page, url),
                             ),
+                            *campos_colar,
                         ],
                         spacing=4,
                         tight=True,

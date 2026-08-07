@@ -14,11 +14,20 @@ from database import (
 
 
 def _resetar_banco():
+    """Limpa o banco de teste na ordem das dependências (evita erro de FK)."""
     conn = get_connection()
     try:
         create_tables(conn)
-        conn.execute("DELETE FROM oradores")
-        conn.execute("DELETE FROM congregacoes")
+        for tabela in (
+            "arranjo_oradores",
+            "tema_uso_por_ano",
+            "orador_temas",
+            "designacoes",
+            "arranjos",
+            "oradores",
+            "congregacoes",
+        ):
+            conn.execute(f"DELETE FROM {tabela}")  # noqa: S608 — nomes fixos
         conn.commit()
     finally:
         conn.close()
@@ -124,3 +133,63 @@ def test_trocar_datas_designacoes():
         conn.close()
     assert datas[ids[0]] == "11/01/2026"
     assert datas[ids[1]] == "04/01/2026"
+
+
+class TestUsoDosTemas:
+    """Designar um orador RECEBIDO deve preencher o 'Último uso' do tema."""
+
+    def _preparar(self):
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM arranjo_oradores")
+            conn.execute("DELETE FROM arranjos")
+            conn.execute("DELETE FROM tema_uso_por_ano")
+            conn.execute("DELETE FROM temas WHERE nr IN (74, 80)")
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Outra')")
+            cong = conn.execute("SELECT id FROM congregacoes WHERE nome='Outra'").fetchone()[0]
+            conn.execute(
+                "INSERT INTO oradores (nome, categoria, congregacao_id) VALUES ('Zé', 'Ancião', ?)",
+                (cong,),
+            )
+            orador = conn.execute("SELECT id FROM oradores WHERE nome='Zé'").fetchone()[0]
+            conn.execute("INSERT INTO temas (nr, titulo) VALUES (74, 'Tema 74'), (80, 'Tema 80')")
+            conn.execute("INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026, 10, 10)")
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        return arranjo, orador
+
+    def _uso(self, tema_nr):
+        conn = get_connection()
+        try:
+            linha = conn.execute(
+                "SELECT data_uso FROM tema_uso_por_ano WHERE tema_nr = ?", (tema_nr,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return linha[0] if linha else None
+
+    def test_recebido_preenche_a_data_do_tema(self):
+        arranjo, orador = self._preparar()
+        database.adicionar_orador_arranjo(arranjo, "recebido", orador, 74, data="31/10/2026")
+        assert self._uso(74) == "10/2026"
+
+    def test_enviado_nao_conta(self):
+        """Enviado = o tema foi apresentado em OUTRA congregação."""
+        arranjo, orador = self._preparar()
+        database.adicionar_orador_arranjo(arranjo, "enviado", orador, 80, data="31/10/2026")
+        assert self._uso(80) is None
+
+    def test_mantem_a_data_mais_recente_do_ano(self):
+        arranjo, orador = self._preparar()
+        database.adicionar_orador_arranjo(arranjo, "recebido", orador, 74, data="05/03/2026")
+        database.adicionar_orador_arranjo(arranjo, "recebido", orador, 74, data="12/09/2026")
+        assert self._uso(74) == "09/2026"
+
+    def test_cria_a_coluna_do_ano(self):
+        arranjo, orador = self._preparar()
+        database.adicionar_orador_arranjo(arranjo, "recebido", orador, 74, data="31/10/2026")
+        anos = [a["ano"] for a in database.listar_anos_colunas(apenas_visiveis=False)]
+        assert 2026 in anos
