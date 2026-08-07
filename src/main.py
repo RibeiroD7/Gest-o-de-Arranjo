@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import calendar
 import re
+import sys
 import time
 import webbrowser
 from datetime import date, timedelta
@@ -142,9 +143,9 @@ from ui_comuns import (
     _largura_dialog,
     _rotulo_entrega,
     _sombra_card,
+    abrir_url,
     aplicar_tema,
     criar_cabecalho_tela,
-    criar_painel_informativo,
     criar_secao_titulo,
     executar_com_progresso,
     linha_campos,
@@ -178,18 +179,29 @@ URL_API_RELEASE = (
 )
 URL_RELEASES = "https://github.com/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
 
-# Zoom "Ctrl + roda do mouse" na prévia do quadro: o ScrollEvent do Flet não
-# traz os modificadores, então rastreamos o Ctrl pelo teclado e o consideramos
-# "ativo" por um curto intervalo após a tecla ser vista pressionada.
+# Zoom "Ctrl + roda do mouse" na prévia do quadro. O ScrollEvent do Flet não
+# traz os modificadores, então perguntamos ao sistema se o Ctrl está pressionado
+# NO MOMENTO da rolagem. No Windows isso é exato (GetKeyState); no restante,
+# caímos no rastreio por evento de teclado, que é o melhor que dá para fazer.
 _TECLADO = {"ctrl_ate": 0.0}
 
 
 def _registrar_teclado(e) -> None:
+    """Marca o Ctrl como recém-visto (usado fora do Windows)."""
     if getattr(e, "ctrl", False):
         _TECLADO["ctrl_ate"] = time.monotonic() + 1.5
 
 
-def _ctrl_ativo() -> bool:
+def _ctrl_pressionado() -> bool:
+    """True se a tecla Ctrl está pressionada agora."""
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            # 0x11 = VK_CONTROL; bit alto ligado = tecla pressionada.
+            return bool(ctypes.windll.user32.GetKeyState(0x11) & 0x8000)
+        except Exception:  # noqa: BLE001 — sem API do sistema: usa o fallback
+            pass
     return time.monotonic() < _TECLADO["ctrl_ate"]
 
 SECOES = [
@@ -3388,42 +3400,19 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         width=230,
     )
 
-    TEMAS_POR_PAGINA = 50
     # Cache do dataframe: consultas ao banco só quando os dados mudam de fato
-    estado_temas: dict = {"df": None, "pagina": 0, "montado": False}
+    estado_temas: dict = {"df": None, "montado": False}
 
-    texto_pagina = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
-    botao_pag_anterior = ft.IconButton(
-        icon=ft.Icons.CHEVRON_LEFT, tooltip="Página anterior", icon_size=fonte(20)
-    )
-    botao_pag_proxima = ft.IconButton(
-        icon=ft.Icons.CHEVRON_RIGHT, tooltip="Próxima página", icon_size=fonte(20)
-    )
+    # Sem paginação: todos os temas numa lista só, é só rolar.
     if eh_mobile():
-        # No celular a contagem longa empurrava as setas para fora da tela e
-        # não dava para passar da página 1 — contagem em cima, setas embaixo.
-        texto_contagem.size = 12
+        texto_contagem.size = fonte(12)
         texto_contagem.max_lines = 1
         texto_contagem.overflow = ft.TextOverflow.ELLIPSIS
-        linha_paginacao = ft.Column(
-            [
-                texto_contagem,
-                ft.Row(
-                    [botao_pag_anterior, texto_pagina, botao_pag_proxima],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=4,
-                ),
-            ],
-            spacing=0,
-            tight=True,
-        )
-    else:
-        linha_paginacao = ft.Row(
-            [texto_contagem, ft.Container(expand=True), botao_pag_anterior, texto_pagina, botao_pag_proxima],
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=4,
-        )
+    linha_paginacao = ft.Row(
+        [texto_contagem],
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=4,
+    )
 
     def _df_temas() -> pd.DataFrame:
         if estado_temas["df"] is None:
@@ -3437,11 +3426,9 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         if df_cache is not None:
             # Atualiza o cache em memória em vez de recarregar todos os temas.
             df_cache.loc[df_cache["nr"] == tema_nr, "prioritario"] = 1 if novo else 0
-        atualizar_view(manter_pagina=True)
+        atualizar_view()
 
-    def atualizar_view(_=None, manter_pagina: bool = False):
-        if not manter_pagina:
-            estado_temas["pagina"] = 0
+    def atualizar_view(_=None):
         df = _df_temas()
         df_filtrado = filtrar_dataframe(
             df, campo_busca.value or "", _colunas_filtro_temas()
@@ -3461,38 +3448,20 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
             )
 
         total = len(df_filtrado)
-        paginas = max(1, -(-total // TEMAS_POR_PAGINA))
-        pagina = min(estado_temas["pagina"], paginas - 1)
-        estado_temas["pagina"] = pagina
-        inicio = pagina * TEMAS_POR_PAGINA
-        df_pagina = df_filtrado.iloc[inicio : inicio + TEMAS_POR_PAGINA]
-
         area_tabela.content = criar_area_tabela(
-            df_pagina,
+            df_filtrado,
             on_editar=abrir_editar,
             on_excluir=abrir_excluir,
             config={**CONFIG_TABELA_TEMAS, "on_prioritario": alternar_prioritario},
         )
-        if total > TEMAS_POR_PAGINA:
-            fim = min(inicio + TEMAS_POR_PAGINA, total)
-            texto_contagem.value = f"Exibindo {inicio + 1}–{fim} de {total} tema(s) filtrado(s) ({len(df)} no total)"
+        if total == len(df):
+            texto_contagem.value = f"{total} tema(s)"
         else:
-            texto_contagem.value = f"Exibindo {total} de {len(df)} tema(s)"
-        texto_pagina.value = f"{pagina + 1}/{paginas}"
-        botao_pag_anterior.disabled = pagina <= 0
-        botao_pag_proxima.disabled = pagina >= paginas - 1
-        linha_paginacao.visible = paginas > 1
+            texto_contagem.value = f"{total} de {len(df)} tema(s)"
         if estado_temas["montado"]:
             # Atualiza só os controles afetados — bem mais rápido que page.update()
             area_tabela.update()
             linha_paginacao.update()
-
-    def mudar_pagina(delta: int):
-        estado_temas["pagina"] += delta
-        atualizar_view(manter_pagina=True)
-
-    botao_pag_anterior.on_click = lambda _: mudar_pagina(-1)
-    botao_pag_proxima.on_click = lambda _: mudar_pagina(1)
 
     filtro_assunto.on_select = atualizar_view
     filtro_uso.on_select = atualizar_view
@@ -3500,7 +3469,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
 
     def recarregar():
         estado_temas["df"] = None  # dados mudaram: invalida o cache
-        atualizar_view(manter_pagina=True)
+        atualizar_view()
 
     def abrir_editar(tema_nr: int):
         abrir_dialog_tema(page, recarregar, tema_nr)
@@ -6886,12 +6855,9 @@ def tela_ajustes(
                 ft.Text("Carga inicial por planilha", size=fonte(16), weight=ft.FontWeight.W_600),
                 ft.Container(height=4),
                 ft.Text(
-                    "Para começar num aplicativo vazio há dois caminhos: restaurar "
-                    "um arquivo de backup (acima) ou preencher uma planilha com "
-                    "congregações, oradores e presidentes e importá-la aqui. A "
-                    "importação apenas adiciona dados — nada é apagado. Os temas "
-                    "não entram na planilha: importe os formulários S-99/S-99a "
-                    "diretamente na aba Temas.",
+                    "Cadastre congregações, oradores e presidentes de uma vez por "
+                    "planilha. A importação só adiciona — nada é apagado. Os temas "
+                    "vêm dos formulários S-99/S-99a, na aba Temas.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
@@ -6930,11 +6896,8 @@ def tela_ajustes(
                 ft.Text("Backup dos dados", size=fonte(16), weight=ft.FontWeight.W_600),
                 ft.Container(height=4),
                 ft.Text(
-                    "Exporte todos os dados do aplicativo — congregações, oradores, "
-                    "temas (títulos, assuntos, observações e datas de uso por ano), "
-                    "arranjos, designações, presidentes e datas especiais — para um "
-                    "arquivo JSON portátil, o mesmo formato que será usado pelo "
-                    "futuro aplicativo de smartphone.",
+                    "Salve todos os seus dados num arquivo, para guardar em outro "
+                    "lugar ou levar para outro aparelho.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                 ),
@@ -6995,13 +6958,6 @@ def tela_ajustes(
         mostrar_sucesso(page, "Credenciais salvas.")
         recarregar()
 
-    def _abrir_no_navegador(url: str):
-        """Abre a URL no navegador do sistema (no celular, via page.launch_url)."""
-        if eh_mobile():
-            page.launch_url(url)
-        else:
-            webbrowser.open(url)
-
     def conectar_pelo_navegador(client_id: str, client_secret: str):
         """Abre o navegador e recebe o retorno automaticamente (loopback + PKCE).
 
@@ -7014,7 +6970,7 @@ def tela_ajustes(
         url = nuvem_drive.montar_url_autorizacao(
             client_id, servidor.url_redirecionamento, desafio
         )
-        _abrir_no_navegador(url)
+        abrir_url(page, url)
 
         estado_login = {"cancelado": False}
 
@@ -7049,7 +7005,7 @@ def tela_ajustes(
                             ft.TextButton(
                                 "Não abriu? Clique aqui",
                                 icon=ft.Icons.OPEN_IN_NEW,
-                                on_click=lambda _: _abrir_no_navegador(url),
+                                on_click=lambda _: abrir_url(page, url),
                             ),
                         ],
                         spacing=4,
@@ -7243,10 +7199,9 @@ def tela_ajustes(
 
         controles_nuvem = [
             ft.Text(
-                "Envie o backup automático para a sua conta do Google e restaure "
-                "em outro aparelho. Cada pessoa entra na própria conta, e o "
-                "aplicativo só enxerga a pasta dele mesmo no Drive — nunca o "
-                "restante dos seus arquivos.",
+                "Guarde o backup na sua conta do Google e restaure em outro "
+                "aparelho. O aplicativo só enxerga a pasta dele mesmo no Drive — "
+                "nunca o restante dos seus arquivos.",
                 size=fonte(13),
                 color=TEXTO_SECUNDARIO,
             ),
@@ -7335,24 +7290,16 @@ def tela_ajustes(
         width=_largura_dialog(page, 560),
     )
 
-    painel_uso = criar_painel_informativo(
-        "Uso nas exportações",
-        "Estas informações serão utilizadas na geração do PDF de envio "
-        "de discursos públicos ao superintendente de circuito.",
-    )
-    if eh_mobile():
-        painel_uso.width = _largura_dialog(page, 560)
-
     return ft.Column(
         [
             criar_cabecalho_tela(
                 "Ajustes",
-                "Dados da congregação, presidentes, backup e exportações",
+                "Dados da congregação, backup e preferências",
             ),
             ft.Container(height=12 if eh_mobile() else 24),
+            # Ordem: identidade → proteger os dados → começar do zero →
+            # preferências (mexidas uma vez só, ficam por último).
             formulario,
-            ft.Container(height=24),
-            secao_acessibilidade,
             ft.Container(height=24),
             secao_backup,
             ft.Container(height=24),
@@ -7360,7 +7307,7 @@ def tela_ajustes(
             ft.Container(height=24),
             secao_planilha,
             ft.Container(height=24),
-            painel_uso,
+            secao_acessibilidade,
         ],
         spacing=0,
         expand=True,
@@ -7511,10 +7458,10 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
         """Ctrl + roda do mouse sobre a prévia: para cima amplia, para baixo reduz.
 
         Sem Ctrl, ignora — deixando a rolagem normal da página. O Ctrl é
-        rastreado pelo teclado (ver _registrar_teclado), pois o ScrollEvent não
+        consultado no sistema (ver _ctrl_pressionado), pois o ScrollEvent não
         traz modificadores.
         """
-        if not _ctrl_ativo():
+        if not _ctrl_pressionado():
             return
         delta = getattr(getattr(e, "scroll_delta", None), "y", 0) or 0
         if not delta:

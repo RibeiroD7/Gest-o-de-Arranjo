@@ -44,6 +44,18 @@ def _telas(page, fp):
     }
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _banco_pronto():
+    """As telas leem o banco: garante as tabelas mesmo rodando este arquivo só."""
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+    finally:
+        conn.close()
+
+
 @pytest.fixture(autouse=True)
 def _escala_padrao():
     yield
@@ -80,3 +92,40 @@ def test_linha_e_tabela_de_designacao(escala):
         [registro], "vazio", nada, nada, on_status=nada, on_mover=nada
     )
     assert itens
+
+
+class TestAbrirUrl:
+    """page.launch_url é corrotina: precisa ir por run_task, senão não abre nada.
+
+    Foi exatamente esse esquecimento que impediu o login do Google no Android.
+    """
+
+    def teardown_method(self):
+        import armazenamento
+        armazenamento.definir_layout_mobile(False)
+
+    def test_no_celular_usa_run_task(self, monkeypatch):
+        import armazenamento
+        import ui_comuns
+
+        armazenamento.definir_layout_mobile(True)
+        monkeypatch.delenv("GA_FORCAR_MOBILE", raising=False)
+        chamadas = []
+        page = types.SimpleNamespace(
+            run_task=lambda fn, *a: chamadas.append((fn, a)),
+            launch_url="CORROTINA",
+        )
+        ui_comuns.abrir_url(page, "https://exemplo.com")
+        assert chamadas == [("CORROTINA", ("https://exemplo.com",))]
+
+    def test_no_pc_usa_o_navegador_do_sistema(self, monkeypatch):
+        import armazenamento
+        import ui_comuns
+
+        armazenamento.definir_layout_mobile(False)
+        monkeypatch.delenv("GA_FORCAR_MOBILE", raising=False)
+        abertas = []
+        monkeypatch.setattr(ui_comuns.webbrowser, "open", lambda u: abertas.append(u))
+        page = types.SimpleNamespace(run_task=lambda *a, **k: pytest.fail("não usar run_task no PC"))
+        ui_comuns.abrir_url(page, "https://exemplo.com")
+        assert abertas == ["https://exemplo.com"]

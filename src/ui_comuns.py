@@ -8,6 +8,7 @@ ciclo de imports e permite que cada tela, ao ser extraída, importe daqui.
 
 from __future__ import annotations
 
+import webbrowser
 from typing import Callable
 
 import flet as ft
@@ -194,6 +195,19 @@ def linha_campos(*campos, spacing: int = 12) -> ft.Control:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
     return ft.Row(list(campos), spacing=spacing)
+
+
+def abrir_url(page: ft.Page, url: str) -> None:
+    """Abre a URL no navegador do sistema (PC e celular).
+
+    ⚠️ ``page.launch_url`` é uma corrotina no Flet: chamada sem ``await`` ela
+    nunca roda e **nada acontece, em silêncio** — foi o que impediu o login do
+    Google no Android. Por isso vai por ``page.run_task``.
+    """
+    if eh_mobile():
+        page.run_task(page.launch_url, url)
+    else:
+        webbrowser.open(url)
 
 
 def _rotulo_entrega() -> str:
