@@ -8218,7 +8218,8 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         especiais = listar_datas_especiais_por_ano(ano)
 
         semanas = calendar.Calendar(firstweekday=6).monthdayscalendar(ano, mes)
-        altura = 72 if eh_mobile() else 96
+        # No celular a grade é só número + bolinhas, então cabe bem menor.
+        altura = 52 if eh_mobile() else 96
 
         def abrir_dia(data_str: str):
             esp = especiais.get(data_str)
@@ -8381,8 +8382,45 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                     )
                 )
             tem_conteudo = bool(esp or rec or envs or pres)
-            return ft.Container(
-                content=ft.Column(
+
+            if eh_mobile():
+                # Sete colunas num celular deixam ~45px por dia: nome nenhum
+                # cabe ("Laer…", "P: Gi…"). Na grade ficam só o número e
+                # bolinhas coloridas; os nomes vão na lista logo abaixo.
+                pontos = []
+                if esp:
+                    pontos.append(COR_AVISO)
+                if rec:
+                    pontos.append(COR_SUCESSO)
+                if envs:
+                    pontos.append(COR_DESTAQUE_CLARA)
+                conteudo_celula = ft.Column(
+                    [
+                        ft.Text(
+                            str(dia),
+                            size=fonte(13),
+                            weight=ft.FontWeight.W_700 if eh_hoje else ft.FontWeight.W_500,
+                            color=COR_DESTAQUE if eh_hoje else TEXTO_PRIMARIO,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                        ft.Row(
+                            [
+                                ft.Container(
+                                    width=6, height=6, bgcolor=cor, border_radius=3
+                                )
+                                for cor in pontos[:3]
+                            ],
+                            spacing=3,
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            tight=True,
+                        ),
+                    ],
+                    spacing=3,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            else:
+                conteudo_celula = ft.Column(
                     [
                         ft.Text(
                             str(dia),
@@ -8394,7 +8432,10 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                     ],
                     spacing=1,
                     tight=True,
-                ),
+                )
+
+            return ft.Container(
+                content=conteudo_celula,
                 bgcolor=ft.Colors.with_opacity(0.08, COR_DESTAQUE)
                 if tem_conteudo
                 else FUNDO_CARD,
@@ -8428,8 +8469,84 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         )
         corpo.controls = [
             cabecalho,
-            *[ft.Row([celula(d) for d in semana], spacing=6) for semana in semanas],
+            *[
+                ft.Row([celula(d) for d in semana], spacing=6 if not eh_mobile() else 4)
+                for semana in semanas
+            ],
         ]
+
+        if eh_mobile():
+            # A grade dá a visão do mês; os nomes ficam legíveis aqui embaixo.
+            itens_agenda: list[ft.Control] = []
+            for dia in range(1, calendar.monthrange(ano, mes)[1] + 1):
+                data_str = f"{dia:02d}/{mes:02d}/{ano}"
+                esp = especiais.get(data_str)
+                rec = recebidos.get(data_str)
+                envs = enviados.get(data_str) or []
+                pres = presidentes.get(data_str)
+                if not (esp or rec or envs):
+                    continue
+                linhas: list[ft.Control] = []
+                if esp:
+                    linhas.append(
+                        ft.Text(esp.get("tipo") or "Evento especial",
+                                size=fonte(12), color=COR_AVISO,
+                                weight=ft.FontWeight.W_600)
+                    )
+                if rec:
+                    linhas.append(
+                        ft.Text(rec.get("orador") or "", size=fonte(13),
+                                color=COR_SUCESSO, weight=ft.FontWeight.W_600)
+                    )
+                for env in envs:
+                    destino = env.get("congregacao") or "?"
+                    linhas.append(
+                        ft.Text(f"→ {env.get('orador', '')} · {destino}",
+                                size=fonte(12), color=COR_DESTAQUE_CLARA,
+                                max_lines=2)
+                    )
+                if pres:
+                    linhas.append(
+                        ft.Text(f"Presidente: {pres['nome']}", size=fonte(11),
+                                color=TEXTO_SECUNDARIO)
+                    )
+                itens_agenda.append(
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Container(
+                                    content=ft.Text(
+                                        f"{dia:02d}",
+                                        size=fonte(16),
+                                        weight=ft.FontWeight.W_700,
+                                        color=COR_DESTAQUE,
+                                        text_align=ft.TextAlign.CENTER,
+                                    ),
+                                    width=fonte(38),
+                                ),
+                                ft.Column(linhas, spacing=1, tight=True, expand=True),
+                            ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.START,
+                        ),
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                        bgcolor=FUNDO_CARD,
+                        border=ft.Border.all(1, BORDA_SUAVE),
+                        border_radius=10,
+                        on_click=lambda e, d=data_str: abrir_dia(d),
+                        ink=True,
+                    )
+                )
+            corpo.controls += [
+                ft.Container(height=8),
+                ft.Text(f"Programação de {NOMES_MESES[mes].lower()}",
+                        size=fonte(13), weight=ft.FontWeight.W_600,
+                        color=TEXTO_PRIMARIO),
+                *(itens_agenda or [
+                    ft.Text("Nada programado neste mês.", size=fonte(12),
+                            color=TEXTO_SECUNDARIO, italic=True)
+                ]),
+            ]
         page.update()
 
     def mudar_mes(delta: int):
@@ -8469,7 +8586,10 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     legenda = ft.Row(
         [
             item_legenda(COR_SUCESSO, "Orador recebido"),
-            item_legenda(COR_DESTAQUE_CLARA, "→ Enviado da minha congregação"),
+            item_legenda(
+                COR_DESTAQUE_CLARA,
+                "Enviado" if eh_mobile() else "→ Enviado da minha congregação",
+            ),
             item_legenda(COR_AVISO, "Evento especial"),
             item_legenda(TEXTO_SECUNDARIO, "P: presidente"),
         ],
