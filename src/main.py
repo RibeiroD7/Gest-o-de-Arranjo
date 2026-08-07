@@ -6995,15 +6995,26 @@ def tela_ajustes(
         mostrar_sucesso(page, "Credenciais salvas.")
         recarregar()
 
+    def _abrir_no_navegador(url: str):
+        """Abre a URL no navegador do sistema (no celular, via page.launch_url)."""
+        if eh_mobile():
+            page.launch_url(url)
+        else:
+            webbrowser.open(url)
+
     def conectar_pelo_navegador(client_id: str, client_secret: str):
-        """PC: abre o navegador e recebe o retorno automaticamente (loopback)."""
+        """Abre o navegador e recebe o retorno automaticamente (loopback + PKCE).
+
+        Vale para PC e celular: o app sobe um servidor em 127.0.0.1 e o
+        navegador do próprio aparelho devolve o código para ele.
+        """
         servidor = nuvem_drive.ServidorRetorno()
         servidor.__enter__()
         verificador, desafio = nuvem_drive._gerar_pkce()
         url = nuvem_drive.montar_url_autorizacao(
             client_id, servidor.url_redirecionamento, desafio
         )
-        webbrowser.open(url)
+        _abrir_no_navegador(url)
 
         estado_login = {"cancelado": False}
 
@@ -7038,7 +7049,7 @@ def tela_ajustes(
                             ft.TextButton(
                                 "Não abriu? Clique aqui",
                                 icon=ft.Icons.OPEN_IN_NEW,
-                                on_click=lambda _: webbrowser.open(url),
+                                on_click=lambda _: _abrir_no_navegador(url),
                             ),
                         ],
                         spacing=4,
@@ -7082,7 +7093,7 @@ def tela_ajustes(
         page.run_task(aguardar_navegador)
 
     def conectar_nuvem(_=None):
-        """Conecta ao Drive: navegador no PC, código no celular."""
+        """Conecta ao Drive pelo navegador (mesmo fluxo no PC e no celular)."""
         salvas = nuvem_drive.carregar_credenciais()
         client_id, client_secret = nuvem_drive.credenciais_efetivas(eh_mobile(), salvas)
         if not client_id or not client_secret:
@@ -7095,115 +7106,7 @@ def tela_ajustes(
             )
             return
 
-        if not eh_mobile():
-            conectar_pelo_navegador(client_id, client_secret)
-            return
-
-        dados = dict(salvas)
-        dados["client_id"], dados["client_secret"] = client_id, client_secret
-        try:
-            inicio = executar_com_progresso(
-                page,
-                "Falando com o Google...",
-                lambda: nuvem_drive.iniciar_autorizacao(dados["client_id"]),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Falha ao iniciar autorização do Drive")
-            mostrar_aviso(page, "Não foi possível conectar", str(exc))
-            return
-
-        estado_conexao = {"cancelado": False}
-        url_verificacao = inicio.get("verification_url", "")
-
-        def fechar_conexao(_=None):
-            estado_conexao["cancelado"] = True
-            page.pop_dialog()
-
-        texto_status = ft.Text(
-            "Aguardando a autorização no navegador…", size=fonte(12),
-            color=TEXTO_SECUNDARIO,
-        )
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Conectar ao Google Drive"),
-                content=ft.Container(
-                    width=_largura_dialog(page, 420),
-                    content=ft.Column(
-                        [
-                            ft.Text("1. Abra o endereço abaixo:", size=fonte(13)),
-                            ft.Row(
-                                [
-                                    ft.Text(
-                                        url_verificacao, size=fonte(13),
-                                        weight=ft.FontWeight.W_600, color=COR_DESTAQUE,
-                                        selectable=True, expand=True,
-                                    ),
-                                    ft.IconButton(
-                                        ft.Icons.OPEN_IN_NEW,
-                                        tooltip="Abrir no navegador",
-                                        on_click=lambda _: webbrowser.open(url_verificacao),
-                                    ),
-                                ],
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            ft.Container(height=8),
-                            ft.Text("2. Digite este código:", size=fonte(13)),
-                            ft.Text(
-                                inicio.get("user_code", ""),
-                                size=fonte(26), weight=ft.FontWeight.BOLD,
-                                color=COR_DESTAQUE_CLARA, selectable=True,
-                            ),
-                            ft.Container(height=8),
-                            ft.Row(
-                                [
-                                    ft.ProgressRing(width=16, height=16, stroke_width=2),
-                                    texto_status,
-                                ],
-                                spacing=10,
-                            ),
-                        ],
-                        spacing=6,
-                        tight=True,
-                    ),
-                ),
-                actions=[ft.TextButton("Cancelar", on_click=fechar_conexao)],
-            )
-        )
-        page.update()
-
-        async def aguardar():
-            import asyncio
-
-            intervalo = max(5, int(inicio.get("interval", 5)))
-            limite = time.monotonic() + int(inicio.get("expires_in", 900))
-            while not estado_conexao["cancelado"] and time.monotonic() < limite:
-                await asyncio.sleep(intervalo)
-                if estado_conexao["cancelado"]:
-                    return
-                try:
-                    obtidas = await asyncio.to_thread(
-                        nuvem_drive.consultar_autorizacao,
-                        dados["client_id"], dados["client_secret"],
-                        inicio.get("device_code", ""),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    page.pop_dialog()
-                    mostrar_aviso(page, "Não foi possível conectar", str(exc))
-                    return
-                if obtidas:
-                    dados.update(obtidas)
-                    nuvem_drive.salvar_credenciais(dados)
-                    page.pop_dialog()
-                    mostrar_sucesso(page, "Conectado ao Google Drive.")
-                    recarregar()
-                    return
-            if not estado_conexao["cancelado"]:
-                page.pop_dialog()
-                mostrar_aviso(page, "Tempo esgotado",
-                              "O código expirou. Tente conectar novamente.")
-
-        page.run_task(aguardar)
+        conectar_pelo_navegador(client_id, client_secret)
 
     def enviar_para_nuvem(_=None):
         try:

@@ -35,60 +35,6 @@ def _campos(corpo: bytes) -> dict:
     return {k: v[0] for k, v in parse_qs(corpo.decode()).items()}
 
 
-class TestIniciarAutorizacao:
-    def test_pede_codigo_com_escopo_da_pasta_do_app(self):
-        http = HttpFalso([
-            _json(200, {"device_code": "DC", "user_code": "ABC-DEF",
-                        "verification_url": "https://google.com/device", "interval": 5})
-        ])
-        dados = nd.iniciar_autorizacao("meu-id", http=http)
-        assert dados["user_code"] == "ABC-DEF"
-        assert dados["verification_url"] == "https://google.com/device"
-
-        enviado = _campos(http.chamadas[0]["corpo"])
-        assert enviado["client_id"] == "meu-id"
-        # Escopo mínimo: só a pasta privada do app, nunca o Drive inteiro.
-        assert enviado["scope"] == "https://www.googleapis.com/auth/drive.appdata"
-        assert "drive.file" not in enviado["scope"]
-
-    def test_aceita_verification_uri(self):
-        http = HttpFalso([_json(200, {"device_code": "DC", "user_code": "X",
-                                      "verification_uri": "https://g.co/dev"})])
-        assert nd.iniciar_autorizacao("id", http=http)["verification_url"] == "https://g.co/dev"
-
-    def test_erro_vira_mensagem_legivel(self):
-        http = HttpFalso([_json(400, {"error": "invalid_client",
-                                      "error_description": "Cliente inválido"})])
-        with pytest.raises(nd.ErroNuvem, match="Cliente inválido"):
-            nd.iniciar_autorizacao("errado", http=http)
-
-
-class TestConsultarAutorizacao:
-    def test_pendente_retorna_none(self):
-        http = HttpFalso([_json(428, {"error": "authorization_pending"})])
-        assert nd.consultar_autorizacao("id", "seg", "DC", http=http) is None
-
-    def test_slow_down_tambem_e_pendente(self):
-        http = HttpFalso([_json(403, {"error": "slow_down"})])
-        assert nd.consultar_autorizacao("id", "seg", "DC", http=http) is None
-
-    def test_sucesso_devolve_credenciais(self):
-        http = HttpFalso([_json(200, {"access_token": "AT", "refresh_token": "RT",
-                                      "expires_in": 3600})])
-        cred = nd.consultar_autorizacao("id", "seg", "DC", http=http)
-        assert cred["access_token"] == "AT"
-        assert cred["refresh_token"] == "RT"
-        assert cred["expira_em"] > 0
-
-    def test_negado_e_expirado_avisam_o_usuario(self):
-        with pytest.raises(nd.ErroNuvem, match="negada"):
-            nd.consultar_autorizacao("id", "s", "DC",
-                                     http=HttpFalso([_json(403, {"error": "access_denied"})]))
-        with pytest.raises(nd.ErroNuvem, match="expirou"):
-            nd.consultar_autorizacao("id", "s", "DC",
-                                     http=HttpFalso([_json(400, {"error": "expired_token"})]))
-
-
 class TestRenovacao:
     def test_preserva_refresh_token_quando_nao_reenviado(self):
         # O Google não reenvia o refresh_token ao renovar.
@@ -243,20 +189,23 @@ class TestEscolhaDeCredenciais:
         salvas = {"client_id": "MEU", "client_secret": "S-MEU"}
         assert nd.credenciais_efetivas(False, salvas) == ("MEU", "S-MEU")
 
-    def test_usa_embutidas_por_plataforma(self, monkeypatch):
+    def test_mesma_credencial_nas_duas_plataformas(self, monkeypatch):
+        """PC e celular usam o mesmo cliente (fluxo loopback nos dois).
+
+        É isso que faz os dois enxergarem os mesmos backups: mesma credencial,
+        mesmo escopo, mesma appDataFolder.
+        """
         monkeypatch.setattr(nd.credenciais_app, "CLIENT_ID_DESKTOP", "PC")
         monkeypatch.setattr(nd.credenciais_app, "CLIENT_SECRET_DESKTOP", "S-PC")
-        monkeypatch.setattr(nd.credenciais_app, "CLIENT_ID_DISPOSITIVO", "CEL")
-        monkeypatch.setattr(nd.credenciais_app, "CLIENT_SECRET_DISPOSITIVO", "S-CEL")
         assert nd.credenciais_efetivas(False, {}) == ("PC", "S-PC")
-        assert nd.credenciais_efetivas(True, {}) == ("CEL", "S-CEL")
+        assert nd.credenciais_efetivas(True, {}) == ("PC", "S-PC")
         assert nd.ha_credenciais(True, {}) is True
 
     def test_sem_credenciais(self, monkeypatch):
-        for nome in ("CLIENT_ID_DESKTOP", "CLIENT_SECRET_DESKTOP",
-                     "CLIENT_ID_DISPOSITIVO", "CLIENT_SECRET_DISPOSITIVO"):
+        for nome in ("CLIENT_ID_DESKTOP", "CLIENT_SECRET_DESKTOP"):
             monkeypatch.setattr(nd.credenciais_app, nome, "")
         assert nd.ha_credenciais(False, {}) is False
+        assert nd.ha_credenciais(True, {}) is False
 
 
 class TestCredenciaisLocais:

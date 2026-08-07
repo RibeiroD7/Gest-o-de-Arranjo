@@ -1,13 +1,17 @@
 """Backup na nuvem via Google Drive (pasta privada do aplicativo).
 
-Usa o **fluxo de dispositivo** do OAuth 2.0: o app mostra um código e um link;
-o usuário autoriza no navegador (em qualquer aparelho), na página oficial do
-Google. O app nunca vê a senha — recebe apenas os tokens, guardados na área
-privada do próprio app.
+Usa o fluxo **loopback + PKCE** do OAuth 2.0, igual no PC e no celular: o app
+sobe um servidor em ``127.0.0.1``, abre a página oficial do Google no navegador
+do aparelho e recebe o código de volta ali mesmo. O app nunca vê a senha —
+recebe apenas os tokens, guardados na área privada do próprio app.
+
+O fluxo de dispositivo (código digitado numa TV) foi abandonado: o Google
+recusa o escopo ``drive.appdata`` nele ("Invalid device flow scope"), e sem
+esse escopo o celular não enxergaria os backups enviados pelo PC.
 
 Escopo: ``drive.appdata`` — o app só enxerga a **pasta oculta dele mesmo**
-(appDataFolder), nunca o resto do Drive do usuário. É um dos poucos escopos
-que o fluxo de dispositivo aceita, o que também o torna viável no Android.
+(appDataFolder), nunca o resto do Drive do usuário. Como as duas plataformas
+usam a mesma credencial e o mesmo escopo, elas compartilham os backups.
 
 O transporte HTTP é injetável (``http=``) para permitir testar todo o
 protocolo sem rede nem credenciais (ver ``tests/test_nuvem_drive.py``).
@@ -33,14 +37,12 @@ import credenciais_app
 from armazenamento import BASE_DIR
 
 URL_AUTORIZACAO = "https://accounts.google.com/o/oauth2/v2/auth"
-URL_DEVICE_CODE = "https://oauth2.googleapis.com/device/code"
 URL_TOKEN = "https://oauth2.googleapis.com/token"
 URL_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
 URL_ARQUIVOS = "https://www.googleapis.com/drive/v3/files"
 
 # Só a pasta privada do app — não dá acesso a nenhum outro arquivo do Drive.
 ESCOPO = "https://www.googleapis.com/auth/drive.appdata"
-GRANT_DEVICE = "urn:ietf:params:oauth:grant-type:device_code"
 
 ARQUIVO_CREDENCIAIS = BASE_DIR / "nuvem_google.json"
 
@@ -98,12 +100,15 @@ def _json_ou_erro(resposta: Resposta, contexto: str) -> dict:
 
 
 def credenciais_do_app(mobile: bool) -> tuple[str, str]:
-    """Client ID/Secret embutidos para a plataforma (vazios se não houver)."""
-    if mobile:
-        return (
-            credenciais_app.CLIENT_ID_DISPOSITIVO,
-            credenciais_app.CLIENT_SECRET_DISPOSITIVO,
-        )
+    """Client ID/Secret embutidos (vazios se a compilação não os tiver).
+
+    Todas as plataformas usam o cliente "App para computador": o celular faz o
+    mesmo fluxo do PC (navegador + retorno em 127.0.0.1). O fluxo de dispositivo
+    (código na TV) foi abandonado porque o Google recusa o escopo
+    ``drive.appdata`` nele — e sem esse escopo o celular não enxergaria os
+    backups enviados pelo PC.
+    """
+    _ = mobile  # mesma credencial nas duas plataformas
     return credenciais_app.CLIENT_ID_DESKTOP, credenciais_app.CLIENT_SECRET_DESKTOP
 
 
@@ -258,65 +263,6 @@ def trocar_codigo_por_tokens(
         "Não foi possível concluir o login",
     )
     return _credenciais_de_resposta(dados)
-
-
-# ---------------------------------------------------------------------------
-# Autorização (fluxo de dispositivo)
-# ---------------------------------------------------------------------------
-
-
-def iniciar_autorizacao(client_id: str, http: Http = _http_padrao) -> dict:
-    """Pede o código de dispositivo. Retorna o que o usuário precisa ver.
-
-    Chaves úteis: ``user_code`` (código a digitar), ``verification_url`` (link),
-    ``device_code`` e ``interval`` (usados internamente no aguardo).
-    """
-    corpo = urllib.parse.urlencode({"client_id": client_id, "scope": ESCOPO}).encode()
-    dados = _json_ou_erro(
-        http("POST", URL_DEVICE_CODE, corpo,
-             {"Content-Type": "application/x-www-form-urlencoded"}),
-        "Não foi possível iniciar a conexão com o Google",
-    )
-    # A API usa verification_url; alguns retornos trazem verification_uri.
-    dados.setdefault("verification_url", dados.get("verification_uri", ""))
-    return dados
-
-
-def consultar_autorizacao(
-    client_id: str, client_secret: str, device_code: str, http: Http = _http_padrao
-) -> dict | None:
-    """Uma tentativa de resgatar os tokens.
-
-    Retorna as credenciais quando o usuário já autorizou, ``None`` enquanto
-    ainda está pendente, e levanta ``ErroNuvem`` se foi negado/expirou.
-    """
-    corpo = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "device_code": device_code,
-            "grant_type": GRANT_DEVICE,
-        }
-    ).encode()
-    status, bruto = http(
-        "POST", URL_TOKEN, corpo, {"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    try:
-        dados = json.loads(bruto or b"{}")
-    except ValueError:
-        dados = {}
-
-    if status < 400:
-        return _credenciais_de_resposta(dados)
-
-    erro = dados.get("error", "")
-    if erro in ("authorization_pending", "slow_down"):
-        return None
-    if erro == "access_denied":
-        raise ErroNuvem("Autorização negada na tela do Google.")
-    if erro == "expired_token":
-        raise ErroNuvem("O código expirou. Gere um novo e tente de novo.")
-    raise ErroNuvem(dados.get("error_description") or f"Falha ao autorizar ({erro or status}).")
 
 
 def _credenciais_de_resposta(dados: dict, agora: float | None = None) -> dict:

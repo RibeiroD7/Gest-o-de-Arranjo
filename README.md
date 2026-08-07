@@ -196,14 +196,12 @@ Para gerar as suas:
    *Publicar aplicativo*). Como o escopo usado (`drive.appdata`) é
    **não sensível**, não é preciso passar pela verificação do Google — e,
    publicada, a conexão não expira a cada 7 dias (limite do modo "Teste").
-4. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, crie **duas**,
-   porque o Google exige um tipo por fluxo:
-   - **App para computador** → usada no PC (login que volta sozinho ao app);
-   - **TVs e dispositivos com entrada limitada** → usada no Android (código).
+4. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, crie **uma**
+   do tipo **App para computador**. Ela serve para o PC e para o Android: nos
+   dois o login abre o navegador e volta sozinho para o app (`127.0.0.1`).
 5. Em **Settings → Secrets and variables → Actions** do repositório no GitHub,
-   cadastre os quatro valores:
-   `GOOGLE_CLIENT_ID_DESKTOP`, `GOOGLE_CLIENT_SECRET_DESKTOP`,
-   `GOOGLE_CLIENT_ID_DISPOSITIVO`, `GOOGLE_CLIENT_SECRET_DISPOSITIVO`.
+   cadastre os dois valores: `GOOGLE_CLIENT_ID_DESKTOP` e
+   `GOOGLE_CLIENT_SECRET_DESKTOP`.
 
 A próxima Release já sai com o login pronto. Sem os secrets, nada quebra: o app
 apenas pede as credenciais em **Usar minhas credenciais (avançado)** — que é
@@ -227,7 +225,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/main.py` | Interface (Flet): telas, dialogs e navegação; layout responsivo (PC/celular) |
 | `src/database.py` | Esquema SQLite, migrações, consultas e backup |
 | `src/armazenamento.py` | Resolução de caminhos de dados (desktop vs. área privada do celular) |
-| `src/nuvem_drive.py` | Backup na nuvem: OAuth por dispositivo e arquivos na pasta do app no Drive |
+| `src/nuvem_drive.py` | Backup na nuvem: OAuth (loopback + PKCE) e arquivos na pasta do app no Drive |
 | `src/pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
 | `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
