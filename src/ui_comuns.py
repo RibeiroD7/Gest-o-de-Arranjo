@@ -200,12 +200,19 @@ def linha_campos(*campos, spacing: int = 12) -> ft.Control:
 def abrir_url(page: ft.Page, url: str) -> None:
     """Abre a URL no navegador do sistema (PC e celular).
 
-    ⚠️ ``page.launch_url`` é uma corrotina no Flet: chamada sem ``await`` ela
-    nunca roda e **nada acontece, em silêncio** — foi o que impediu o login do
-    Google no Android. Por isso vai por ``page.run_task``.
+    No celular é preciso ``page.launch_url``, que é assíncrona: chamada sem
+    ``await`` nada acontece (em silêncio). E ela **não pode ir direto** para o
+    ``page.run_task``, que exige uma função corrotina de verdade — como o Flet
+    a embrulha num decorador de descontinuação, ``inspect.iscoroutinefunction``
+    devolve False e o run_task levanta TypeError. Por isso envolvemos numa
+    corrotina nossa, que satisfaz as duas exigências.
     """
     if eh_mobile():
-        page.run_task(page.launch_url, url)
+
+        async def _abrir() -> None:
+            await page.launch_url(url)
+
+        page.run_task(_abrir)
     else:
         webbrowser.open(url)
 

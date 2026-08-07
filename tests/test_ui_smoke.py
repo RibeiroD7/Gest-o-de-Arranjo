@@ -104,19 +104,42 @@ class TestAbrirUrl:
         import armazenamento
         armazenamento.definir_layout_mobile(False)
 
-    def test_no_celular_usa_run_task(self, monkeypatch):
+    def test_no_celular_abre_pelo_run_task(self, monkeypatch):
+        """Replica a validação real do Flet e executa a corrotina de verdade.
+
+        O Flet exige `inspect.iscoroutinefunction(handler)` no run_task — e o
+        `page.launch_url` reprova nesse teste (vem embrulhado num decorador),
+        o que derrubava o app no Android com "handler must be a coroutine
+        function". Um `run_task` falso que aceita qualquer coisa não pega isso.
+        """
+        import asyncio
+        import inspect
+
         import armazenamento
         import ui_comuns
 
         armazenamento.definir_layout_mobile(True)
         monkeypatch.delenv("GA_FORCAR_MOBILE", raising=False)
-        chamadas = []
+
+        capturado, abertas = [], []
+
+        def run_task_como_no_flet(handler, *args):
+            if not inspect.iscoroutinefunction(handler):
+                raise TypeError("handler must be a coroutine function")
+            capturado.append((handler, args))
+
+        async def launch_url_falso(url):
+            abertas.append(url)
+
         page = types.SimpleNamespace(
-            run_task=lambda fn, *a: chamadas.append((fn, a)),
-            launch_url="CORROTINA",
+            run_task=run_task_como_no_flet, launch_url=launch_url_falso
         )
         ui_comuns.abrir_url(page, "https://exemplo.com")
-        assert chamadas == [("CORROTINA", ("https://exemplo.com",))]
+
+        assert capturado, "nada foi agendado no run_task"
+        handler, args = capturado[0]
+        asyncio.run(handler(*args))  # roda a corrotina como o Flet faria
+        assert abertas == ["https://exemplo.com"]
 
     def test_no_pc_usa_o_navegador_do_sistema(self, monkeypatch):
         import armazenamento
@@ -129,3 +152,28 @@ class TestAbrirUrl:
         page = types.SimpleNamespace(run_task=lambda *a, **k: pytest.fail("não usar run_task no PC"))
         ui_comuns.abrir_url(page, "https://exemplo.com")
         assert abertas == ["https://exemplo.com"]
+
+
+def test_todos_os_run_task_recebem_corrotinas():
+    """Varre o código: page.run_task só aceita função corrotina de verdade.
+
+    O Flet valida com inspect.iscoroutinefunction e levanta TypeError. Já
+    derrubou o app duas vezes no Android (com page.launch_url e com um lambda),
+    então a checagem virou teste.
+    """
+    import pathlib
+    import re
+
+    problemas = []
+    for arquivo in pathlib.Path("src").glob("*.py"):
+        codigo = arquivo.read_text(encoding="utf-8")
+        for achado in re.finditer(r"run_task\(\s*([^\s,)]+)", codigo):
+            handler = achado.group(1)
+            linha = codigo[: achado.start()].count("\n") + 1
+            if handler.startswith("lambda"):
+                problemas.append(f"{arquivo.name}:{linha} passa um lambda")
+                continue
+            nome = handler.split(".")[-1]
+            if not re.search(rf"\basync def {re.escape(nome)}\b", codigo):
+                problemas.append(f"{arquivo.name}:{linha} passa {handler!r} (não é async def)")
+    assert not problemas, "run_task com handler inválido:\n" + "\n".join(problemas)

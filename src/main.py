@@ -8485,7 +8485,9 @@ def _verificar_atualizacao(page: ft.Page) -> None:
 
         def ao_clicar(_=None):
             if url_instalador:
-                page.run_task(lambda: _baixar_e_abrir_instalador(page, url_instalador))
+                # run_task exige uma função corrotina de verdade: um lambda
+                # (mesmo devolvendo corrotina) é rejeitado com TypeError.
+                page.run_task(_baixar_e_abrir_instalador, page, url_instalador)
             else:
                 webbrowser.open(URL_RELEASES)
 
