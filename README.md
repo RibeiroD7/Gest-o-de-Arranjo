@@ -182,13 +182,20 @@ recebe um token guardado na área privada do próprio aplicativo (o arquivo
 `nuvem_google.json`, que nunca vai para o repositório).
 
 **Para quem usa o app:** vá em **Ajustes → Backup na nuvem → Entrar com o
-Google**. No computador, o navegador abre, você escolhe a sua conta e o app
-conecta sozinho; no celular, aparece um código para digitar na página do
-Google. Cada pessoa entra na **própria** conta — os backups de uma nunca
-aparecem para a outra.
+Google**. O navegador abre, você escolhe a sua conta e o app conecta sozinho —
+o mesmo fluxo no computador e no celular. Cada pessoa entra na **própria**
+conta: os backups de uma nunca aparecem para a outra.
 
 Feito isso, o backup diário passa a subir sozinho. Em outro aparelho, entre com
 a mesma conta e use **Restaurar da nuvem** para trazer o backup mais recente.
+
+> **No celular apareceu "não é possível acessar esse site" (127.0.0.1)?**
+> É o Android congelando o aplicativo enquanto o navegador está na frente: o
+> endereço que devolve o código deixa de responder. **O login não se perdeu** —
+> o código continua no endereço. Toque na barra de endereço do navegador, copie
+> o endereço inteiro, volte ao aplicativo e cole em **Concluir colando o
+> endereço** (aparece no diálogo do login e também em Ajustes → Backup na
+> nuvem, por até 30 minutos).
 
 <details>
 <summary><b>Para quem publica o app</b> (criar as credenciais do Google, uma vez)</summary>

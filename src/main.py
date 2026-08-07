@@ -174,7 +174,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.11.0"
+VERSAO_APP = "1.11.1"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -7265,6 +7265,109 @@ def tela_ajustes(
         mostrar_sucesso(page, "Credenciais salvas.")
         recarregar()
 
+    def concluir_login_colado(texto: str, ao_terminar: Callable[[], None]) -> bool:
+        """Troca por tokens o código que veio no endereço colado pelo usuário.
+
+        Usa o PKCE salvo em ``login_pendente``, então funciona mesmo depois de
+        o Android ter encerrado o aplicativo — é o resgate do login em que o
+        navegador ficou em "não é possível acessar esse site" (o servidor local
+        do app morreu, mas o código continua no endereço).
+        """
+        pendente = nuvem_drive.carregar_login_pendente()
+        try:
+            codigo = nuvem_drive.extrair_codigo(texto)
+            obtidas = executar_com_progresso(
+                page,
+                "Concluindo o login...",
+                lambda: nuvem_drive.trocar_codigo_com_retentativa(
+                    pendente.get("client_id", ""),
+                    pendente.get("client_secret", ""),
+                    codigo,
+                    pendente.get("redirect_uri", ""),
+                    pendente.get("verificador", ""),
+                    tentativas=3,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao concluir o login colado")
+            mostrar_aviso(page, "Não foi possível concluir", str(exc))
+            return False
+        dados = nuvem_drive.carregar_credenciais()
+        dados.update(obtidas)
+        dados["client_id"] = pendente.get("client_id", "")
+        dados["client_secret"] = pendente.get("client_secret", "")
+        nuvem_drive.salvar_credenciais(dados)
+        nuvem_drive.limpar_login_pendente()
+        ao_terminar()
+        mostrar_sucesso(page, "Conectado ao Google Drive.")
+        recarregar()
+        return True
+
+    def _campo_colar_endereco() -> ft.TextField:
+        return ft.TextField(
+            label="Cole aqui o endereço do navegador",
+            hint_text="http://127.0.0.1:.../?code=...",
+            expand=True,
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+        )
+
+    def abrir_dialog_login_pendente(_=None):
+        """Retoma um login interrompido: o usuário cola o endereço de retorno."""
+        campo = _campo_colar_endereco()
+
+        def fechar(_=None):
+            page.pop_dialog()
+
+        def concluir(_=None):
+            concluir_login_colado(campo.value or "", fechar)
+
+        def descartar(_=None):
+            nuvem_drive.limpar_login_pendente()
+            fechar()
+            recarregar()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Concluir o login do Google"),
+                content=ft.Container(
+                    width=_largura_dialog(page, 420),
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                "Se o navegador mostrou \"não é possível acessar "
+                                "esse site\" (127.0.0.1), está tudo bem: o código "
+                                "do login ficou no endereço.",
+                                size=fonte(13),
+                            ),
+                            ft.Container(height=6),
+                            ft.Text(
+                                "Volte ao navegador, toque na barra de endereço, "
+                                "copie o endereço inteiro e cole abaixo.",
+                                size=fonte(13),
+                                color=TEXTO_SECUNDARIO,
+                            ),
+                            ft.Container(height=10),
+                            campo,
+                        ],
+                        spacing=0,
+                        tight=True,
+                    ),
+                ),
+                actions=[
+                    ft.TextButton("Descartar", on_click=descartar),
+                    ft.TextButton("Fechar", on_click=fechar),
+                    ft.FilledButton(
+                        "Concluir login", icon=ft.Icons.CHECK, on_click=concluir
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+        page.update()
+
     def conectar_pelo_navegador(client_id: str, client_secret: str):
         """Abre o navegador e recebe o retorno automaticamente (loopback + PKCE).
 
@@ -7296,52 +7399,30 @@ def tela_ajustes(
             servidor.encerrar()
             page.pop_dialog()
 
-        # No celular, o app pode ser encerrado enquanto o navegador está aberto
-        # e o retorno automático se perde. Aí o usuário cola o endereço que
-        # ficou na barra do navegador (ele contém o código).
-        campo_colar = ft.TextField(
-            label="Ou cole aqui o endereço do navegador",
-            hint_text="http://127.0.0.1:.../?code=...",
-            expand=True,
-            multiline=True,
-            min_lines=1,
-            max_lines=3,
-        )
+        # No celular, o app pode ser encerrado (ou congelado) enquanto o
+        # navegador está aberto e o retorno automático se perde — o navegador
+        # mostra "não é possível acessar esse site". Aí o usuário cola o
+        # endereço que ficou na barra, que contém o código.
+        campo_colar = _campo_colar_endereco()
+        campo_colar.label = "Ou cole aqui o endereço do navegador"
 
-        def concluir_colando(_=None):
-            try:
-                codigo = nuvem_drive.extrair_codigo(campo_colar.value or "")
-                pend = nuvem_drive.carregar_login_pendente()
-                obtidas = executar_com_progresso(
-                    page,
-                    "Concluindo o login...",
-                    lambda: nuvem_drive.trocar_codigo_com_retentativa(
-                        pend.get("client_id") or client_id,
-                        pend.get("client_secret") or client_secret,
-                        codigo,
-                        pend.get("redirect_uri") or servidor.url_redirecionamento,
-                        pend.get("verificador") or verificador,
-                        tentativas=3,
-                    ),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("Falha ao concluir o login colado")
-                mostrar_aviso(page, "Não foi possível concluir", str(exc))
-                return
+        def encerrar_espera():
             estado_login["cancelado"] = True  # encerra a espera do servidor
             servidor.encerrar()
-            dados = nuvem_drive.carregar_credenciais()
-            dados.update(obtidas)
-            dados["client_id"], dados["client_secret"] = client_id, client_secret
-            nuvem_drive.salvar_credenciais(dados)
-            nuvem_drive.limpar_login_pendente()
             page.pop_dialog()
-            mostrar_sucesso(page, "Conectado ao Google Drive.")
-            recarregar()
+
+        def concluir_colando(_=None):
+            concluir_login_colado(campo_colar.value or "", encerrar_espera)
 
         campos_colar = (
             [
                 ft.Container(height=4),
+                ft.Text(
+                    "Deu \"não é possível acessar esse site\"? É normal — copie "
+                    "o endereço da barra do navegador e cole abaixo.",
+                    size=fonte(12),
+                    color=TEXTO_SECUNDARIO,
+                ),
                 campo_colar,
                 ft.FilledButton(
                     "Concluir login", icon=ft.Icons.CHECK, on_click=concluir_colando
@@ -7572,6 +7653,56 @@ def tela_ajustes(
             area_avancado.visible = not area_avancado.visible
             page.update()
 
+        # Login interrompido (o Android congelou o app e o navegador não
+        # conseguiu devolver o código): oferece concluir colando o endereço.
+        aviso_pendente = (
+            [
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Icon(ft.Icons.INFO_OUTLINE, color=COR_AVISO,
+                                            size=fonte(18)),
+                                    ft.Text(
+                                        "Login começado e não concluído",
+                                        size=fonte(13),
+                                        color=COR_AVISO,
+                                        weight=ft.FontWeight.W_600,
+                                        expand=True,
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                            ft.Container(height=6),
+                            ft.Text(
+                                "O navegador mostrou \"não é possível acessar esse "
+                                "site\"? O código do login ficou no endereço — dá "
+                                "para terminar sem começar de novo.",
+                                size=fonte(12),
+                                color=TEXTO_SECUNDARIO,
+                            ),
+                            ft.Container(height=8),
+                            ft.FilledButton(
+                                "Concluir colando o endereço",
+                                icon=ft.Icons.CONTENT_PASTE_GO,
+                                on_click=abrir_dialog_login_pendente,
+                            ),
+                        ],
+                        spacing=0,
+                        tight=True,
+                    ),
+                    padding=12,
+                    bgcolor=ft.Colors.with_opacity(0.10, COR_AVISO),
+                    border=ft.Border.all(1, ft.Colors.with_opacity(0.35, COR_AVISO)),
+                    border_radius=10,
+                ),
+                ft.Container(height=12),
+            ]
+            if nuvem_drive.login_pendente_valido()
+            else []
+        )
+
         controles_nuvem = [
             ft.Text(
                 "Guarde o backup na sua conta do Google e restaure em outro "
@@ -7581,6 +7712,7 @@ def tela_ajustes(
                 color=TEXTO_SECUNDARIO,
             ),
             ft.Container(height=12),
+            *aviso_pendente,
             ft.FilledButton(
                 "Entrar com o Google",
                 icon=ft.Icons.CLOUD_SYNC_OUTLINED,

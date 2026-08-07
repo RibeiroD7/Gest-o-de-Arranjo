@@ -274,6 +274,42 @@ class TestLoginPendente:
         assert nd.carregar_credenciais()["client_id"] == "ID"
         assert nd.carregar_credenciais()["refresh_token"] == "RT"
 
+    def test_guarda_o_momento_do_inicio(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nd, "ARQUIVO_CREDENCIAIS", tmp_path / "n.json")
+        nd.salvar_login_pendente({"verificador": "V"}, agora=1000.0)
+        assert nd.carregar_login_pendente()["criado_em"] == 1000.0
+
+
+class TestLoginPendenteValido:
+    """Decide se o app oferece 'concluir colando o endereço'.
+
+    Cenário real: o Android congela o app em segundo plano, o servidor de
+    retorno em 127.0.0.1 morre e o navegador para em ERR_CONNECTION_REFUSED —
+    mas o código continua na barra de endereço, então o login ainda dá para
+    ser concluído.
+    """
+
+    def _pendente(self, **extra):
+        return {"verificador": "V", "redirect_uri": "http://127.0.0.1:1", **extra}
+
+    def test_recente_pode_ser_concluido(self):
+        pendente = self._pendente(criado_em=1000.0)
+        assert nd.login_pendente_valido(pendente, agora=1000.0 + 60)
+
+    def test_antigo_nao_e_mais_oferecido(self):
+        pendente = self._pendente(criado_em=1000.0)
+        assert not nd.login_pendente_valido(pendente, agora=1000.0 + 3600)
+
+    def test_sem_pkce_nao_serve(self):
+        assert not nd.login_pendente_valido({"criado_em": 1000.0}, agora=1000.0)
+
+    def test_vazio(self):
+        assert not nd.login_pendente_valido({}, agora=1000.0)
+
+    def test_pendente_antigo_sem_carimbo_e_descartado(self):
+        """Registro gravado por uma versão anterior (sem criado_em)."""
+        assert not nd.login_pendente_valido(self._pendente(), agora=1000.0)
+
 
 class TestTrocaComRetentativa:
     """No Android o app fica sem DNS em segundo plano; a troca precisa insistir."""

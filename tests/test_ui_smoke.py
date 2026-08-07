@@ -124,6 +124,26 @@ def test_dialogos_de_presidentes_constroem(mobile):
         armazenamento.definir_layout_mobile(False)
 
 
+@pytest.mark.parametrize("mobile", [False, True])
+def test_ajustes_oferece_concluir_login_pendente(mobile, monkeypatch):
+    """O resgate do login do Drive precisa aparecer em Ajustes, não só no diálogo.
+
+    Quando o Android congela o app, o navegador para em ERR_CONNECTION_REFUSED
+    e o diálogo de espera se perde — sem esse cartão o usuário ficaria sem
+    caminho para concluir com o código que ficou no endereço.
+    """
+    import armazenamento
+    import nuvem_drive
+
+    monkeypatch.setattr(nuvem_drive, "login_pendente_valido", lambda *a, **k: True)
+    monkeypatch.setattr(nuvem_drive, "esta_conectado", lambda *a, **k: False)
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        assert main.tela_ajustes(_page(), lambda: None, flet.FilePicker()) is not None
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
 class TestAbrirUrl:
     """page.launch_url é corrotina: precisa ir por run_task, senão não abre nada.
 

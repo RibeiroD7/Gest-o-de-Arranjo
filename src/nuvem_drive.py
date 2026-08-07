@@ -245,19 +245,52 @@ def extrair_codigo(texto: str) -> str:
     return texto
 
 
-def salvar_login_pendente(dados: dict) -> None:
+# Por quanto tempo um login interrompido ainda pode ser concluído colando o
+# endereço. O código do Google dura poucos minutos; meia hora é folga suficiente
+# sem deixar um convite velho na tela para sempre.
+VALIDADE_LOGIN_PENDENTE = 30 * 60
+
+
+def salvar_login_pendente(dados: dict, agora: float | None = None) -> None:
     """Guarda o PKCE e a credencial do login em andamento.
 
-    No celular o app pode ser encerrado enquanto o navegador está aberto; sem
-    isso, ao voltar não haveria como concluir a troca do código por tokens.
+    No celular o app pode ser encerrado (ou congelado) enquanto o navegador
+    está aberto; sem isso, ao voltar não haveria como concluir a troca do
+    código por tokens.
     """
     atual = carregar_credenciais()
-    atual["login_pendente"] = dados
+    atual["login_pendente"] = {
+        **dados,
+        "criado_em": time.time() if agora is None else agora,
+    }
     salvar_credenciais(atual)
 
 
 def carregar_login_pendente() -> dict:
     return carregar_credenciais().get("login_pendente") or {}
+
+
+def login_pendente_valido(
+    pendente: dict | None = None,
+    agora: float | None = None,
+    validade: float = VALIDADE_LOGIN_PENDENTE,
+) -> bool:
+    """True se há um login interrompido recente, que ainda dá para concluir.
+
+    É o que decide se o app oferece "concluir colando o endereço" — o caso do
+    Android que congela o aplicativo em segundo plano e derruba o servidor de
+    retorno, deixando o navegador em ERR_CONNECTION_REFUSED com o código ainda
+    na barra de endereço.
+    """
+    pendente = carregar_login_pendente() if pendente is None else pendente
+    if not pendente.get("verificador") or not pendente.get("redirect_uri"):
+        return False
+    # Sem carimbo de hora: registro de uma versão anterior, idade desconhecida.
+    criado_em = pendente.get("criado_em")
+    if not criado_em:
+        return False
+    agora = time.time() if agora is None else agora
+    return (agora - float(criado_em)) < validade
 
 
 def limpar_login_pendente() -> None:
