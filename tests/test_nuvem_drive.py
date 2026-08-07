@@ -273,3 +273,51 @@ class TestLoginPendente:
         nd.limpar_login_pendente()
         assert nd.carregar_credenciais()["client_id"] == "ID"
         assert nd.carregar_credenciais()["refresh_token"] == "RT"
+
+
+class TestTrocaComRetentativa:
+    """No Android o app fica sem DNS em segundo plano; a troca precisa insistir."""
+
+    def test_insiste_ate_a_rede_voltar(self):
+        chamadas = {"n": 0}
+
+        def http(metodo, url, corpo=None, cabecalhos=None, timeout=30):
+            chamadas["n"] += 1
+            if chamadas["n"] < 3:  # duas falhas de DNS, como no Android
+                raise OSError("[Errno 7] No address associated with hostname")
+            return _json(200, {"access_token": "AT", "refresh_token": "RT",
+                               "expires_in": 3600})
+
+        esperas = []
+        cred = nd.trocar_codigo_com_retentativa(
+            "id", "seg", "COD", "http://127.0.0.1:1", "V",
+            http=http, espera=0.01, dormir=esperas.append,
+        )
+        assert cred["access_token"] == "AT"
+        assert chamadas["n"] == 3
+        assert len(esperas) == 2  # esperou entre as tentativas
+
+    def test_codigo_recusado_nao_repete(self):
+        """Se o Google recusou, insistir não muda nada — falha na hora."""
+        chamadas = {"n": 0}
+
+        def http(metodo, url, corpo=None, cabecalhos=None, timeout=30):
+            chamadas["n"] += 1
+            return _json(400, {"error": "invalid_grant",
+                               "error_description": "Código expirado"})
+
+        with pytest.raises(nd.ErroNuvem, match="Código expirado"):
+            nd.trocar_codigo_com_retentativa(
+                "id", "seg", "COD", "http://x", "V", http=http, dormir=lambda _: None
+            )
+        assert chamadas["n"] == 1
+
+    def test_desiste_com_mensagem_amigavel(self):
+        def http(*a, **k):
+            raise OSError("[Errno 7] No address associated with hostname")
+
+        with pytest.raises(nd.ErroNuvem, match="Sem conexão para concluir"):
+            nd.trocar_codigo_com_retentativa(
+                "id", "seg", "COD", "http://x", "V",
+                http=http, tentativas=3, dormir=lambda _: None,
+            )

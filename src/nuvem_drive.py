@@ -179,6 +179,45 @@ text-align:center;padding-top:80px">
 </body></html>"""
 
 
+def trocar_codigo_com_retentativa(
+    client_id: str,
+    client_secret: str,
+    codigo: str,
+    redirect_uri: str,
+    verificador: str,
+    http: Http = _http_padrao,
+    tentativas: int = 15,
+    espera: float = 2.0,
+    dormir=time.sleep,
+) -> dict:
+    """Troca o código por tokens, insistindo enquanto a rede não responder.
+
+    No Android o aplicativo fica sem DNS enquanto está em segundo plano — e é
+    exatamente aí que o código chega (o navegador está na frente). O erro é
+    ``[Errno 7] No address associated with hostname``. Insistindo, a troca
+    acontece assim que o usuário volta ao aplicativo.
+
+    Só repete falhas de REDE: se o Google recusou o código (ErroNuvem), para na
+    hora, porque insistir não mudaria a resposta.
+    """
+    ultimo: Exception | None = None
+    for tentativa in range(max(1, tentativas)):
+        try:
+            return trocar_codigo_por_tokens(
+                client_id, client_secret, codigo, redirect_uri, verificador, http=http
+            )
+        except ErroNuvem:
+            raise  # resposta do Google: não adianta repetir
+        except Exception as exc:  # noqa: BLE001 — rede indisponível: tenta de novo
+            ultimo = exc
+            if tentativa < tentativas - 1:
+                dormir(espera)
+    raise ErroNuvem(
+        "Sem conexão para concluir o login. Volte ao aplicativo com a internet "
+        f"ligada e tente de novo. ({ultimo})"
+    )
+
+
 def extrair_codigo(texto: str) -> str:
     """Extrai o código de autorização de uma URL de retorno colada pelo usuário.
 

@@ -7092,12 +7092,13 @@ def tela_ajustes(
                 obtidas = executar_com_progresso(
                     page,
                     "Concluindo o login...",
-                    lambda: nuvem_drive.trocar_codigo_por_tokens(
+                    lambda: nuvem_drive.trocar_codigo_com_retentativa(
                         pend.get("client_id") or client_id,
                         pend.get("client_secret") or client_secret,
                         codigo,
                         pend.get("redirect_uri") or servidor.url_redirecionamento,
                         pend.get("verificador") or verificador,
+                        tentativas=3,
                     ),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -7171,8 +7172,10 @@ def tela_ajustes(
 
             try:
                 codigo = await asyncio.to_thread(servidor.aguardar_codigo, 300)
+                # No celular o código chega enquanto o app está em segundo
+                # plano, sem DNS: a troca insiste até o usuário voltar ao app.
                 obtidas = await asyncio.to_thread(
-                    nuvem_drive.trocar_codigo_por_tokens,
+                    nuvem_drive.trocar_codigo_com_retentativa,
                     client_id, client_secret, codigo,
                     servidor.url_redirecionamento, verificador,
                 )
