@@ -97,6 +97,35 @@ def oradores_mais_tempo_sem_discurso(
     return sorted(orador_ids, key=chave)
 
 
+def weekdays_sugeridos(
+    tipo: str,
+    weekday_minha: int | None,
+    weekday_host: int | None,
+    weekday_padrao: int | None = None,
+) -> list[tuple[int, str]]:
+    """Dias da semana que fazem sentido sugerir, conforme quem ouve o discurso.
+
+    - ``recebido``: o orador vem falar **na minha congregação** → só os dias da
+      **minha** reunião. Sugerir o dia da outra congregação seria marcar um
+      discurso num dia em que não temos reunião.
+    - ``enviado``: nosso orador vai falar **na outra congregação** → só os dias
+      da reunião **dela**.
+
+    Se o dia da congregação que importa não estiver cadastrado, cai no padrão
+    observado nas designações do mês (melhor do que não sugerir nada).
+
+    Returns:
+        ``[(weekday, origem)]`` com origem em ``{"minha", "host", "padrao"}``.
+    """
+    principal = weekday_minha if tipo == "recebido" else weekday_host
+    origem = "minha" if tipo == "recebido" else "host"
+    if principal is not None:
+        return [(principal, origem)]
+    if weekday_padrao is not None:
+        return [(weekday_padrao, "padrao")]
+    return []
+
+
 def sugerir_recebidos(
     oradores: list[dict],
     prioritarios: set[int],

@@ -115,6 +115,7 @@ from servicos import (
     escolher_rodizio_presidentes,
     oradores_mais_tempo_sem_discurso,
     sugerir_recebidos,
+    weekdays_sugeridos,
 )
 from tema import (
     BORDA_SUAVE,
@@ -659,21 +660,19 @@ def _sugerir_datas_arranjo(
     host_wd = _dia_semana_para_weekday(host_dia)
     ita_wd = _dia_semana_para_weekday(ita_dia)
 
-    candidatos: list[tuple[int, str]] = []
-    if tipo == "recebido" and host_wd == 6:
-        candidatos.append((5, f"Sábado (véspera — {host_nome})"))
-    if host_wd is not None:
-        candidatos.append(
-            (host_wd, _rotulo_dia_congregacao(host_nome, host_dia, host_horario))
+    # Recebido = falará na minha congregação (meus dias de reunião);
+    # enviado = falará na outra congregação (os dias dela).
+    rotulos = {
+        "minha": _rotulo_dia_congregacao(ita_nome, ita_dia, ita_horario),
+        "host": _rotulo_dia_congregacao(host_nome, host_dia, host_horario),
+        "padrao": "Padrão do mês",
+    }
+    candidatos = [
+        (weekday, rotulos[origem])
+        for weekday, origem in weekdays_sugeridos(
+            tipo, ita_wd, host_wd, weekday_padrao
         )
-    if ita_wd is not None:
-        candidatos.append(
-            (ita_wd, _rotulo_dia_congregacao(ita_nome, ita_dia, ita_horario))
-        )
-    if weekday_padrao is not None:
-        usados = {wd for wd, _ in candidatos}
-        if weekday_padrao not in usados:
-            candidatos.append((weekday_padrao, "Padrão do mês"))
+    ]
 
     vistos: set[int] = set()
     sugestoes: list[dict] = []

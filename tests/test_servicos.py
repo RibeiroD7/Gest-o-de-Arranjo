@@ -6,6 +6,7 @@ from servicos import (
     escolher_rodizio_presidentes,
     oradores_mais_tempo_sem_discurso,
     sugerir_recebidos,
+    weekdays_sugeridos,
 )
 
 
@@ -161,3 +162,37 @@ class TestDetectarConflitosOradores:
             {"orador_id": 1},
         ]
         assert detectar_conflitos_oradores(registros) == []
+
+
+class TestWeekdaysSugeridos:
+    """Quem ouve o discurso define as datas possíveis.
+
+    Caso real: arranjo com Jardim Bela Vista (Domingo), minha congregação
+    Jardim Aurora (Sábado). Ao RECEBER um orador, ele fala aqui — então só
+    sábados. Antes o app sugeria também os domingos da outra congregação.
+    """
+
+    SABADO, DOMINGO = 5, 6
+
+    def test_recebido_usa_so_os_meus_dias(self):
+        assert weekdays_sugeridos("recebido", self.SABADO, self.DOMINGO) == [
+            (self.SABADO, "minha")
+        ]
+
+    def test_enviado_usa_so_os_dias_da_outra(self):
+        assert weekdays_sugeridos("enviado", self.SABADO, self.DOMINGO) == [
+            (self.DOMINGO, "host")
+        ]
+
+    def test_cai_no_padrao_quando_falta_o_dia(self):
+        # Minha congregação sem dia cadastrado: usa o padrão observado no mês.
+        assert weekdays_sugeridos("recebido", None, self.DOMINGO, 2) == [(2, "padrao")]
+        assert weekdays_sugeridos("enviado", self.SABADO, None, 3) == [(3, "padrao")]
+
+    def test_sem_nada_nao_sugere(self):
+        assert weekdays_sugeridos("recebido", None, None, None) == []
+
+    def test_nunca_mistura_as_duas_congregacoes(self):
+        for tipo in ("recebido", "enviado"):
+            dias = [wd for wd, _ in weekdays_sugeridos(tipo, self.SABADO, self.DOMINGO, 1)]
+            assert len(dias) == 1, f"{tipo} sugeriu mais de um dia da semana"
