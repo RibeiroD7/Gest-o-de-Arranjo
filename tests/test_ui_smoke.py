@@ -41,6 +41,7 @@ def _telas(page, fp):
         "temas": lambda: main.tela_temas(page, fp),
         "quadro": lambda: main.tela_quadro_anuncios(page, lambda: None),
         "calendario": lambda: main.tela_calendario(page, lambda: None),
+        "relatorios": lambda: main.tela_relatorios(page, lambda: None),
         "ajustes": lambda: main.tela_ajustes(page, lambda: None, fp),
     }
 
@@ -266,6 +267,29 @@ class TestAbrirUrl:
         page = types.SimpleNamespace(run_task=lambda *a, **k: pytest.fail("não usar run_task no PC"))
         ui_comuns.abrir_url(page, "https://exemplo.com")
         assert abertas == ["https://exemplo.com"]
+
+
+def test_nenhum_uso_de_atributo_que_a_page_nao_tem():
+    """Varre o código: tudo que se chama em `page.` precisa existir no Flet.
+
+    O `page.set_clipboard()` sumiu no Flet 0.86 e derrubou o app inteiro no
+    Android — e passou pelos testes porque só é chamado dentro de um handler,
+    que a fumaça de UI não dispara. Uma varredura estática pega a próxima
+    remoção de API antes de virar release.
+    """
+    import pathlib
+    import re
+
+    conhecidos = set(dir(flet.Page)) | set(flet.Page.__dataclass_fields__)
+    problemas = []
+    for arquivo in pathlib.Path("src").glob("*.py"):
+        codigo = arquivo.read_text(encoding="utf-8")
+        for achado in re.finditer(r"\bpage\.(\w+)", codigo):
+            nome = achado.group(1)
+            if nome not in conhecidos:
+                linha = codigo[: achado.start()].count("\n") + 1
+                problemas.append(f"{arquivo.name}:{linha} usa page.{nome}")
+    assert not problemas, "atributo inexistente em ft.Page:\n" + "\n".join(problemas)
 
 
 def test_todos_os_run_task_recebem_corrotinas():

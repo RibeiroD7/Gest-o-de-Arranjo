@@ -116,6 +116,7 @@ from png_oradores import (
 from servicos import (
     detectar_conflitos_oradores,
     escolher_rodizio_presidentes,
+    meses_de_atencao,
     montar_mensagem_presidencia,
     oradores_mais_tempo_sem_discurso,
     sugerir_recebidos,
@@ -176,7 +177,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.13.0"
+VERSAO_APP = "1.14.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -218,12 +219,26 @@ SECOES = [
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
     {"nome": "Quadro de Anúncios", "icone": ft.Icons.CAMPAIGN},
     {"nome": "Calendário", "icone": ft.Icons.CALENDAR_TODAY},
+    {"nome": "Relatórios", "icone": ft.Icons.INSIGHTS},
     {"nome": "Ajustes", "icone": ft.Icons.SETTINGS},
 ]
 
 # Índices de navegação usados em botões/atalhos (mantidos junto de SECOES
 # para não quebrarem quando a ordem das abas mudar).
-INDICE_AJUSTES = 7
+INDICE_RELATORIOS = 7
+INDICE_AJUSTES = 8
+
+# Quantos meses à frente as Pendências do Início cobram. O arranjo se monta com
+# poucos meses de antecedência: cobrar o ano todo enche a lista de meses que
+# ainda nem começaram a ser feitos.
+MESES_DE_ATENCAO = 3
+
+# Serviços do Flet criados no main() e usados por funções soltas do módulo.
+# Declarados aqui para quem lê antes de o app subir (testes) achar None em vez
+# de NameError.
+_file_picker_global: ft.FilePicker | None = None
+_share_global: ft.Share | None = None
+_clipboard_global: ft.Clipboard | None = None
 
 SQL_ORADORES = """
     SELECT o.id,
@@ -1678,6 +1693,36 @@ def confirmar_exclusao_congregacao(
 # Formulário de designações
 # ---------------------------------------------------------------------------
 
+def copiar_texto(page: ft.Page, texto: str, mensagem: str = "Copiado.") -> None:
+    """Copia texto para a área de transferência.
+
+    O Flet 0.86 removeu o antigo método de clipboard da Page e pôs no lugar o
+    serviço ``Clipboard``, que é assíncrono — a chamada antiga derrubava o app
+    inteiro no Android com ``AttributeError``. O serviço vem do ``main()``,
+    onde é criado junto com os demais (Share, FilePicker).
+    """
+    servico = _clipboard_global
+    if servico is None:
+        mostrar_aviso(
+            page,
+            "Não foi possível copiar",
+            "A área de transferência não está disponível neste aparelho.",
+        )
+        return
+
+    async def _copiar() -> None:
+        try:
+            await servico.set(texto)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao copiar para a área de transferência")
+            mostrar_aviso(page, "Não foi possível copiar", str(exc))
+            return
+        if mensagem:
+            mostrar_sucesso(page, mensagem)
+
+    page.run_task(_copiar)
+
+
 def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
     """Entrega ao usuário um arquivo já gerado em `exports/`.
 
@@ -2454,12 +2499,39 @@ def tela_inicio(
     )
 
     pendencias: list[str] = []
-    contagens_ano = contar_designacoes_por_mes(ano)
-    for mes_ref in range(mes, 13):
-        if mes_ref not in arranjos:
+    # Cache por ano: a janela de atenção pode cruzar a virada (nov → jan).
+    dados_por_ano: dict[int, dict] = {
+        ano: {
+            "arranjos": arranjos,
+            "recebidos": recebidos,
+            "presidentes": presidentes,
+            "especiais": especiais,
+            "contagens": contar_designacoes_por_mes(ano),
+        }
+    }
+
+    def dados_ano(ano_ref: int) -> dict:
+        if ano_ref not in dados_por_ano:
+            dados_por_ano[ano_ref] = {
+                "arranjos": {a["mes_inicio"]: a for a in carregar_arranjos_por_ano(ano_ref)},
+                "recebidos": carregar_recebidos_por_ano(ano_ref),
+                "presidentes": carregar_presidentes_por_ano(ano_ref),
+                "especiais": listar_datas_especiais_por_ano(ano_ref),
+                "contagens": contar_designacoes_por_mes(ano_ref),
+            }
+        return dados_por_ano[ano_ref]
+
+    for ano_ref, mes_ref in meses_de_atencao(ano, mes, MESES_DE_ATENCAO):
+        dados = dados_ano(ano_ref)
+        if mes_ref not in dados["arranjos"]:
             continue
-        r = _resumo_mes_programacao(ano, mes_ref, recebidos, presidentes, contagens_ano, especiais)
+        r = _resumo_mes_programacao(
+            ano_ref, mes_ref, dados["recebidos"], dados["presidentes"],
+            dados["contagens"], dados["especiais"],
+        )
         nome_mes = NOMES_MESES[mes_ref]
+        if ano_ref != ano:
+            nome_mes = f"{nome_mes}/{ano_ref}"
         if r["semanas"] and r["cobertas"] == 0:
             pendencias.append(f"{nome_mes}: nenhuma semana com orador")
         elif r["cobertas"] < r["semanas"]:
@@ -2521,53 +2593,6 @@ def tela_inicio(
         except Exception as exc:
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
-    def gerar_relatorios(_=None):
-        try:
-            minha_cong = obter_id_minha_congregacao()
-            freq = relatorio_frequencia_oradores(
-                int(minha_cong) if minha_cong else None
-            )
-            presidencias = relatorio_presidencias()
-            intercambio = relatorio_intercambio_congregacoes(ano)
-
-            # Resumo do ano: soma mês a mês só o que tem arranjo cadastrado —
-            # meses sem arranjo não são pendência, são planejamento futuro.
-            contagens = contar_designacoes_por_mes(ano)
-            resumo_ano = {
-                "semanas": 0, "cobertas": 0, "presidentes": 0,
-                "recebidos": 0, "enviados": 0,
-                "pendentes": contar_designacoes_por_status(ano).get("pendente", 0),
-                "especiais": len(especiais),
-            }
-            for mes_ref in arranjos:
-                r = _resumo_mes_programacao(
-                    ano, mes_ref, recebidos, presidentes, contagens, especiais
-                )
-                for chave in ("semanas", "cobertas", "presidentes", "recebidos", "enviados"):
-                    resumo_ano[chave] += r[chave]
-
-            caminho, erro = executar_com_progresso(
-                page,
-                "Gerando relatório...",
-                lambda: gerar_pdf_relatorios(
-                    freq,
-                    presidencias,
-                    intercambio,
-                    resumo_ano,
-                    subtitulo=(
-                        f"{config.get('nome_congregacao') or 'Minha congregação'} · {ano}"
-                    ),
-                ),
-            )
-            if erro:
-                mostrar_aviso(page, "Erro", erro)
-                return
-            entregar_arquivo(page, caminho, abrir_arquivo)
-            if not eh_mobile():
-                mostrar_sucesso(page, f"Relatório gerado: {caminho}")
-        except Exception as exc:
-            mostrar_aviso(page, "Erro", f"Não foi possível gerar o relatório: {exc}")
-
     par_inicio, par_fim = par_meses_do_mes_quadro(mes)
     card_pendencias = ft.Container(
         content=ft.Column(
@@ -2611,9 +2636,9 @@ def tela_inicio(
                     on_click=lambda _: ir_para(4),
                 ),
                 ft.OutlinedButton(
-                    "Relatórios (PDF)",
+                    "Relatórios",
                     icon=ft.Icons.ASSESSMENT_OUTLINED,
-                    on_click=gerar_relatorios,
+                    on_click=lambda _: ir_para(INDICE_RELATORIOS),
                 ),
             ],
             spacing=8,
@@ -5427,8 +5452,10 @@ async def _dialog_whatsapp_designacao_envio(
             if tel:
                 webbrowser.open(gerar_link_whatsapp(tel, mensagem))
             else:
-                page.set_clipboard(mensagem)
-                mostrar_sucesso(page, "Mensagem copiada — cole no WhatsApp e anexe a imagem.")
+                copiar_texto(
+                    page, mensagem,
+                    "Mensagem copiada — cole no WhatsApp e anexe a imagem.",
+                )
             fechar_dialog()
 
         def abrir_pasta(_=None):
@@ -5571,14 +5598,14 @@ def abrir_dialog_mensagem_presidencia(
         page.pop_dialog()
 
     def copiar(_=None):
-        page.set_clipboard(mensagem_atual())
+        texto = mensagem_atual()
         fechar()
-        mostrar_sucesso(page, "Mensagem copiada.")
+        copiar_texto(page, texto, "Mensagem copiada.")
 
     def enviar(_=None):
         telefone = (presidente.get("telefone") or "").strip()
         if not telefone:
-            page.set_clipboard(mensagem_atual())
+            copiar_texto(page, mensagem_atual(), "")
             fechar()
             mostrar_aviso(
                 page,
@@ -7011,6 +7038,400 @@ def tela_programacao(
         ],
         spacing=0,
         expand=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Relatórios
+# ---------------------------------------------------------------------------
+
+def _cartao_numero_relatorio(
+    rotulo: str, valor: str, detalhe: str, cor: str, icone: str
+) -> ft.Container:
+    """Número grande do painel de relatórios, com rótulo e uma linha de apoio."""
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Icon(icone, size=fonte(16), color=cor),
+                        ft.Text(
+                            rotulo, size=fonte(11), color=TEXTO_SECUNDARIO,
+                            weight=ft.FontWeight.W_600, expand=True,
+                            max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+                ft.Text(valor, size=fonte(26), weight=ft.FontWeight.W_700, color=cor),
+                ft.Text(
+                    detalhe, size=fonte(11), color=TEXTO_SECUNDARIO,
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+            spacing=2,
+            tight=True,
+        ),
+        bgcolor=FUNDO_ELEVADO,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=12,
+        padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+        expand=True,
+    )
+
+
+def _barra_proporcao(valor: int, total: int, cor: str, largura: int = 90) -> ft.Control:
+    """Barrinha proporcional — dá a leitura do ranking sem ler os números."""
+    fracao = (valor / total) if total else 0
+    return ft.Container(
+        content=ft.Container(
+            bgcolor=cor,
+            border_radius=4,
+            height=6,
+            width=max(3, round(largura * fracao)) if valor else 0,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.10, cor),
+        border_radius=4,
+        height=6,
+        width=largura,
+        alignment=ft.Alignment.CENTER_LEFT,
+    )
+
+
+def _tabela_relatorio(
+    titulo: str,
+    descricao: str,
+    colunas: list[tuple[str, int | None]],
+    linhas: list[list[ft.Control | str]],
+    vazio: str,
+) -> ft.Container:
+    """Quadro do relatório: título, explicação e uma tabela enxuta.
+
+    ``colunas`` são pares ``(rótulo, largura)``; largura ``None`` ocupa o
+    espaço que sobra. As células aceitam texto ou controle pronto (a barrinha).
+    """
+    def celula(valor, largura, cabecalho=False):
+        if isinstance(valor, ft.Control):
+            return ft.Container(content=valor, width=largura, expand=largura is None)
+        return ft.Text(
+            str(valor),
+            size=fonte(12) if cabecalho else fonte(13),
+            weight=ft.FontWeight.W_700 if cabecalho else ft.FontWeight.W_400,
+            color=TEXTO_SECUNDARIO if cabecalho else TEXTO_PRIMARIO,
+            width=largura,
+            expand=largura is None,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+
+    cabecalho = ft.Container(
+        content=ft.Row(
+            [celula(rotulo, largura, cabecalho=True) for rotulo, largura in colunas],
+            spacing=10,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.06, COR_DESTAQUE),
+        padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+    )
+    corpo = [
+        ft.Container(
+            content=ft.Row(
+                [
+                    celula(valor, largura)
+                    for valor, (_rotulo, largura) in zip(linha, colunas)
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=9),
+            border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE))
+            if indice < len(linhas) - 1
+            else None,
+        )
+        for indice, linha in enumerate(linhas)
+    ]
+    if not corpo:
+        corpo = [
+            ft.Container(
+                content=ft.Text(vazio, size=fonte(13), color=TEXTO_SECUNDARIO, italic=True),
+                padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+            )
+        ]
+
+    tabela = ft.Container(
+        content=ft.Column([cabecalho, *corpo], spacing=0, tight=True),
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=10,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+    )
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Text(titulo, size=fonte(15), weight=ft.FontWeight.W_600,
+                        color=TEXTO_PRIMARIO),
+                ft.Text(descricao, size=fonte(12), color=TEXTO_SECUNDARIO),
+                ft.Container(height=10),
+                tabela,
+            ],
+            spacing=2,
+            tight=True,
+        ),
+        bgcolor=FUNDO_CARD,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=14,
+        padding=16 if eh_mobile() else 20,
+        shadow=_sombra_card(0.25),
+    )
+
+
+def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
+    """Painel com o retrato do arranjo: o que só aparece somando o ano inteiro.
+
+    Fica dentro do app (o PDF virou só uma opção de exportação): números do
+    ano, quem está discursando e presidindo de menos, e como está a troca com
+    cada congregação.
+    """
+    anos = listar_anos_arranjos() or [date.today().year]
+    ano_atual = date.today().year
+    estado_rel = {"ano": ano_atual if ano_atual in anos else anos[0]}
+
+    def dados_do_ano(ano: int) -> dict:
+        minha_cong = obter_id_minha_congregacao()
+        recebidos = carregar_recebidos_por_ano(ano)
+        presidentes = carregar_presidentes_por_ano(ano)
+        especiais = listar_datas_especiais_por_ano(ano)
+        contagens = contar_designacoes_por_mes(ano)
+        arranjos = {a["mes_inicio"] for a in carregar_arranjos_por_ano(ano)}
+
+        resumo = {
+            "semanas": 0, "cobertas": 0, "presidentes": 0,
+            "recebidos": 0, "enviados": 0,
+            "pendentes": contar_designacoes_por_status(ano).get("pendente", 0),
+            "especiais": len(especiais),
+            "meses": len(arranjos),
+        }
+        # Só os meses com arranjo cadastrado: mês sem arranjo é planejamento
+        # futuro, não buraco na programação.
+        for mes_ref in arranjos:
+            parcial = _resumo_mes_programacao(
+                ano, mes_ref, recebidos, presidentes, contagens, especiais
+            )
+            for chave in ("semanas", "cobertas", "presidentes", "recebidos", "enviados"):
+                resumo[chave] += parcial[chave]
+
+        return {
+            "resumo": resumo,
+            "frequencia": relatorio_frequencia_oradores(
+                int(minha_cong) if minha_cong else None
+            ),
+            "presidencias": relatorio_presidencias(),
+            "intercambio": relatorio_intercambio_congregacoes(ano),
+        }
+
+    area = ft.Column(spacing=16, tight=True)
+
+    def exportar_pdf(_=None):
+        ano = estado_rel["ano"]
+        dados = dados_do_ano(ano)
+        config = carregar_configuracao()
+        try:
+            caminho, erro = executar_com_progresso(
+                page,
+                "Gerando PDF...",
+                lambda: gerar_pdf_relatorios(
+                    dados["frequencia"],
+                    dados["presidencias"],
+                    dados["intercambio"],
+                    dados["resumo"],
+                    subtitulo=(
+                        f"{config.get('nome_congregacao') or 'Minha congregação'} · {ano}"
+                    ),
+                ),
+            )
+            if erro:
+                mostrar_aviso(page, "Não foi possível exportar", erro)
+                return
+            entregar_arquivo(page, caminho, abrir_arquivo)
+            if not eh_mobile():
+                mostrar_sucesso(page, f"Relatório gerado: {caminho}")
+        except Exception as exc:  # noqa: BLE001
+            mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
+
+    def montar():
+        ano = estado_rel["ano"]
+        dados = dados_do_ano(ano)
+        resumo = dados["resumo"]
+        semanas = resumo["semanas"]
+        sem_orador = max(0, semanas - resumo["cobertas"])
+        sem_presidente = max(0, semanas - resumo["presidentes"])
+
+        cartoes = [
+            _cartao_numero_relatorio(
+                "Semanas com orador",
+                f"{resumo['cobertas']}/{semanas}" if semanas else "—",
+                f"{sem_orador} sem orador" if sem_orador else "nenhuma em aberto",
+                COR_SUCESSO if not sem_orador else COR_AVISO,
+                ft.Icons.RECORD_VOICE_OVER_OUTLINED,
+            ),
+            _cartao_numero_relatorio(
+                "Semanas com presidente",
+                f"{resumo['presidentes']}/{semanas}" if semanas else "—",
+                f"{sem_presidente} sem presidente" if sem_presidente else "nenhuma em aberto",
+                COR_SUCESSO if not sem_presidente else COR_AVISO,
+                ft.Icons.PERSON_OUTLINE,
+            ),
+            _cartao_numero_relatorio(
+                "Oradores recebidos",
+                str(resumo["recebidos"]),
+                f"em {resumo['meses']} mês(es) com arranjo",
+                COR_DESTAQUE_CLARA,
+                ft.Icons.CALL_RECEIVED,
+            ),
+            _cartao_numero_relatorio(
+                "Designações enviadas",
+                str(resumo["enviados"]),
+                f"{resumo['pendentes']} aguardando confirmação",
+                COR_DESTAQUE_CLARA if not resumo["pendentes"] else COR_AVISO,
+                ft.Icons.CALL_MADE,
+            ),
+        ]
+        if eh_mobile():
+            grade = ft.Column(
+                [ft.Row(cartoes[:2], spacing=10), ft.Row(cartoes[2:], spacing=10)],
+                spacing=10,
+                tight=True,
+            )
+        else:
+            grade = ft.Row(cartoes, spacing=12)
+
+        # Frequência: barra proporcional ao maior número da coluna.
+        freq = dados["frequencia"]
+        max_discursos = max((o["quantidade"] for o in freq), default=0)
+        linhas_freq = [
+            [
+                o["nome"],
+                str(o["quantidade"]),
+                _barra_proporcao(o["quantidade"], max_discursos, COR_DESTAQUE_CLARA),
+                o["ultima_data"] or "nunca",
+            ]
+            for o in freq
+        ]
+
+        presidencias = dados["presidencias"]
+        max_pres = max((p["quantidade"] for p in presidencias), default=0)
+        linhas_pres = [
+            [
+                p["nome"],
+                str(p["quantidade"]),
+                _barra_proporcao(p["quantidade"], max_pres, COR_SUCESSO),
+                p["ultima_data"] or "nunca",
+            ]
+            for p in presidencias
+        ]
+
+        linhas_inter = [
+            [
+                c["congregacao"],
+                str(c["recebidos"]),
+                str(c["enviados"]),
+                _saldo_intercambio(c),
+                c["ultima_data"] or "—",
+            ]
+            for c in dados["intercambio"]
+        ]
+
+        largura_nome = None
+        area.controls = [
+            grade,
+            _tabela_relatorio(
+                "Oradores da minha congregação",
+                "Discursos enviados. De quem discursou menos (e há mais tempo) "
+                "para quem discursou mais.",
+                [("Orador", largura_nome), ("Disc.", 46), ("", 90), ("Último", 82)],
+                linhas_freq,
+                "Nenhum orador cadastrado na sua congregação.",
+            ),
+            _tabela_relatorio(
+                "Presidências da reunião",
+                "Quantas vezes cada um presidiu, desde o começo. Quem presidiu "
+                "menos vem primeiro.",
+                [("Presidente", largura_nome), ("Vezes", 46), ("", 90), ("Última", 82)],
+                linhas_pres,
+                "Nenhum presidente cadastrado.",
+            ),
+            _tabela_relatorio(
+                f"Troca com as congregações em {ano}",
+                "Quantos discursos vieram de cada congregação e quantos "
+                "mandamos para lá.",
+                [
+                    ("Congregação", largura_nome), ("Recebidos", 74),
+                    ("Enviados", 68), ("Saldo", 62), ("Último", 82),
+                ],
+                linhas_inter,
+                "Nenhum arranjo cadastrado neste ano.",
+            ),
+        ]
+
+    def mudar_ano(e=None):
+        estado_rel["ano"] = int(seletor_ano.value)
+        montar()
+        page.update()
+
+    seletor_ano = ft.Dropdown(
+        label="Ano",
+        value=str(estado_rel["ano"]),
+        options=[ft.dropdown.Option(str(a)) for a in anos],
+        width=140,
+        border_color=BORDA_SUAVE,
+        focused_border_color=COR_DESTAQUE,
+    )
+    # O Dropdown do Flet 0.86 avisa por on_select (não existe on_change aqui).
+    seletor_ano.on_select = mudar_ano
+    botao_pdf = ft.OutlinedButton(
+        content="Exportar PDF",
+        icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
+        on_click=exportar_pdf,
+    )
+
+    montar()
+    controles_topo = (
+        ft.Column([seletor_ano, ft.Row([botao_pdf], wrap=True)], spacing=10, tight=True)
+        if eh_mobile()
+        else ft.Row(
+            [seletor_ano, ft.Container(expand=True), botao_pdf],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    )
+
+    return ft.Column(
+        [
+            criar_cabecalho_tela(
+                "Relatórios",
+                "O retrato do arranjo: o que só aparece somando o ano inteiro.",
+            ),
+            ft.Container(height=12),
+            controles_topo,
+            ft.Container(height=16),
+            ft.Column([area], expand=True, scroll=ft.ScrollMode.AUTO),
+        ],
+        spacing=0,
+        expand=True,
+    )
+
+
+def _saldo_intercambio(registro: dict) -> ft.Control:
+    """Diferença entre o que recebemos e o que mandamos para uma congregação.
+
+    Positivo = viemos recebendo mais do que mandando. É o número que mostra
+    com quem o arranjo está desequilibrado, e para que lado.
+    """
+    saldo = int(registro.get("recebidos", 0)) - int(registro.get("enviados", 0))
+    if saldo == 0:
+        return ft.Text("em dia", size=fonte(12), color=TEXTO_SECUNDARIO)
+    cor = COR_SUCESSO if saldo > 0 else COR_AVISO
+    return ft.Text(
+        f"{saldo:+d}", size=fonte(13), weight=ft.FontWeight.W_600, color=cor,
     )
 
 
@@ -9478,6 +9899,9 @@ def main(page: ft.Page):
     def mostrar_calendario():
         area_conteudo.content = tela_calendario(page, recarregar)
 
+    def mostrar_relatorios():
+        area_conteudo.content = tela_relatorios(page, recarregar)
+
     telas = [
         mostrar_inicio,
         mostrar_programacao,
@@ -9486,6 +9910,7 @@ def main(page: ft.Page):
         mostrar_temas,
         mostrar_quadro_anuncios,
         mostrar_calendario,
+        mostrar_relatorios,
         mostrar_ajustes,
     ]
 
@@ -9503,9 +9928,11 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker()
     servico_share = ft.Share()
-    global _file_picker_global, _share_global
+    servico_clipboard = ft.Clipboard()
+    global _file_picker_global, _share_global, _clipboard_global
     _file_picker_global = file_picker
     _share_global = servico_share
+    _clipboard_global = servico_clipboard
 
     if eh_mobile():
         # Layout de celular: barra superior com menu que abre a lista de seções;

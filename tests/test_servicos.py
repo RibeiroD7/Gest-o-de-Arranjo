@@ -4,6 +4,7 @@ from servicos import (
     _chave_data_br,
     detectar_conflitos_oradores,
     escolher_rodizio_presidentes,
+    meses_de_atencao,
     oradores_mais_tempo_sem_discurso,
     sugerir_recebidos,
     weekdays_sugeridos,
@@ -220,3 +221,29 @@ class TestWeekdaysSugeridos:
         for tipo in ("recebido", "enviado"):
             dias = [wd for wd, _ in weekdays_sugeridos(tipo, self.SABADO, self.DOMINGO, 1)]
             assert len(dias) == 1, f"{tipo} sugeriu mais de um dia da semana"
+
+
+class TestMesesDeAtencao:
+    """A janela que as Pendências do Início cobram.
+
+    Cobrar o ano inteiro enchia a lista com meses que ainda nem tinham
+    começado a ser montados — o arranjo se organiza com poucos meses de
+    antecedência.
+    """
+
+    def test_inclui_o_mes_atual_e_os_dois_seguintes(self):
+        assert meses_de_atencao(2026, 8) == [(2026, 8), (2026, 9), (2026, 10)]
+
+    def test_vira_o_ano(self):
+        assert meses_de_atencao(2026, 11) == [(2026, 11), (2026, 12), (2027, 1)]
+
+    def test_dezembro(self):
+        assert meses_de_atencao(2026, 12) == [(2026, 12), (2027, 1), (2027, 2)]
+
+    def test_quantidade_configuravel(self):
+        assert meses_de_atencao(2026, 8, 1) == [(2026, 8)]
+        assert len(meses_de_atencao(2026, 8, 6)) == 6
+
+    def test_quantidade_zero_ainda_cobra_o_mes_atual(self):
+        """Nunca devolver lista vazia: sem o mês atual a tela não cobra nada."""
+        assert meses_de_atencao(2026, 8, 0) == [(2026, 8)]

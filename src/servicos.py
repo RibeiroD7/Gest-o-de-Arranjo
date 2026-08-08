@@ -192,6 +192,25 @@ def sugerir_recebidos(
     return sugestoes
 
 
+def meses_de_atencao(
+    ano: int, mes: int, quantidade: int = 3
+) -> list[tuple[int, int]]:
+    """Os meses que a tela inicial deve cobrar, a partir do mês atual.
+
+    O arranjo se organiza com poucos meses de antecedência: cobrar o ano
+    inteiro enche a lista de pendências com meses que ainda nem começaram a ser
+    montados. A janela vira o ano quando precisa (novembro → nov, dez, jan).
+
+    Returns:
+        ``[(ano, mes)]`` em ordem cronológica, incluindo o mês atual.
+    """
+    janela = []
+    for passo in range(max(1, quantidade)):
+        indice = (mes - 1) + passo
+        janela.append((ano + indice // 12, indice % 12 + 1))
+    return janela
+
+
 def montar_mensagem_presidencia(
     cantico: str,
     orador: str,

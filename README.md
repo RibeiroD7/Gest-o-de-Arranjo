@@ -29,8 +29,9 @@ uma planilha (veja abaixo).
 
 ## Funcionalidades
 
-- **Dashboard** — visão geral: totais de oradores, temas, congregações e
-  designações do mês.
+- **Início** — a próxima reunião, as semanas seguintes e as pendências dos
+  **próximos 3 meses** (o arranjo se monta com pouca antecedência; cobrar o ano
+  inteiro só enche a lista de meses que ainda nem começaram).
 - **Oradores** — cadastro dos oradores (nome, telefone, privilégio, temas que
   pode fazer), separados entre "Minha congregação" e "Outras congregações"
   (agrupados por congregação). Gera o PDF da lista de oradores para envio ao
@@ -63,12 +64,13 @@ uma planilha (veja abaixo).
 - **Quadro de Anúncios** — prévia fiel e exportação em PDF do quadro de
   conferência pública, publicado de 2 em 2 meses, no layout oficial usado no
   quadro de anúncios da congregação.
-- **Relatórios (PDF)** — o retrato do arranjo numa folha: resumo do ano
-  (semanas com e sem orador, recebidos, enviados, designações aguardando
-  confirmação), frequência dos oradores da sua congregação, **quantas vezes
-  cada um presidiu** e a troca com cada congregação (quantos vieram de lá e
-  quantos foram para lá) — o quadro que mostra onde o arranjo está
-  desequilibrado.
+- **Relatórios** — tela com o retrato do arranjo, o que só aparece somando o
+  ano inteiro: números do ano (semanas com e sem orador, com presidente,
+  recebidos, enviados, aguardando confirmação), frequência dos oradores da sua
+  congregação, **quantas vezes cada um presidiu** e a troca com cada
+  congregação — com o **saldo** entre o que veio de lá e o que foi para lá,
+  que é onde o arranjo aparece desequilibrado. Dá para trocar o ano e
+  exportar tudo em PDF.
 - **Minha Congregação** — dados da sua congregação (usados nos cabeçalhos dos
   PDFs), backup e restauração.
 - **Importação por planilha** — modelo de planilha para preencher congregações,
@@ -255,7 +257,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
 | `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
-| `src/pdf_relatorios.py` | PDF de relatórios: resumo do ano, frequência, presidências e troca com as congregações |
+| `src/pdf_relatorios.py` | Exportação em PDF da tela de Relatórios |
 | `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
 | `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
 | `src/assets/` | Ícones, fontes e a carga inicial de temas (`temas_seed.json`) |
