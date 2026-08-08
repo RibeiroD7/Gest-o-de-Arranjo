@@ -1,6 +1,6 @@
 [project]
 name = "gestao-arranjo"
-version = "1.15.0"
+version = "1.16.0"
 description = "Gestão de Arranjo — coordenação de discursos públicos (Windows, Linux e Android)"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -18,6 +18,12 @@ dependencies = [
     "python-calamine ; sys_platform != 'android'",
     # Windows: COM do Excel para o PDF de envio (opcional; degrada sem ele).
     "pywin32>=306 ; sys_platform == 'win32'",
+    # Seletor NATIVO de contatos — extensão local em extensoes/flet_contatos.
+    # O pacote Flutter por trás (flutter_contacts) só existe para Android/iOS,
+    # então os jobs de Windows e Linux removem esta linha (e a de
+    # tool.flet.dev_packages) antes de compilar. No PC o app importa isso de
+    # forma protegida e usa o arquivo .vcf.
+    "flet-contatos",
 ]
 
 [dependency-groups]
@@ -56,7 +62,7 @@ copyright = "Copyright (C) 2026"
 # build_version é sobrescrito no CI por --build-version (vem da tag vX.Y.Z);
 # build_number é o versionCode do Android (deve só crescer entre releases).
 build_version = "1.0.18"
-build_number = 24
+build_number = 25
 
 [tool.flet.app]
 path = "src"
@@ -64,6 +70,18 @@ path = "src"
 [tool.flet.android]
 bundle_id = "br.com.iontech.gestaoarranjo"
 
-# O app grava o banco na área privada e não pede permissões especiais.
+# O banco fica na área privada do app. READ_CONTACTS é só para o botão
+# "Buscar nos contatos": o seletor nativo devolve o contato escolhido, mas ler
+# o TELEFONE dele exige a permissão. Nada é lido sem o usuário escolher, e o
+# app funciona normalmente se ela for negada (cai no arquivo .vcf).
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true
+"android.permission.READ_CONTACTS" = true
+
+# Extensão local com o seletor nativo (lado Python + lado Flutter). Só entra no
+# build do Android; Windows e Linux removem esta seção no CI.
+[tool.flet.dev_packages]
+flet-contatos = "extensoes/flet_contatos"
+
+[tool.uv.sources]
+flet-contatos = { path = "extensoes/flet_contatos", editable = true }

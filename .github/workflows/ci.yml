@@ -25,7 +25,7 @@ jobs:
         run: pip install pandas python-dateutil pytest ruff flet reportlab Pillow openpyxl pypdf
 
       - name: Ruff (lint)
-        run: ruff check src tests
+        run: ruff check src tests extensoes
 
       - name: Pytest
         run: pytest -q

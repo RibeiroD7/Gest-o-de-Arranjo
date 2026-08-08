@@ -3,6 +3,7 @@ venv-linux/
 venv-test/
 __pycache__/
 *.pyc
+*.egg-info/
 .claude/
 terminals/
 backups/
@@ -21,5 +22,9 @@ nuvem_google.json
 
 # Saída do flet build
 build/
+
+# Saída das ferramentas do Flutter na extensão de contatos
+.dart_tool/
+extensoes/**/pubspec.lock
 dist/
 .flet/

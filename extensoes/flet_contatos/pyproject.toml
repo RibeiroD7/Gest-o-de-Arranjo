@@ -1,0 +1,19 @@
+[project]
+name = "flet-contatos"
+version = "0.1.0"
+description = "Seletor nativo de contatos (Android/iOS) para o Gestão de Arranjo"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flet>=0.86.2",
+]
+
+[tool.setuptools.package-data]
+"flutter.flet_contatos" = ["**/*"]
+
+[tool.setuptools]
+license-files = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

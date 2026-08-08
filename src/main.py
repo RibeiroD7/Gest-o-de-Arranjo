@@ -30,7 +30,7 @@ from armazenamento import (
     garantir_pastas,
 )
 from canticos import rotulo_cantico, titulo_cantico
-from contatos import Contato, filtrar_contatos, ler_vcard
+from contatos import Contato, filtrar_contatos, formatar_telefone, ler_vcard
 from database import (
     adicionar_ano_coluna,
     adicionar_ano_planejamento,
@@ -160,6 +160,14 @@ from ui_comuns import (
     mostrar_aviso,
     mostrar_sucesso,
 )
+
+try:
+    # Extensão local (extensoes/flet_contatos): seletor NATIVO de contatos.
+    # Só entra no build do Android — o pacote Flutter por trás não existe para
+    # Windows e Linux. No PC o import falha de propósito e o app usa o .vcf.
+    from flet_contatos import Contatos as _ServicoContatosNativo
+except ImportError:  # pragma: no cover — depende da plataforma compilada
+    _ServicoContatosNativo = None
 from util import (
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -178,7 +186,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.15.0"
+VERSAO_APP = "1.16.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -240,6 +248,7 @@ MESES_DE_ATENCAO = 3
 _file_picker_global: ft.FilePicker | None = None
 _share_global: ft.Share | None = None
 _clipboard_global: ft.Clipboard | None = None
+_contatos_nativo_global = None
 
 SQL_ORADORES = """
     SELECT o.id,
@@ -1290,12 +1299,11 @@ _contatos_da_sessao: list[Contato] = []
 def _botao_buscar_contato(
     page: ft.Page, campo_telefone: ft.TextField, campo_nome: ft.TextField | None = None
 ) -> ft.Control:
-    """Botão que associa a pessoa a um contato do celular (arquivo .vcf).
+    """Botão que associa a pessoa a um contato do celular.
 
-    O Flet não abre a agenda do aparelho — não existe serviço de contatos, e
-    fazer isso exigiria um plugin nativo. O caminho que funciona com o que o
-    app tem é o arquivo que o próprio celular exporta (Contatos → Exportar):
-    o app lê, mostra a lista e preenche o telefone com o contato escolhido.
+    No celular abre a agenda do próprio sistema (extensão ``flet_contatos``).
+    No computador — onde o pacote nativo não existe — e sempre que o seletor
+    não estiver disponível, cai no arquivo ``.vcf`` exportado do aparelho.
     """
 
     def escolher(contato: Contato):
@@ -1304,11 +1312,41 @@ def _botao_buscar_contato(
             campo_nome.value = contato.nome
         page.update()
 
+    async def abrir_nativo() -> None:
+        try:
+            escolhido = await _contatos_nativo_global.escolher()
+        except Exception:  # noqa: BLE001 — sem agenda/plugin: usa o .vcf
+            logger.exception("Seletor nativo de contatos indisponível")
+            abrir_dialog_escolher_contato(page, escolher)
+            return
+        if escolhido is None:
+            # Cancelou ou negou a permissão: não force o outro caminho.
+            return
+        telefones = [
+            numero
+            for numero in (formatar_telefone(t) for t in escolhido.get("telefones", []))
+            if numero
+        ]
+        if not telefones:
+            mostrar_aviso(
+                page,
+                "Contato sem telefone",
+                f"{escolhido.get('nome') or 'O contato'} não tem número salvo.",
+            )
+            return
+        escolher(Contato(escolhido.get("nome") or "", telefones))
+
+    def ao_clicar(_=None):
+        if _contatos_nativo_global is not None:
+            page.run_task(abrir_nativo)
+        else:
+            abrir_dialog_escolher_contato(page, escolher)
+
     return ft.TextButton(
         content="Buscar nos contatos",
         icon=ft.Icons.CONTACT_PHONE_OUTLINED,
-        tooltip="Preencher o telefone a partir da agenda exportada do celular",
-        on_click=lambda _: abrir_dialog_escolher_contato(page, escolher),
+        tooltip="Preencher o telefone a partir dos contatos do celular",
+        on_click=ao_clicar,
     )
 
 
@@ -10178,9 +10216,14 @@ def main(page: ft.Page):
     servico_share = ft.Share()
     servico_clipboard = ft.Clipboard()
     global _file_picker_global, _share_global, _clipboard_global
+    global _contatos_nativo_global
     _file_picker_global = file_picker
     _share_global = servico_share
     _clipboard_global = servico_clipboard
+    # Só existe no build do Android; no PC continua None e o app usa o .vcf.
+    _contatos_nativo_global = (
+        _ServicoContatosNativo() if _ServicoContatosNativo is not None else None
+    )
 
     if eh_mobile():
         # Layout de celular: barra superior com menu que abre a lista de seções;

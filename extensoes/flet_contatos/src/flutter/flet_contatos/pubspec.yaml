@@ -1,0 +1,27 @@
+name: flet_contatos
+description: Seletor nativo de contatos para o Gestão de Arranjo
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=1.17.0"
+
+dependencies:
+  flet: ^0.86.2
+  flutter:
+    sdk: flutter
+  # Abre a agenda do próprio aparelho. Só tem implementação para Android, iOS e
+  # macOS — por isso a extensão entra apenas no build do Android (ver o
+  # workflow de release).
+  #
+  # A faixa começa em 2.1.0 de propósito: dali em diante existe a API que
+  # usamos (permissions.has/request e native.showPicker), e a 2.1 ainda aceita
+  # Flutter 3.32+. Exigir a 2.3 obrigaria o Flutter 3.44+, que nem sempre é o
+  # que o `flet build` provisiona. minSdk do pacote: 24.
+  flutter_contacts: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0

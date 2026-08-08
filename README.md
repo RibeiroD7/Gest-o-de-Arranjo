@@ -42,11 +42,13 @@ uma planilha (veja abaixo).
   telefone, endereço, dia e horário da reunião).
 - **Contatos do celular** — no cadastro de oradores e de presidentes, o botão
   **Buscar nos contatos** preenche o telefone a partir da agenda do aparelho.
-  O Flet não abre os contatos do celular (precisaria de um plugin nativo), e o
-  caminho que funciona é o arquivo que o próprio celular exporta: em Contatos
-  → Configurações → **Exportar**, escolha `.vcf` e abra esse arquivo no app.
-  A agenda fica só na memória enquanto o app está aberto — o que é gravado (e
-  vai no backup) é apenas o número da pessoa escolhida.
+  No **Android** abre o seletor do próprio sistema: você toca no contato e o
+  app recebe nome e telefone (na primeira vez o Android pede a permissão de
+  contatos; se você negar, nada quebra). No **computador**, e sempre que o
+  seletor não estiver disponível, o app usa o arquivo que o celular exporta —
+  em Contatos → Configurações → **Exportar**, escolha `.vcf` e abra no app.
+  Nenhuma agenda é gravada: o que fica salvo (e vai no backup) é apenas o
+  número da pessoa escolhida.
 - **Arranjos** — a programação mensal: oradores recebidos e designações
   enviadas de cada mês, com sugestão automática de datas conforme o dia de
   reunião da congregação e exportação de listas em PNG. Cada **orador
@@ -250,7 +252,12 @@ também o caminho de quem compila do código-fonte.
 ## Estrutura do projeto
 
 Todo o código do app vive em [`src/`](src/) — **fonte única** para os três
-sistemas. As diferenças de plataforma são resolvidas em tempo de execução por
+sistemas. A única parte fora dali é
+[`extensoes/flet_contatos`](extensoes/flet_contatos/), a extensão do seletor
+nativo de contatos: ela carrega código Flutter, só existe para Android e é
+removida do `pyproject.toml` nos builds de Windows e Linux (ver
+[`.github/scripts/sem_extensao_contatos.py`](.github/scripts/sem_extensao_contatos.py)).
+As diferenças de plataforma são resolvidas em tempo de execução por
 `src/armazenamento.py` (`eh_mobile()`), sem cópias paralelas.
 
 | Arquivo | Papel |
@@ -264,6 +271,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
 | `src/pdf_relatorios.py` | Exportação em PDF da tela de Relatórios |
 | `src/contatos.py` | Leitura da agenda do celular exportada em vCard (.vcf) |
+| `extensoes/flet_contatos/` | Extensão Flet (Python + Flutter) com o seletor nativo de contatos do Android |
 | `src/canticos.py` | Catálogo dos 151 cânticos (número, título e texto bíblico) |
 | `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
 | `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |

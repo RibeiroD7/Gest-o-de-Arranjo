@@ -214,6 +214,94 @@ def test_escolher_contato_constroi_com_e_sem_agenda(mobile):
         armazenamento.definir_layout_mobile(False)
 
 
+class TestBotaoBuscarContato:
+    """No celular abre a agenda do sistema; no PC (sem a extensão), o .vcf."""
+
+    def teardown_method(self):
+        main._contatos_nativo_global = None
+
+    def test_sem_extensao_cai_no_arquivo_vcf(self, monkeypatch):
+        main._contatos_nativo_global = None
+        abertos = []
+        monkeypatch.setattr(
+            main, "abrir_dialog_escolher_contato",
+            lambda page, ao_escolher: abertos.append(ao_escolher),
+        )
+        page = _page()
+        botao = main._botao_buscar_contato(page, flet.TextField(), flet.TextField())
+        botao.on_click(None)
+        assert abertos, "sem o seletor nativo o botão precisa abrir o .vcf"
+
+    def test_com_extensao_usa_o_seletor_nativo(self, monkeypatch):
+        import asyncio
+
+        class ContatosFalso:
+            async def escolher(self):
+                return {"nome": "Fábio Moreira", "telefones": ["(11) 99999-8888"]}
+
+        main._contatos_nativo_global = ContatosFalso()
+        monkeypatch.setattr(
+            main, "abrir_dialog_escolher_contato",
+            lambda *a, **k: pytest.fail("não deveria cair no .vcf"),
+        )
+
+        agendados = []
+        page = _page()
+        page.run_task = lambda handler, *args: agendados.append((handler, args))
+
+        campo_tel, campo_nome = flet.TextField(), flet.TextField()
+        main._botao_buscar_contato(page, campo_tel, campo_nome).on_click(None)
+
+        assert agendados, "o seletor nativo precisa ir pelo run_task"
+        handler, args = agendados[0]
+        asyncio.run(handler(*args))
+        # O número chega formatado do contato e o nome preenche o campo vazio.
+        assert campo_tel.value == "11999998888"
+        assert campo_nome.value == "Fábio Moreira"
+
+    def test_cancelar_no_seletor_nao_abre_o_vcf(self, monkeypatch):
+        """Cancelou de propósito: empurrar o outro caminho seria atrapalhar."""
+        import asyncio
+
+        class ContatosCancelado:
+            async def escolher(self):
+                return None
+
+        main._contatos_nativo_global = ContatosCancelado()
+        monkeypatch.setattr(
+            main, "abrir_dialog_escolher_contato",
+            lambda *a, **k: pytest.fail("cancelar não deve abrir o .vcf"),
+        )
+        agendados = []
+        page = _page()
+        page.run_task = lambda handler, *args: agendados.append((handler, args))
+        campo = flet.TextField()
+        main._botao_buscar_contato(page, campo).on_click(None)
+        asyncio.run(agendados[0][0](*agendados[0][1]))
+        assert not campo.value
+
+    def test_falha_do_seletor_cai_no_vcf(self, monkeypatch):
+        """Aparelho sem agenda ou plugin ausente: não pode ficar sem saída."""
+        import asyncio
+
+        class ContatosQuebrado:
+            async def escolher(self):
+                raise RuntimeError("MissingPluginException")
+
+        main._contatos_nativo_global = ContatosQuebrado()
+        abertos = []
+        monkeypatch.setattr(
+            main, "abrir_dialog_escolher_contato",
+            lambda page, ao_escolher: abertos.append(ao_escolher),
+        )
+        agendados = []
+        page = _page()
+        page.run_task = lambda handler, *args: agendados.append((handler, args))
+        main._botao_buscar_contato(page, flet.TextField()).on_click(None)
+        asyncio.run(agendados[0][0](*agendados[0][1]))
+        assert abertos, "falha no nativo precisa cair no .vcf"
+
+
 @pytest.mark.parametrize("mobile", [False, True])
 def test_relatorio_da_largura_para_a_coluna_de_nome(mobile):
     """A coluna do nome precisa de largura explícita, senão nasce com zero.

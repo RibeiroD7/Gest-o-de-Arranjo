@@ -62,6 +62,11 @@ jobs:
           print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
           EOF
 
+      - name: Remover a extensão de contatos (só Android)
+        # flutter_contacts não tem implementação para desktop; o app importa a
+        # extensão de forma protegida e usa o arquivo .vcf no computador.
+        run: python .github/scripts/sem_extensao_contatos.py
+
       - name: Compilar
         # UTF-8 evita o UnicodeEncodeError do console cp1252 do Windows;
         # --no-rich-output desliga o indicador de progresso com caracteres especiais.
@@ -142,6 +147,11 @@ jobs:
           arquivo.write_text(texto, encoding="utf-8")
           print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
           EOF
+
+      - name: Remover a extensão de contatos (só Android)
+        # flutter_contacts não tem implementação para desktop; o app importa a
+        # extensão de forma protegida e usa o arquivo .vcf no computador.
+        run: python .github/scripts/sem_extensao_contatos.py
 
       - name: Compilar
         run: >
