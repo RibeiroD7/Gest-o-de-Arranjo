@@ -199,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.18.0"
+VERSAO_APP = "1.19.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -3146,6 +3146,7 @@ def _criar_lista_oradores(
     estado_selecao: dict,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
+    on_conversar: Callable[[int], None] | None = None,
 ) -> ft.Container:
     """Lista de oradores com iniciais, privilégio, telefone e chip de temas."""
     if df.empty:
@@ -3213,6 +3214,19 @@ def _criar_lista_oradores(
             on_change=alternar_selecao,
             tooltip="Selecionar para o PDF de envio",
         )
+        # Conversar só aparece com telefone: sem número não há para onde ir.
+        tem_telefone = bool(formatar_valor(mapa.get("telefone")).strip())
+        botao_conversar = (
+            ft.IconButton(
+                icon=ft.Icons.CHAT_OUTLINED,
+                icon_size=fonte(17),
+                tooltip="Conversar no WhatsApp",
+                icon_color="#34D399",
+                on_click=lambda e, rid=orador_id: on_conversar(rid),
+            )
+            if on_conversar and tem_telefone
+            else None
+        )
         botao_editar = ft.IconButton(
             icon=ft.Icons.EDIT_OUTLINED,
             icon_size=fonte(17),
@@ -3253,10 +3267,11 @@ def _criar_lista_oradores(
                                 max_lines=2,
                                 overflow=ft.TextOverflow.ELLIPSIS,
                             ),
+                            *([botao_conversar] if botao_conversar else []),
                             botao_editar,
                             botao_excluir,
                         ],
-                        spacing=8,
+                        spacing=0,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     ft.Row(
@@ -3319,6 +3334,7 @@ def _criar_lista_oradores(
                         avatar,
                         info_orador,
                         chip,
+                        *([botao_conversar] if botao_conversar else []),
                         botao_editar,
                         botao_excluir,
                     ],
@@ -3366,6 +3382,19 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     def abrir_excluir(orador_id: int):
         confirmar_exclusao_orador(page, recarregar, orador_id)
 
+    def conversar_com_orador(orador_id: int):
+        """Abre o WhatsApp do orador direto da lista."""
+        orador = carregar_orador(orador_id) or {}
+        telefone = (orador.get("telefone") or "").strip()
+        if not telefone:
+            mostrar_aviso(
+                page,
+                "Sem telefone",
+                f"{orador.get('nome') or 'Este orador'} não tem telefone cadastrado.",
+            )
+            return
+        abrir_url(page, gerar_link_whatsapp(telefone, ""))
+
     def gerar_pdf_envio(_=None):
         acionar_geracao_pdf_envio(page, estado_selecao["ids"])
 
@@ -3398,10 +3427,16 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
 
     def renderizar_oradores(df_filtrado: pd.DataFrame) -> ft.Control:
         if estado_filtro["modo"] != "outras":
-            return _criar_lista_oradores(df_filtrado, estado_selecao, abrir_editar, abrir_excluir)
+            return _criar_lista_oradores(
+                df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
+                conversar_com_orador,
+            )
 
         if df_filtrado.empty:
-            return _criar_lista_oradores(df_filtrado, estado_selecao, abrir_editar, abrir_excluir)
+            return _criar_lista_oradores(
+                df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
+                conversar_com_orador,
+            )
 
         def bloco_congregacao(nome_congregacao: str, grupo: pd.DataFrame) -> ft.Control:
             cong_ids = [c for c in grupo["congregacao_id"].dropna().unique()]
@@ -3430,7 +3465,10 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 controls=[
-                    _criar_lista_oradores(grupo, estado_selecao, abrir_editar, abrir_excluir)
+                    _criar_lista_oradores(
+                        grupo, estado_selecao, abrir_editar, abrir_excluir,
+                        conversar_com_orador,
+                    )
                 ],
             )
 
@@ -9358,13 +9396,22 @@ def abrir_dialog_gerenciar_presidentes(
     # Contato da agenda amarrado a quem está sendo editado no formulário.
     vinculo_presidente: dict = {"contato_id": ""}
     cadastro: list[dict] = []
+    def _altura_lista_cadastro() -> int:
+        """Altura da lista, tirada do que sobra da tela.
+
+        Fixar 200px deixava dois cadastrados visíveis num celular grande. O
+        formulário compacto ocupa altura conhecida; o resto é da lista.
+        """
+        if not eh_mobile():
+            return 260
+        altura = getattr(getattr(page, "window", None), "height", None)
+        return max(220, min(460, int(altura * 0.42))) if altura else 260
+
     lista_cadastro = ft.Column(
         spacing=8 if eh_mobile() else 0,
         tight=True,
         scroll=ft.ScrollMode.AUTO,
-        # No celular o formulário empilhado já ocupa altura; a lista fica menor
-        # para o diálogo caber na tela (ela rola por dentro).
-        height=200 if eh_mobile() else 260,
+        height=_altura_lista_cadastro(),
     )
     # No celular os campos vão empilhados em largura total: lado a lado o Flet
     # espremia o nome e quebrava os rótulos letra a letra.
@@ -9616,25 +9663,46 @@ def abrir_dialog_gerenciar_presidentes(
         page, campo_telefone, campo_nome, vinculo_presidente
     )
     if eh_mobile():
+        # O formulário ocupava mais da metade da tela e sobravam duas linhas
+        # para a lista. Buscar contato virou ícone dentro do próprio campo de
+        # telefone, e privilégio e Salvar dividem a mesma linha: de cinco
+        # linhas para três, e o resto do espaço vai para os cadastrados.
+        campo_telefone.suffix = ft.IconButton(
+            icon=ft.Icons.CONTACT_PHONE_OUTLINED,
+            icon_size=fonte(18),
+            icon_color=COR_DESTAQUE,
+            tooltip="Buscar nos contatos do celular",
+            on_click=botao_contato.on_click,
+        )
+        campo_categoria.expand = True
         formulario = ft.Column(
-            [campo_nome, campo_telefone, campo_categoria,
-             ft.Row([botao_contato, botao_salvar],
-                    alignment=ft.MainAxisAlignment.END, spacing=8, wrap=True)],
-            spacing=10,
+            [
+                campo_nome,
+                campo_telefone,
+                ft.Row(
+                    [campo_categoria, botao_salvar],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=8,
             tight=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        cabecalho_lista = ft.Column(
+        cabecalho_lista = ft.Row(
             [
                 ft.Text("Cadastrados", weight=ft.FontWeight.W_600, size=fonte(13)),
                 ft.Text(
-                    "A ordem define o rodízio automático",
-                    size=fonte(12),
+                    "· a ordem define o rodízio",
+                    size=fonte(11),
                     color=TEXTO_SECUNDARIO,
+                    expand=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
-            spacing=2,
-            tight=True,
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
     else:
         formulario = ft.Row(

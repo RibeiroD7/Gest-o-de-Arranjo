@@ -147,13 +147,25 @@ class TestMascaraTelefone:
         uma = mascara_telefone("11900000000")
         assert mascara_telefone(uma) == uma
 
-    def test_codigo_do_pais(self):
-        assert mascara_telefone("+5511900000000") == "+55 (11) 90000-0000"
-        assert mascara_telefone("5511900000000") == "+55 (11) 90000-0000"
+    def test_tira_o_55_do_brasil(self):
+        """O contato vem com +55, mas ele é ruído: o link do WhatsApp recoloca."""
+        assert mascara_telefone("+5511900000000") == "(11) 90000-0000"
+        assert mascara_telefone("5511900000000") == "(11) 90000-0000"
+        assert mascara_telefone("+55 (11) 90000-0000") == "(11) 90000-0000"
+        assert mascara_telefone("+551130000000") == "(11) 3000-0000"
+
+    def test_ddd_55_nao_e_confundido_com_pais(self):
+        """55 também é DDD (Rio Grande do Sul) — só o número longo é país."""
+        assert mascara_telefone("5511") == "(55) 11"
+        assert mascara_telefone("55999887766") == "(55) 99988-7766"
+
+    def test_numero_estrangeiro_fica_como_veio(self):
+        """Sem máscara brasileira no que não é do Brasil."""
+        assert mascara_telefone("+13125550123") == "+13125550123"
 
     def test_numero_grande_demais_fica_sem_mascara(self):
         """Não inventa separador onde não se sabe o formato."""
-        assert mascara_telefone("551190000000012") == "+55 1190000000012"
+        assert mascara_telefone("1190000000012") == "1190000000012"
 
     @pytest.mark.parametrize("entrada", ["", "   ", "abc", None])
     def test_entrada_sem_digito(self, entrada):

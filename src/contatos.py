@@ -120,9 +120,13 @@ def mascara_telefone(texto: str) -> str:
 
     pais = ""
     digitos = re.sub(r"\D", "", texto)
-    if texto.startswith("+") or (len(digitos) > 11 and digitos.startswith("55")):
-        pais = "+55 "
-        digitos = digitos.removeprefix("55")
+    # O 55 do Brasil é ruído aqui: todo mundo do circuito é daqui, e o link do
+    # WhatsApp recoloca o país sozinho. Some com ele e mostra só (11) 9…
+    if digitos.startswith("55") and len(digitos) in (12, 13):
+        digitos = digitos[2:]
+    elif texto.startswith("+"):
+        # Número estrangeiro de verdade: preserva como veio, sem máscara do BR.
+        return "+" + digitos
 
     if len(digitos) > 11:
         # Fora dos formatos do Brasil: não force máscara no lugar errado.

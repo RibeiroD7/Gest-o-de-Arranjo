@@ -256,6 +256,48 @@ def test_escolher_contato_constroi_com_e_sem_agenda(mobile):
         armazenamento.definir_layout_mobile(False)
 
 
+@pytest.mark.parametrize("mobile", [False, True])
+def test_conversar_so_aparece_com_telefone(mobile):
+    """Botão de WhatsApp na lista de oradores: sem número não há para onde ir."""
+    import pandas as pd
+
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        colunas = ["id", "nome", "categoria", "telefone", "observacoes", "temas"]
+        df = pd.DataFrame(
+            [
+                (1, "Com Telefone", "Ancião", "(11) 90000-0000", "", "1, 2"),
+                (2, "Sem Telefone", "Ancião", "", "", ""),
+            ],
+            columns=colunas,
+        )
+        nada = lambda *a, **k: None  # noqa: E731
+        lista = main._criar_lista_oradores(df, {"ids": set()}, nada, nada, nada)
+
+        chats = []
+
+        def visitar(controle):
+            if (
+                isinstance(controle, flet.IconButton)
+                and controle.icon == flet.Icons.CHAT_OUTLINED
+            ):
+                chats.append(controle)
+            for attr in ("content", "controls"):
+                filho = getattr(controle, attr, None)
+                if isinstance(filho, list):
+                    for f in filho:
+                        visitar(f)
+                elif filho is not None and not isinstance(filho, str):
+                    visitar(filho)
+
+        visitar(lista)
+        assert len(chats) == 1, "só o orador com telefone deve ter o botão"
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
 class TestBotaoBuscarContato:
     """No celular abre a agenda do sistema; no PC (sem a extensão), o .vcf."""
 

@@ -34,8 +34,9 @@ uma planilha (veja abaixo).
   inteiro só enche a lista de meses que ainda nem começaram).
 - **Oradores** — cadastro dos oradores (nome, telefone, privilégio, temas que
   pode fazer), separados entre "Minha congregação" e "Outras congregações"
-  (agrupados por congregação). Gera o PDF da lista de oradores para envio ao
-  superintendente de circuito.
+  (agrupados por congregação). Cada orador com telefone tem o botão de
+  **WhatsApp** na lista, para falar com ele na hora. Gera o PDF da lista de
+  oradores para envio ao superintendente de circuito.
 - **Temas** — os discursos públicos numerados, com controle de uso por ano e
   observações. Importa os títulos dos formulários oficiais S-99/S-99a em PDF.
 - **Congregações** — cadastro das congregações do circuito (responsável,
@@ -53,8 +54,9 @@ uma planilha (veja abaixo).
   Nenhuma agenda é gravada: ficam salvos só o número e a chave do contato — e
   esses vão no backup. As fotos ficam em cache fora do backup e voltam
   sozinhas do aparelho.
-- **Telefones** — todos os campos de telefone se formatam enquanto você digita
-  (`(11) 90000-0000`), em celular e fixo.
+- **Telefones** — todos os campos se formatam enquanto você digita
+  (`(11) 90000-0000`), em celular e fixo. O `+55` que vem dos contatos é
+  descartado: o link do WhatsApp recoloca o país sozinho.
 - **Arranjos** — a programação mensal: oradores recebidos e designações
   enviadas de cada mês, com sugestão automática de datas conforme o dia de
   reunião da congregação e exportação de listas em PNG. Cada **orador
