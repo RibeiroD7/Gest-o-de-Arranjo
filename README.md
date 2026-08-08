@@ -64,7 +64,9 @@ uma planilha (veja abaixo).
   congregação anfitriã do mês.
 - **Designações** — as designações enviadas organizadas por mês/ano, com
   geração de imagem individual da designação (modelo pronto para enviar ao
-  orador pelo WhatsApp).
+  orador pelo WhatsApp). No rodapé do mês, **Falar com o responsável** abre o
+  WhatsApp do irmão responsável pela congregação anfitriã daquele mês, com uma
+  mensagem já começada (o telefone vem do cadastro em Congregações).
 - **Presidentes** — cadastro de quem pode presidir (nome, telefone e
   privilégio) e atribuição semana a semana, por ano e mês. Semanas tomadas por
   uma **data especial** (assembleia, congresso, visita) não pedem presidente:
@@ -138,6 +140,31 @@ Para ver a interface **de celular** rodando no PC (sem gerar o APK), dê dois
 cliques em [`preview-mobile.bat`](preview-mobile.bat) — ele prepara o ambiente
 na primeira vez e abre o app já no layout mobile (basta estreitar a janela). O
 mesmo efeito pode ser obtido definindo `GA_FORCAR_MOBILE=1` antes de executar.
+
+### Compilar o APK na sua máquina (opcional)
+
+O APK das Releases sai do GitHub Actions, mas dá para compilar localmente para
+testar antes. No **Windows** o build só passa com três condições:
+
+1. **Modo de desenvolvedor ligado** (`start ms-settings:developers`) — o
+   Flutter precisa de symlinks para montar os plugins.
+2. **Caminho sem acento** — o Gradle recusa `Gestão de Arranjo`. Copie o
+   projeto para algo como `C:\Users\voce\gab`. (No CI isso não aparece porque o
+   GitHub troca o `ã` por hífen no checkout.)
+3. **Caminho curto** — os arquivos intermediários estouram o limite de caminho
+   do Windows se a pasta estiver funda demais.
+
+Antes de compilar, tire as dependências que só existem no desktop (o job do
+Android faz o mesmo):
+
+```bash
+sed -i '/python-calamine ; /d;/pywin32>=306 ; /d' pyproject.toml
+flet build apk --yes --arch arm64-v8a
+```
+
+> O APK gerado assim é assinado com a **sua** chave de depuração, diferente da
+> que o CI usa — ele não instala por cima do app vindo da Release. Serve para
+> testar num aparelho limpo, não para substituir a instalação do dia a dia.
 
 ## Publicar uma nova versão (gerar os instaladores)
 

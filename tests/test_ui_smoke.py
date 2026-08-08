@@ -124,6 +124,48 @@ def test_dialogos_de_presidentes_constroem(mobile):
 
 
 @pytest.mark.parametrize("mobile", [False, True])
+def test_falar_com_o_responsavel_da_anfitria(mobile, monkeypatch):
+    """Contato do responsável pela congregação do mês, no diálogo do mês."""
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        page = _page()
+        arranjo = {"id": 1, "ano": 2026, "mes_inicio": 10, "congregacao_host_id": 7}
+
+        # Com telefone: monta a mensagem e oferece WhatsApp.
+        monkeypatch.setattr(
+            main, "carregar_congregacao",
+            lambda _id: {
+                "nome": "Jardim Bela Vista",
+                "responsavel": "Paulo Souza",
+                "telefone": "11977776666",
+            },
+        )
+        main.abrir_dialog_falar_responsavel(page, arranjo)
+
+        # Sem telefone cadastrado: avisa em vez de abrir um WhatsApp vazio.
+        avisos = []
+        monkeypatch.setattr(
+            main, "carregar_congregacao",
+            lambda _id: {"nome": "Jardim Bela Vista", "responsavel": "", "telefone": ""},
+        )
+        monkeypatch.setattr(
+            main, "mostrar_aviso",
+            lambda page, titulo, msg: avisos.append(titulo),
+        )
+        main.abrir_dialog_falar_responsavel(page, arranjo)
+        assert avisos == ["Sem telefone cadastrado"]
+
+        # O rodapé só mostra o botão quando há para quem ligar.
+        nada = lambda *a, **k: None  # noqa: E731
+        assert main._criar_rodape_dialog_mes(nada, nada, nada, nada) is not None
+        assert main._criar_rodape_dialog_mes(nada, nada, nada) is not None
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
 def test_semana_de_data_especial_nao_pede_presidente(mobile):
     """Assembleia/congresso substituem a reunião: a linha mostra o evento.
 

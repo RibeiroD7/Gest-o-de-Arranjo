@@ -199,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.17.0"
+VERSAO_APP = "1.18.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -4515,11 +4515,24 @@ def _criar_rodape_dialog_mes(
     on_fechar: Callable,
     on_editar: Callable,
     on_excluir: Callable,
+    on_falar_responsavel: Callable | None = None,
 ) -> ft.Container:
     """Barra fixa de ações na parte inferior do dialog."""
     mobile = eh_mobile()
     botoes = [
         ft.TextButton("Fechar", on_click=on_fechar),
+        *(
+            [
+                ft.OutlinedButton(
+                    content="Responsável" if mobile else "Falar com o responsável",
+                    icon=ft.Icons.CHAT_OUTLINED,
+                    style=ft.ButtonStyle(color="#34D399"),
+                    on_click=on_falar_responsavel,
+                )
+            ]
+            if on_falar_responsavel
+            else []
+        ),
         ft.OutlinedButton(
             # Rótulos curtos no celular para os três botões caberem
             content="Editar" if mobile else "Editar arranjo",
@@ -6012,6 +6025,99 @@ def abrir_dialog_mensagem_presidencia(
     page.update()
 
 
+def abrir_dialog_falar_responsavel(page: ft.Page, arranjo: dict) -> None:
+    """Fala com o irmão responsável pela congregação anfitriã daquele mês.
+
+    É com ele que o arranjo do mês é combinado, então o contato fica à mão no
+    próprio diálogo do mês, em vez de ter que procurar em Congregações.
+    """
+    cong = {}
+    if arranjo.get("congregacao_host_id"):
+        cong = carregar_congregacao(int(arranjo["congregacao_host_id"])) or {}
+    nome_cong = (cong.get("nome") or arranjo.get("congregacao") or "").strip()
+    responsavel = (cong.get("responsavel") or "").strip()
+    telefone = (cong.get("telefone") or "").strip()
+
+    def fechar(_=None):
+        page.pop_dialog()
+
+    if not telefone:
+        mostrar_aviso(
+            page,
+            "Sem telefone cadastrado",
+            f"A congregação {nome_cong or 'anfitriã'} não tem telefone em "
+            "Congregações. Cadastre lá para falar com o responsável por aqui.",
+        )
+        return
+
+    mes = int(arranjo.get("mes_inicio", 1))
+    ano = int(arranjo.get("ano", date.today().year))
+    config = carregar_configuracao()
+    mensagem = (
+        f"Olá{', ' + responsavel.split()[0] if responsavel else ''}! "
+        f"Aqui é {config.get('coordenador_discursos') or 'o coordenador'}, "
+        f"da {config.get('nome_congregacao') or 'nossa congregação'}. "
+        f"Estou organizando o arranjo de {NOMES_MESES[mes]} de {ano} com a "
+        f"{nome_cong or 'sua congregação'}."
+    )
+
+    campo_mensagem = ft.TextField(
+        label="Mensagem",
+        value=mensagem,
+        multiline=True,
+        min_lines=3,
+        max_lines=6,
+    )
+
+    def abrir_whatsapp(_=None):
+        abrir_url(page, gerar_link_whatsapp(telefone, campo_mensagem.value or ""))
+        fechar()
+
+    def copiar(_=None):
+        texto = campo_mensagem.value or ""
+        fechar()
+        copiar_texto(page, texto, "Mensagem copiada.")
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Column(
+                [
+                    ft.Text("Falar com o responsável", size=fonte(18),
+                            weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        " · ".join(
+                            parte
+                            for parte in (nome_cong, responsavel, mascara_telefone(telefone))
+                            if parte
+                        ),
+                        size=fonte(13),
+                        color=TEXTO_SECUNDARIO,
+                    ),
+                ],
+                spacing=4,
+                tight=True,
+            ),
+            content=ft.Container(
+                width=_largura_dialog(page, 460),
+                content=ft.Column([campo_mensagem], spacing=8, tight=True),
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=fechar),
+                ft.OutlinedButton("Copiar", icon=ft.Icons.CONTENT_COPY, on_click=copiar),
+                ft.FilledButton(
+                    "Abrir WhatsApp",
+                    icon=ft.Icons.CHAT,
+                    style=ft.ButtonStyle(bgcolor="#25D366", color="#FFFFFF"),
+                    on_click=abrir_whatsapp,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def _linha_presidente_data_especial(
     page: ft.Page,
     ano: int,
@@ -6603,6 +6709,9 @@ def abrir_dialog_oradores_mes(
             page, arranjo_id, "enviado", atualizar_listas, arranjo=arranjo
         )
 
+    def falar_com_responsavel(_=None):
+        abrir_dialog_falar_responsavel(page, arranjo)
+
     def editar_arranjo(_=None):
         fechar()
         on_editar_arranjo(arranjo_id)
@@ -6884,7 +6993,9 @@ def abrir_dialog_oradores_mes(
         ),
         inset_padding=ft.Padding.all(12 if eh_mobile() else 40),
         actions=[
-            _criar_rodape_dialog_mes(fechar, editar_arranjo, excluir_arranjo),
+            _criar_rodape_dialog_mes(
+                fechar, editar_arranjo, excluir_arranjo, falar_com_responsavel
+            ),
         ],
         actions_padding=ft.Padding.symmetric(
             horizontal=12 if eh_mobile() else 32, vertical=16
