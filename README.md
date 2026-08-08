@@ -63,6 +63,12 @@ uma planilha (veja abaixo).
 - **Quadro de Anúncios** — prévia fiel e exportação em PDF do quadro de
   conferência pública, publicado de 2 em 2 meses, no layout oficial usado no
   quadro de anúncios da congregação.
+- **Relatórios (PDF)** — o retrato do arranjo numa folha: resumo do ano
+  (semanas com e sem orador, recebidos, enviados, designações aguardando
+  confirmação), frequência dos oradores da sua congregação, **quantas vezes
+  cada um presidiu** e a troca com cada congregação (quantos vieram de lá e
+  quantos foram para lá) — o quadro que mostra onde o arranjo está
+  desequilibrado.
 - **Minha Congregação** — dados da sua congregação (usados nos cabeçalhos dos
   PDFs), backup e restauração.
 - **Importação por planilha** — modelo de planilha para preencher congregações,
@@ -249,6 +255,7 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/pdf_quadro.py` | PDF do Quadro de Anúncios (ReportLab, layout do modelo oficial) |
 | `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
+| `src/pdf_relatorios.py` | PDF de relatórios: resumo do ano, frequência, presidências e troca com as congregações |
 | `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
 | `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
 | `src/assets/` | Ícones, fontes e a carga inicial de temas (`temas_seed.json`) |

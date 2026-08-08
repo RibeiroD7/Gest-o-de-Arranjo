@@ -163,6 +163,30 @@ class TestDetectarConflitosOradores:
         ]
         assert detectar_conflitos_oradores(registros) == []
 
+    def test_recebido_mais_enviado_e_o_mesmo_discurso(self):
+        """Orador da própria congregação: um discurso, anotado dos dois lados.
+
+        Ele entra como enviado (para receber a designação) e como recebido (na
+        lista de quem discursa na semana). Acusar conflito aí só gera ruído —
+        foi o que acontecia com todos os oradores locais.
+        """
+        registros = [
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "tipo": "recebido"},
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "tipo": "enviado"},
+        ]
+        assert detectar_conflitos_oradores(registros) == []
+
+    def test_repeticao_no_mesmo_tipo_continua_sendo_conflito(self):
+        """Dois compromissos do mesmo tipo no mesmo dia: aí é conflito de verdade."""
+        registros = [
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "tipo": "enviado"},
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "tipo": "enviado"},
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "tipo": "recebido"},
+        ]
+        assert detectar_conflitos_oradores(registros) == [
+            {"data": "02/05/2026", "orador_id": 1, "orador_nome": "Danilo", "ocorrencias": 2}
+        ]
+
 
 class TestWeekdaysSugeridos:
     """Quem ouve o discurso define as datas possíveis.

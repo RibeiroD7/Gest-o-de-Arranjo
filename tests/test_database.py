@@ -273,3 +273,89 @@ class TestDadosDaMensagemDaPresidencia:
         assert database.carregar_presidentes_por_ano(2026)["31/01/2026"]["telefone"] == (
             "11999998888"
         )
+
+
+class TestRelatorios:
+    """Os quadros do PDF de relatórios."""
+
+    def _limpar_presidentes(self):
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_presidencias_contam_e_ordenam_por_quem_presidiu_menos(self):
+        self._limpar_presidentes()
+        muito = database.salvar_presidente_cadastro("Muito", "Ancião")
+        pouco = database.salvar_presidente_cadastro("Pouco", "Servo Ministerial")
+        database.salvar_presidente_cadastro("Nunca", "Ancião")
+        for data in ("03/01/2026", "10/01/2026", "17/01/2026"):
+            database.salvar_presidente(data, muito)
+        database.salvar_presidente("24/01/2026", pouco)
+
+        linhas = database.relatorio_presidencias()
+        assert [(item["nome"], item["quantidade"]) for item in linhas] == [
+            ("Nunca", 0),
+            ("Pouco", 1),
+            ("Muito", 3),
+        ]
+        assert linhas[2]["ultima_data"] == "17/01/2026"
+        assert linhas[0]["ultima_data"] == ""
+
+    def test_presidencias_do_ano_mantem_quem_nao_presidiu(self):
+        """O filtro do ano não pode sumir com quem ficou de fora — é a informação."""
+        self._limpar_presidentes()
+        pid = database.salvar_presidente_cadastro("Só em 2025", "Ancião")
+        database.salvar_presidente("06/12/2025", pid)
+        linhas = database.relatorio_presidencias(2026)
+        assert [(item["nome"], item["quantidade"]) for item in linhas] == [("Só em 2025", 0)]
+
+    def test_intercambio_separa_recebidos_de_enviados(self):
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Vila Progresso')")
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+            conn.execute(
+                "INSERT INTO oradores (nome, categoria, congregacao_id) VALUES (?,?,?)",
+                ("Fulano", "Ancião", cong),
+            )
+            orador = conn.execute("SELECT id FROM oradores").fetchone()[0]
+            conn.execute("INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026,5,5)")
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        database.adicionar_orador_arranjo(
+            arranjo, "recebido", orador, None, congregacao_id=cong, data="09/05/2026"
+        )
+        database.adicionar_orador_arranjo(
+            arranjo, "enviado", orador, None, congregacao_id=cong, data="02/05/2026"
+        )
+        (linha,) = database.relatorio_intercambio_congregacoes(2026)
+        assert linha["congregacao"] == "Vila Progresso"
+        assert (linha["recebidos"], linha["enviados"]) == (1, 1)
+        assert linha["ultima_data"] == "09/05/2026"
+
+    def test_conflitos_do_ano_trazem_o_tipo(self):
+        """Sem o tipo, o par recebido+enviado do orador local viraria conflito."""
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("INSERT INTO oradores (nome, categoria) VALUES ('Fulano','Ancião')")
+            orador = conn.execute("SELECT id FROM oradores").fetchone()[0]
+            conn.execute("INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026,5,5)")
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        for tipo in ("recebido", "enviado"):
+            database.adicionar_orador_arranjo(
+                arranjo, tipo, orador, None, data="02/05/2026"
+            )
+        registros = database.carregar_designacoes_ano(2026)
+        assert sorted(r["tipo"] for r in registros) == ["enviado", "recebido"]

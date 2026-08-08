@@ -224,21 +224,28 @@ def montar_mensagem_presidencia(
 def detectar_conflitos_oradores(registros: list[dict]) -> list[dict]:
     """Detecta oradores designados mais de uma vez na mesma data.
 
+    O par ``recebido`` + ``enviado`` do mesmo orador na mesma data **não** é
+    conflito: é um discurso só, anotado dos dois lados. Acontece com o orador
+    da própria congregação, que precisa aparecer entre os enviados (para ele
+    receber a designação) e também na lista de quem discursa naquela semana.
+    Conflito de verdade é a repetição dentro do mesmo tipo — aí sim o orador
+    ficaria com dois compromissos no mesmo dia.
+
     Args:
-        registros: dicts com ``data`` (DD/MM/AAAA), ``orador_id`` e, opcional,
-            ``orador_nome``.
+        registros: dicts com ``data`` (DD/MM/AAAA), ``orador_id`` e, opcionais,
+            ``orador_nome`` e ``tipo`` (``recebido``/``enviado``).
 
     Returns:
         Um dict por conflito: ``{data, orador_id, orador_nome, ocorrencias}``,
         ordenado por data e por orador.
     """
-    por_chave: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    por_chave: dict[tuple[str, int, str], list[dict]] = defaultdict(list)
     for registro in registros:
         orador_id = registro.get("orador_id")
         data = registro.get("data")
         if orador_id is None or not data:
             continue
-        por_chave[(data, orador_id)].append(registro)
+        por_chave[(data, orador_id, registro.get("tipo") or "")].append(registro)
 
     conflitos = [
         {
@@ -247,7 +254,7 @@ def detectar_conflitos_oradores(registros: list[dict]) -> list[dict]:
             "orador_nome": lista[0].get("orador_nome", ""),
             "ocorrencias": len(lista),
         }
-        for (data, orador_id), lista in por_chave.items()
+        for (data, orador_id, _tipo), lista in por_chave.items()
         if len(lista) > 1
     ]
     conflitos.sort(key=lambda c: (_chave_data_br(c["data"]), c["orador_id"]))

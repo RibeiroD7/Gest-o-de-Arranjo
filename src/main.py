@@ -74,6 +74,8 @@ from database import (
     listar_tipos_evento,
     oradores_com_temas_da_congregacao,
     relatorio_frequencia_oradores,
+    relatorio_intercambio_congregacoes,
+    relatorio_presidencias,
     remover_orador_arranjo,
     restaurar_backup,
     salvar_arranjo,
@@ -174,7 +176,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.12.0"
+VERSAO_APP = "1.13.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -2525,22 +2527,37 @@ def tela_inicio(
             freq = relatorio_frequencia_oradores(
                 int(minha_cong) if minha_cong else None
             )
-            df_rel = df_temas.sort_values(["ultimo_uso_chave", "nr"]).head(20)
-            temas_parados = [
-                {
-                    "nr": linha["nr"],
-                    "titulo": linha["titulo"],
-                    "ultimo_uso": linha.get("ultimo_uso", ""),
-                }
-                for linha in (
-                    dict(zip(df_rel.columns, valores))
-                    for valores in df_rel.itertuples(index=False, name=None)
+            presidencias = relatorio_presidencias()
+            intercambio = relatorio_intercambio_congregacoes(ano)
+
+            # Resumo do ano: soma mês a mês só o que tem arranjo cadastrado —
+            # meses sem arranjo não são pendência, são planejamento futuro.
+            contagens = contar_designacoes_por_mes(ano)
+            resumo_ano = {
+                "semanas": 0, "cobertas": 0, "presidentes": 0,
+                "recebidos": 0, "enviados": 0,
+                "pendentes": contar_designacoes_por_status(ano).get("pendente", 0),
+                "especiais": len(especiais),
+            }
+            for mes_ref in arranjos:
+                r = _resumo_mes_programacao(
+                    ano, mes_ref, recebidos, presidentes, contagens, especiais
                 )
-            ]
+                for chave in ("semanas", "cobertas", "presidentes", "recebidos", "enviados"):
+                    resumo_ano[chave] += r[chave]
+
             caminho, erro = executar_com_progresso(
                 page,
                 "Gerando relatório...",
-                lambda: gerar_pdf_relatorios(freq, temas_parados),
+                lambda: gerar_pdf_relatorios(
+                    freq,
+                    presidencias,
+                    intercambio,
+                    resumo_ano,
+                    subtitulo=(
+                        f"{config.get('nome_congregacao') or 'Minha congregação'} · {ano}"
+                    ),
+                ),
             )
             if erro:
                 mostrar_aviso(page, "Erro", erro)
@@ -2589,7 +2606,7 @@ def tela_inicio(
                     on_click=lambda _: ir_para(2),
                 ),
                 ft.OutlinedButton(
-                    "Catálogo de temas",
+                    "Temas",
                     icon=ft.Icons.MENU_BOOK_OUTLINED,
                     on_click=lambda _: ir_para(4),
                 ),
@@ -2632,7 +2649,7 @@ def tela_inicio(
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         ft.TextButton(
-                            "Ver catálogo",
+                            "Ver temas",
                             icon=ft.Icons.ARROW_FORWARD,
                             on_click=lambda _: ir_para(4),
                         ),

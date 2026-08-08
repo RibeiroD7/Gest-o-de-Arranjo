@@ -1,7 +1,12 @@
-"""PDF de relatórios (reportlab): frequência de oradores e temas parados.
+"""PDF de relatórios (reportlab): o retrato do arranjo em uma folha.
 
-Recebe os dados já prontos (o ``main.py`` os busca no banco) e monta um PDF com
-dois quadros. Grava na área de exports gravável (ver ``armazenamento``).
+Traz o que só se enxerga somando o ano inteiro — quem está discursando de
+menos, quem está presidindo de menos e como está a troca com cada congregação.
+Temas parados ficaram de fora de propósito: a aba Temas já mostra isso, com
+filtro e ordenação.
+
+Recebe os dados já prontos (o ``main.py`` os busca no banco). Grava na área de
+exports gravável (ver ``armazenamento``).
 """
 
 from __future__ import annotations
@@ -50,12 +55,30 @@ def _tabela(cabecalhos: list[str], linhas: list[list[str]], larguras: list[int])
     return tabela
 
 
+def _quadro_resumo(resumo: dict) -> list[list[str]]:
+    """Os números do ano, em pares rótulo/valor de duas colunas."""
+    semanas = int(resumo.get("semanas", 0))
+    cobertas = int(resumo.get("cobertas", 0))
+    return [
+        ["Semanas com orador", f"{cobertas} de {semanas}"],
+        ["Semanas sem orador", str(max(0, semanas - cobertas))],
+        ["Semanas com presidente", f"{int(resumo.get('presidentes', 0))} de {semanas}"],
+        ["Oradores recebidos", str(int(resumo.get("recebidos", 0)))],
+        ["Designações enviadas", str(int(resumo.get("enviados", 0)))],
+        ["Aguardando confirmação", str(int(resumo.get("pendentes", 0)))],
+        ["Datas especiais", str(int(resumo.get("especiais", 0)))],
+    ]
+
+
 def gerar_pdf_relatorios(
     frequencia_oradores: list[dict],
-    temas_parados: list[dict],
+    presidencias: list[dict],
+    intercambio: list[dict],
+    resumo: dict | None = None,
     titulo: str = "Relatórios — Gestão de Arranjo",
+    subtitulo: str = "",
 ) -> tuple[str | None, str | None]:
-    """Gera um PDF com os dois quadros. Retorna ``(caminho, erro)``."""
+    """Gera o PDF com os quadros do arranjo. Retorna ``(caminho, erro)``."""
     try:
         garantir_pastas()
         caminho = EXPORTS_DIR / f"Relatorios_{datetime.now():%Y-%m-%d_%H-%M-%S}.pdf"
@@ -79,13 +102,27 @@ def gerar_pdf_relatorios(
             "info", fontName="Helvetica", fontSize=9, textColor=colors.grey, spaceAfter=4
         )
 
+        rodape = f"Gerado em {datetime.now():%d/%m/%Y %H:%M}"
         elementos: list = [
             Paragraph(titulo, estilo_titulo),
-            Paragraph(f"Gerado em {datetime.now():%d/%m/%Y %H:%M}", estilo_info),
+            Paragraph(f"{subtitulo} · {rodape}" if subtitulo else rodape, estilo_info),
         ]
 
+        if resumo:
+            elementos.append(Paragraph("Resumo do ano", estilo_sub))
+            elementos.append(
+                _tabela(["Indicador", "Valor"], _quadro_resumo(resumo), [300, 170])
+            )
+            elementos.append(Spacer(1, 6))
+
         elementos.append(
-            Paragraph("Frequência de oradores (minha congregação)", estilo_sub)
+            Paragraph("Oradores da minha congregação — discursos enviados", estilo_sub)
+        )
+        elementos.append(
+            Paragraph(
+                "Do que discursou menos (e há mais tempo) para o que mais discursou.",
+                estilo_info,
+            )
         )
         if frequencia_oradores:
             linhas = [
@@ -103,21 +140,60 @@ def gerar_pdf_relatorios(
             elementos.append(Paragraph("Sem oradores cadastrados.", estilo_info))
 
         elementos.append(Spacer(1, 6))
-        elementos.append(Paragraph("Temas há mais tempo sem uso", estilo_sub))
-        if temas_parados:
+        elementos.append(Paragraph("Presidências da reunião", estilo_sub))
+        elementos.append(
+            Paragraph(
+                "Quantas vezes cada um presidiu; quem presidiu menos vem primeiro.",
+                estilo_info,
+            )
+        )
+        if presidencias:
             linhas = [
                 [
-                    str(t.get("nr", "")),
-                    t.get("titulo", ""),
-                    t.get("ultimo_uso") or "nunca",
+                    p.get("nome", ""),
+                    p.get("categoria", ""),
+                    str(p.get("quantidade", 0)),
+                    p.get("ultima_data") or "nunca",
                 ]
-                for t in temas_parados
+                for p in presidencias
             ]
             elementos.append(
-                _tabela(["Nº", "Tema", "Último uso"], linhas, [40, 330, 100])
+                _tabela(
+                    ["Presidente", "Privilégio", "Vezes", "Última"],
+                    linhas,
+                    [220, 120, 60, 90],
+                )
             )
         else:
-            elementos.append(Paragraph("Sem temas cadastrados.", estilo_info))
+            elementos.append(Paragraph("Nenhum presidente cadastrado.", estilo_info))
+
+        elementos.append(Spacer(1, 6))
+        elementos.append(Paragraph("Troca com as congregações", estilo_sub))
+        elementos.append(
+            Paragraph(
+                "Discursos que vieram de cada congregação e os que mandamos para lá.",
+                estilo_info,
+            )
+        )
+        if intercambio:
+            linhas = [
+                [
+                    c.get("congregacao", ""),
+                    str(c.get("recebidos", 0)),
+                    str(c.get("enviados", 0)),
+                    c.get("ultima_data") or "—",
+                ]
+                for c in intercambio
+            ]
+            elementos.append(
+                _tabela(
+                    ["Congregação", "Recebidos", "Enviados", "Último"],
+                    linhas,
+                    [220, 80, 80, 90],
+                )
+            )
+        else:
+            elementos.append(Paragraph("Nenhum arranjo cadastrado.", estilo_info))
 
         doc.build(elementos)
         return str(caminho), None
