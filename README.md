@@ -42,13 +42,19 @@ uma planilha (veja abaixo).
   telefone, endereço, dia e horário da reunião).
 - **Contatos do celular** — no cadastro de oradores e de presidentes, o botão
   **Buscar nos contatos** preenche o telefone a partir da agenda do aparelho.
-  No **Android** abre o seletor do próprio sistema: você toca no contato e o
-  app recebe nome e telefone (na primeira vez o Android pede a permissão de
-  contatos; se você negar, nada quebra). No **computador**, e sempre que o
-  seletor não estiver disponível, o app usa o arquivo que o celular exporta —
-  em Contatos → Configurações → **Exportar**, escolha `.vcf` e abra no app.
-  Nenhuma agenda é gravada: o que fica salvo (e vai no backup) é apenas o
-  número da pessoa escolhida.
+  No **Android** abre o seletor do próprio sistema; no **computador**, e se o
+  seletor não estiver disponível, o app lê o arquivo que o celular exporta
+  (Contatos → Configurações → **Exportar**, formato `.vcf`).
+  Ao escolher, a pessoa fica **vinculada** àquele contato: o app guarda a
+  chave dele e, a cada abertura, relê a agenda — trocou de número no celular,
+  o número muda aqui sozinho. A **foto do contato** vira o avatar na lista (é
+  a mesma imagem que o WhatsApp costuma sincronizar nos contatos; o WhatsApp
+  em si não expõe fotos de perfil para outros aplicativos).
+  Nenhuma agenda é gravada: ficam salvos só o número e a chave do contato — e
+  esses vão no backup. As fotos ficam em cache fora do backup e voltam
+  sozinhas do aparelho.
+- **Telefones** — todos os campos de telefone se formatam enquanto você digita
+  (`(11) 90000-0000`), em celular e fixo.
 - **Arranjos** — a programação mensal: oradores recebidos e designações
   enviadas de cada mês, com sugestão automática de datas conforme o dia de
   reunião da congregação e exportação de listas em PNG. Cada **orador

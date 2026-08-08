@@ -1,8 +1,8 @@
-"""Serviço que abre o seletor de contatos do próprio aparelho.
+"""Ponte com a agenda de contatos do próprio aparelho.
 
-O lado Dart (``src/flutter/flet_contatos``) responde ao método ``escolher``
-chamando o ``flutter_contacts``: o sistema mostra a agenda, o usuário toca num
-contato e o app recebe de volta o nome e os telefones dele.
+O lado Dart (``src/flutter/flet_contatos``) fala com o ``flutter_contacts``:
+``escolher`` abre o seletor do sistema; ``reler`` busca de novo os contatos já
+vinculados, para o app acompanhar o que mudar no aparelho.
 
 Nada da agenda é lido sem o usuário escolher, e nada é guardado aqui — quem
 decide o que salvar é o app.
@@ -23,7 +23,17 @@ class Contatos(ft.Service):
         """Abre a agenda do sistema e espera o usuário escolher.
 
         Returns:
-            ``{"nome": str, "telefones": list[str]}`` do contato escolhido, ou
-            ``None`` se o usuário cancelou ou negou a permissão.
+            ``{"id": str, "nome": str, "telefones": list[str], "foto": str|None}``
+            — ``foto`` em base64 — ou ``None`` se cancelou ou negou a permissão.
         """
         return await self._invoke_method("escolher")
+
+    async def reler(self, ids: list[str]) -> list[dict]:
+        """Relê os contatos vinculados, no mesmo formato de ``escolher``.
+
+        Contatos apagados do aparelho simplesmente não voltam na lista — o app
+        mantém o que já tinha, em vez de perder o telefone de alguém.
+        """
+        if not ids:
+            return []
+        return await self._invoke_method("reler", {"ids": list(ids)}) or []

@@ -377,6 +377,12 @@ def create_tables(conn):
     # Telefone: usado para mandar a mensagem da presidência pelo WhatsApp.
     if "telefone" not in colunas_cadastro:
         cursor.execute("ALTER TABLE presidentes_cadastro ADD COLUMN telefone TEXT")
+    # Vínculo com um contato da agenda do celular: guardamos a chave estável do
+    # contato para reler nome/telefone/foto quando ele mudar no aparelho.
+    if "contato_id" not in colunas_cadastro:
+        cursor.execute("ALTER TABLE presidentes_cadastro ADD COLUMN contato_id TEXT")
+    if "contato_id" not in colunas_oradores:
+        cursor.execute("ALTER TABLE oradores ADD COLUMN contato_id TEXT")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
@@ -885,6 +891,83 @@ def _data_de_chave_ordenavel(chave: str | None) -> str:
     return f"{chave[6:8]}/{chave[4:6]}/{chave[0:4]}"
 
 
+def listar_vinculos_de_contato() -> list[dict]:
+    """Quem está vinculado a um contato da agenda, para reler do aparelho.
+
+    Devolve ``[{tabela, id, contato_id, nome, telefone}]`` juntando oradores e
+    presidentes — quem chama pergunta ao celular e manda de volta em
+    ``atualizar_por_contato``.
+    """
+    conn = get_connection()
+    try:
+        linhas = conn.execute(
+            """
+            SELECT 'oradores', id, contato_id, nome, COALESCE(telefone, '')
+            FROM oradores
+            WHERE contato_id IS NOT NULL AND contato_id <> ''
+            UNION ALL
+            SELECT 'presidentes_cadastro', id, contato_id, nome, COALESCE(telefone, '')
+            FROM presidentes_cadastro
+            WHERE contato_id IS NOT NULL AND contato_id <> ''
+            """
+        ).fetchall()
+        return [
+            {
+                "tabela": linha[0],
+                "id": linha[1],
+                "contato_id": linha[2],
+                "nome": linha[3],
+                "telefone": linha[4],
+            }
+            for linha in linhas
+        ]
+    finally:
+        conn.close()
+
+
+def definir_contato_vinculado(
+    tabela: str, registro_id: int, contato_id: str | None
+) -> None:
+    """Amarra (ou solta) uma pessoa a um contato da agenda."""
+    if tabela not in ("oradores", "presidentes_cadastro"):
+        raise ValueError(f"Tabela inválida para vínculo de contato: {tabela}")
+    conn = get_connection()
+    try:
+        conn.execute(
+            f"UPDATE {tabela} SET contato_id = ? WHERE id = ?",  # noqa: S608 — nome validado acima
+            (contato_id or None, registro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def atualizar_telefone_por_contato(tabela: str, registro_id: int, telefone: str) -> int:
+    """Grava o telefone que veio da agenda; devolve 1 se algo mudou.
+
+    Só escreve quando o número realmente mudou — assim a sincronização silenciosa
+    não fica marcando o banco como alterado a cada abertura do app.
+    """
+    if tabela not in ("oradores", "presidentes_cadastro"):
+        raise ValueError(f"Tabela inválida para vínculo de contato: {tabela}")
+    conn = get_connection()
+    try:
+        atual = conn.execute(
+            f"SELECT COALESCE(telefone, '') FROM {tabela} WHERE id = ?",  # noqa: S608
+            (registro_id,),
+        ).fetchone()
+        if not atual or atual[0] == telefone:
+            return 0
+        conn.execute(
+            f"UPDATE {tabela} SET telefone = ? WHERE id = ?",  # noqa: S608
+            (telefone, registro_id),
+        )
+        conn.commit()
+        return 1
+    finally:
+        conn.close()
+
+
 def relatorio_presidencias(ano: int | None = None) -> list[dict]:
     """Quantas vezes cada presidente já presidiu, e quando foi a última.
 
@@ -1303,8 +1386,13 @@ def salvar_orador(
     observacoes: str,
     temas_nr: set[int],
     orador_id: int | None = None,
+    contato_id: str | None = None,
 ) -> int:
-    """Cria ou atualiza um orador e os temas que ele pode apresentar."""
+    """Cria ou atualiza um orador e os temas que ele pode apresentar.
+
+    ``contato_id`` amarra o orador a um contato da agenda do celular, para o
+    telefone acompanhar sozinho o que mudar lá.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -1312,18 +1400,22 @@ def salvar_orador(
             cursor.execute(
                 """
                 UPDATE oradores
-                SET nome = ?, telefone = ?, categoria = ?, congregacao_id = ?, observacoes = ?
+                SET nome = ?, telefone = ?, categoria = ?, congregacao_id = ?,
+                    observacoes = ?, contato_id = ?
                 WHERE id = ?
                 """,
-                (nome, telefone, categoria, congregacao_id, observacoes, orador_id),
+                (nome, telefone, categoria, congregacao_id, observacoes,
+                 contato_id or None, orador_id),
             )
         else:
             cursor.execute(
                 """
-                INSERT INTO oradores (nome, telefone, categoria, congregacao_id, observacoes)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO oradores (
+                    nome, telefone, categoria, congregacao_id, observacoes, contato_id
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (nome, telefone, categoria, congregacao_id, observacoes),
+                (nome, telefone, categoria, congregacao_id, observacoes,
+                 contato_id or None),
             )
             orador_id = int(cursor.lastrowid)
 
@@ -1427,7 +1519,8 @@ def listar_presidentes_cadastro() -> list[dict]:
     try:
         linhas = conn.execute(
             """
-            SELECT id, nome, categoria, ordem, COALESCE(telefone, '')
+            SELECT id, nome, categoria, ordem, COALESCE(telefone, ''),
+                   COALESCE(contato_id, '')
             FROM presidentes_cadastro
             ORDER BY COALESCE(ordem, 999999), nome
             """
@@ -1439,6 +1532,7 @@ def listar_presidentes_cadastro() -> list[dict]:
                 "categoria": linha[2],
                 "ordem": linha[3],
                 "telefone": linha[4],
+                "contato_id": linha[5],
             }
             for linha in linhas
         ]
@@ -1515,23 +1609,26 @@ def salvar_presidente_cadastro(
     categoria: str,
     cadastro_id: int | None = None,
     telefone: str = "",
+    contato_id: str | None = None,
 ) -> int:
     """Cria ou atualiza um presidente no cadastro; retorna o ID."""
     conn = get_connection()
     try:
         if cadastro_id:
             conn.execute(
-                "UPDATE presidentes_cadastro SET nome = ?, categoria = ?, telefone = ? "
-                "WHERE id = ?",
-                (nome, categoria, telefone, cadastro_id),
+                "UPDATE presidentes_cadastro SET nome = ?, categoria = ?, "
+                "telefone = ?, contato_id = ? WHERE id = ?",
+                (nome, categoria, telefone, contato_id or None, cadastro_id),
             )
         else:
             cursor = conn.execute(
                 """
-                INSERT INTO presidentes_cadastro (nome, categoria, telefone, ordem)
-                VALUES (?, ?, ?, (SELECT COALESCE(MAX(ordem), 0) + 1 FROM presidentes_cadastro))
+                INSERT INTO presidentes_cadastro (
+                    nome, categoria, telefone, contato_id, ordem
+                ) VALUES (?, ?, ?, ?,
+                    (SELECT COALESCE(MAX(ordem), 0) + 1 FROM presidentes_cadastro))
                 """,
-                (nome, categoria, telefone),
+                (nome, categoria, telefone, contato_id or None),
             )
             cadastro_id = int(cursor.lastrowid)
         conn.commit()

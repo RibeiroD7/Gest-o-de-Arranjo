@@ -1,6 +1,6 @@
 [project]
 name = "gestao-arranjo"
-version = "1.16.0"
+version = "1.17.0"
 description = "Gestão de Arranjo — coordenação de discursos públicos (Windows, Linux e Android)"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -62,7 +62,7 @@ copyright = "Copyright (C) 2026"
 # build_version é sobrescrito no CI por --build-version (vem da tag vX.Y.Z);
 # build_number é o versionCode do Android (deve só crescer entre releases).
 build_version = "1.0.18"
-build_number = 25
+build_number = 26
 
 [tool.flet.app]
 path = "src"

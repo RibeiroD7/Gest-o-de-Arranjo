@@ -237,7 +237,12 @@ class TestBotaoBuscarContato:
 
         class ContatosFalso:
             async def escolher(self):
-                return {"nome": "Fábio Moreira", "telefones": ["(11) 99999-8888"]}
+                return {
+                    "id": "chave-lucas",
+                    "nome": "Fábio Moreira",
+                    "telefones": ["(11) 99999-8888"],
+                    "foto": None,
+                }
 
         main._contatos_nativo_global = ContatosFalso()
         monkeypatch.setattr(
@@ -250,14 +255,17 @@ class TestBotaoBuscarContato:
         page.run_task = lambda handler, *args: agendados.append((handler, args))
 
         campo_tel, campo_nome = flet.TextField(), flet.TextField()
-        main._botao_buscar_contato(page, campo_tel, campo_nome).on_click(None)
+        vinculo = {"contato_id": ""}
+        main._botao_buscar_contato(page, campo_tel, campo_nome, vinculo).on_click(None)
 
         assert agendados, "o seletor nativo precisa ir pelo run_task"
         handler, args = agendados[0]
         asyncio.run(handler(*args))
-        # O número chega formatado do contato e o nome preenche o campo vazio.
-        assert campo_tel.value == "11999998888"
+        # Telefone entra já com máscara e o nome preenche o campo vazio.
+        assert campo_tel.value == "(11) 99999-8888"
         assert campo_nome.value == "Fábio Moreira"
+        # A chave do contato é o que faz o telefone acompanhar a agenda depois.
+        assert vinculo["contato_id"] == "chave-lucas"
 
     def test_cancelar_no_seletor_nao_abre_o_vcf(self, monkeypatch):
         """Cancelou de propósito: empurrar o outro caminho seria atrapalhar."""

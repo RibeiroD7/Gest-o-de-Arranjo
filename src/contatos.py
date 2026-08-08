@@ -1,23 +1,38 @@
-"""Leitura da agenda do celular exportada em vCard (.vcf).
+"""Apoio para telefones e para os contatos vinculados à agenda do celular.
 
-O Flet não expõe os contatos do aparelho — não há como abrir o seletor de
-contatos do Android sem um plugin nativo. O caminho que funciona só com o que
-o app já tem é o arquivo que o próprio celular exporta: em Contatos →
-Configurações → Exportar, o Android grava um ``.vcf`` com nomes e telefones.
-O app lê esse arquivo e deixa o coordenador escolher o contato, em vez de
-digitar o número.
+Três coisas moram aqui, todas sem depender do Flet (por isso são testáveis):
 
-Só nome e telefone são aproveitados, e nada da agenda é gravado: o que fica
-salvo (e vai para o backup) é apenas o número do orador ou presidente
-escolhido.
+- **Máscara de telefone** (``mascara_telefone``), aplicada enquanto se digita.
+- **Leitura de vCard** (``ler_vcard``), o caminho do computador e a reserva do
+  celular: o aparelho exporta a agenda em ``.vcf`` (Contatos → Configurações →
+  Exportar) e o app lê dali. No Android o normal é o seletor nativo, na
+  extensão ``extensoes/flet_contatos``.
+- **Vínculo com o contato** (``mudancas_de_contato``, foto em cache), que faz o
+  telefone salvo acompanhar sozinho o que mudar na agenda.
+
+Nenhuma agenda é gravada: do contato escolhido ficam só o número, a chave dele
+(para reler depois) e a foto em cache — e a foto fica fora do backup.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
 import unicodedata
+from pathlib import Path
 
-__all__ = ["Contato", "ler_vcard", "filtrar_contatos", "formatar_telefone"]
+__all__ = [
+    "Contato",
+    "ler_vcard",
+    "filtrar_contatos",
+    "formatar_telefone",
+    "mascara_telefone",
+    "iniciais_do_nome",
+    "caminho_foto_contato",
+    "salvar_foto_contato",
+    "mudancas_de_contato",
+]
 
 
 class Contato:
@@ -86,6 +101,45 @@ def formatar_telefone(numero: str) -> str:
     mais = numero.startswith("+")
     digitos = re.sub(r"\D", "", numero)
     return ("+" if mais else "") + digitos
+
+
+def mascara_telefone(texto: str) -> str:
+    """Formata um telefone brasileiro enquanto ele é digitado.
+
+    Vai montando a máscara conforme os dígitos chegam — ``11900000000`` vira
+    ``(11) 90000-0000`` — sem atrapalhar quem apaga no meio: o que vale são os
+    dígitos, os separadores são recalculados a cada tecla.
+
+    Números com país (``+55…``) mantêm o prefixo, e o que não couber em nenhum
+    formato brasileiro conhecido é devolvido só com os dígitos, sem inventar
+    separador no lugar errado.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return ""
+
+    pais = ""
+    digitos = re.sub(r"\D", "", texto)
+    if texto.startswith("+") or (len(digitos) > 11 and digitos.startswith("55")):
+        pais = "+55 "
+        digitos = digitos.removeprefix("55")
+
+    if len(digitos) > 11:
+        # Fora dos formatos do Brasil: não force máscara no lugar errado.
+        return (pais + digitos).strip()
+    if len(digitos) < 2:
+        return pais + digitos
+    if len(digitos) == 2:
+        return f"{pais}({digitos})"
+
+    # Celular começa com 9 e tem 5 dígitos antes do traço; fixo tem 4. Decidir
+    # pelo primeiro dígito mantém o traço no lugar desde o começo da digitação,
+    # em vez de ele pular de posição a cada tecla.
+    resto = digitos[2:]
+    corte = 5 if resto.startswith("9") else 4
+    if len(resto) <= corte:
+        return f"{pais}({digitos[:2]}) {resto}"
+    return f"{pais}({digitos[:2]}) {resto[:corte]}-{resto[corte:]}"
 
 
 def ler_vcard(texto: str) -> list[Contato]:
@@ -171,3 +225,99 @@ def filtrar_contatos(contatos: list[Contato], termo: str) -> list[Contato]:
         if alvo in _chave_ordenacao(c.nome)
         or (digitos and any(digitos in t for t in c.telefones))
     ]
+
+
+# ---------------------------------------------------------------------------
+# Vínculo com um contato da agenda: foto e sincronização
+# ---------------------------------------------------------------------------
+
+
+def iniciais_do_nome(nome: str) -> str:
+    """Até duas iniciais para o avatar de quem não tem foto."""
+    partes = [p for p in re.split(r"\s+", (nome or "").strip()) if p]
+    if not partes:
+        return "?"
+    if len(partes) == 1:
+        return partes[0][:2].upper()
+    return (partes[0][0] + partes[-1][0]).upper()
+
+
+def _nome_arquivo_foto(contato_id: str) -> str:
+    """Nome de arquivo seguro e estável para a chave do contato.
+
+    A chave do Android tem barras e outros caracteres que não valem em nome de
+    arquivo, então o que vai para o disco é um resumo dela.
+    """
+    return hashlib.sha1((contato_id or "").encode("utf-8")).hexdigest() + ".jpg"
+
+
+def caminho_foto_contato(contato_id: str, pasta: Path) -> Path | None:
+    """Caminho da foto guardada desse contato, ou None se não houver."""
+    if not contato_id:
+        return None
+    caminho = pasta / _nome_arquivo_foto(contato_id)
+    return caminho if caminho.exists() else None
+
+
+def salvar_foto_contato(contato_id: str, foto_base64: str | None, pasta: Path) -> Path | None:
+    """Grava (ou apaga) a foto do contato na pasta de fotos.
+
+    Recebe o que a agenda devolveu em base64. Sem foto, remove a que existia —
+    assim tirar a imagem no celular também some do app.
+    """
+    if not contato_id:
+        return None
+    pasta.mkdir(parents=True, exist_ok=True)
+    caminho = pasta / _nome_arquivo_foto(contato_id)
+    if not foto_base64:
+        caminho.unlink(missing_ok=True)
+        return None
+    try:
+        caminho.write_bytes(base64.b64decode(foto_base64))
+    except (ValueError, OSError):
+        # Foto corrompida não pode impedir a sincronização do telefone.
+        return None
+    return caminho
+
+
+def mudancas_de_contato(
+    vinculos: list[dict], contatos: list[dict]
+) -> list[dict]:
+    """Compara o que está salvo com o que a agenda devolveu.
+
+    Args:
+        vinculos: ``[{tabela, id, contato_id, nome, telefone}]`` do banco.
+        contatos: ``[{id, nome, telefones, foto}]`` lidos do aparelho.
+
+    Returns:
+        Uma entrada por pessoa cujo telefone mudou, no formato
+        ``{tabela, id, contato_id, nome, telefone, telefone_antigo, foto}``.
+        Contatos que a agenda não devolveu (apagados, ou de outro aparelho) não
+        entram: manter o número antigo é melhor do que apagá-lo.
+    """
+    por_id = {c.get("id"): c for c in contatos if c.get("id")}
+    mudancas = []
+    for vinculo in vinculos:
+        contato = por_id.get(vinculo.get("contato_id"))
+        if not contato:
+            continue
+        telefones = [
+            numero
+            for numero in (formatar_telefone(t) for t in contato.get("telefones") or [])
+            if numero
+        ]
+        if not telefones:
+            continue
+        novo = mascara_telefone(telefones[0])
+        if novo == vinculo.get("telefone"):
+            continue
+        mudancas.append(
+            {
+                **vinculo,
+                "telefone": novo,
+                "telefone_antigo": vinculo.get("telefone", ""),
+                "nome_contato": contato.get("nome", ""),
+                "foto": contato.get("foto"),
+            }
+        )
+    return mudancas

@@ -20,6 +20,10 @@ BASE_DIR = Path(_STORAGE) if _STORAGE else Path(".")
 DATA_DIR = BASE_DIR / "data"
 EXPORTS_DIR = BASE_DIR / "exports"
 BACKUPS_DIR = BASE_DIR / "backups"
+# Fotos dos contatos vinculados. Ficam FORA do backup de propósito: são só
+# enfeite, pesariam no arquivo enviado à nuvem todo dia e voltam sozinhas do
+# aparelho na próxima sincronização.
+FOTOS_DIR = DATA_DIR / "fotos"
 
 # Pasta somente-leitura com os recursos embutidos (Temas.xlsx, ícones...).
 _ASSETS = os.environ.get("FLET_ASSETS_DIR")
@@ -28,7 +32,7 @@ ASSETS_DIR = Path(_ASSETS) if _ASSETS else Path("assets")
 
 def garantir_pastas() -> None:
     """Cria as pastas graváveis, se necessário."""
-    for pasta in (DATA_DIR, EXPORTS_DIR, BACKUPS_DIR):
+    for pasta in (DATA_DIR, EXPORTS_DIR, BACKUPS_DIR, FOTOS_DIR):
         pasta.mkdir(parents=True, exist_ok=True)
 
 

@@ -25,12 +25,23 @@ import nuvem_drive
 import tema as _tema  # apelidado: `tema` é usado como variável local (título) em várias telas
 from armazenamento import (
     EXPORTS_DIR,
+    FOTOS_DIR,
     definir_layout_mobile,
     eh_mobile,
     garantir_pastas,
 )
 from canticos import rotulo_cantico, titulo_cantico
-from contatos import Contato, filtrar_contatos, formatar_telefone, ler_vcard
+from contatos import (
+    Contato,
+    caminho_foto_contato,
+    filtrar_contatos,
+    formatar_telefone,
+    iniciais_do_nome,
+    ler_vcard,
+    mascara_telefone,
+    mudancas_de_contato,
+    salvar_foto_contato,
+)
 from database import (
     adicionar_ano_coluna,
     adicionar_ano_planejamento,
@@ -39,6 +50,7 @@ from database import (
     atualizar_data_designacao,
     atualizar_orador_arranjo,
     atualizar_status_orador_arranjo,
+    atualizar_telefone_por_contato,
     carregar_arranjo,
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
@@ -74,6 +86,7 @@ from database import (
     listar_datas_especiais_por_ano,
     listar_presidentes_cadastro,
     listar_tipos_evento,
+    listar_vinculos_de_contato,
     oradores_com_temas_da_congregacao,
     relatorio_frequencia_oradores,
     relatorio_presidencias,
@@ -186,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.16.0"
+VERSAO_APP = "1.17.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -821,8 +834,8 @@ def carregar_orador(orador_id: int) -> dict | None:
     conn = get_connection()
     try:
         df = pd.read_sql_query(
-            "SELECT id, nome, telefone, categoria, congregacao_id, observacoes "
-            "FROM oradores WHERE id = ?",
+            "SELECT id, nome, telefone, categoria, congregacao_id, observacoes, "
+            "COALESCE(contato_id, '') AS contato_id FROM oradores WHERE id = ?",
             conn,
             params=(orador_id,),
         )
@@ -838,6 +851,7 @@ def carregar_orador(orador_id: int) -> dict | None:
         "categoria": row["categoria"] or "Ancião",
         "congregacao_id": str(row["congregacao_id"]) if pd.notna(row["congregacao_id"]) else None,
         "observacoes": row["observacoes"] or "",
+        "contato_id": row["contato_id"] or "",
         "temas_nr": carregar_temas_de_orador(int(row["id"])),
     }
 
@@ -1296,18 +1310,129 @@ def criar_tela_padrao(
 _contatos_da_sessao: list[Contato] = []
 
 
+def _avatar_contato(nome: str, contato_id: str = "", tamanho: int = 38) -> ft.Control:
+    """Foto do contato vinculado; sem foto, as iniciais num círculo.
+
+    A foto vem da agenda do aparelho (a mesma que o WhatsApp costuma
+    sincronizar nos contatos) e fica em cache na área do app.
+    """
+    caminho = caminho_foto_contato(contato_id, FOTOS_DIR) if contato_id else None
+    if caminho:
+        return ft.Container(
+            content=ft.Image(
+                src=str(caminho),
+                width=tamanho,
+                height=tamanho,
+                fit=ft.BoxFit.COVER,
+                border_radius=tamanho // 2,
+            ),
+            width=tamanho,
+            height=tamanho,
+            border_radius=tamanho // 2,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+    return ft.Container(
+        content=ft.Text(
+            iniciais_do_nome(nome),
+            size=fonte(13),
+            weight=ft.FontWeight.W_700,
+            color=COR_DESTAQUE_SUAVE,
+        ),
+        width=tamanho,
+        height=tamanho,
+        border_radius=tamanho // 2,
+        bgcolor=ft.Colors.with_opacity(0.16, COR_DESTAQUE),
+        alignment=ft.Alignment.CENTER,
+    )
+
+
+def sincronizar_contatos_vinculados(page: ft.Page, ao_terminar=None) -> None:
+    """Relê na agenda os contatos vinculados e atualiza os telefones salvos.
+
+    Roda em silêncio na abertura do app: quem trocou de número no celular
+    aparece com o número novo aqui, sem ninguém precisar reeditar o cadastro.
+    Só existe no celular — no PC não há agenda para consultar.
+    """
+    if _contatos_nativo_global is None:
+        return
+    vinculos = listar_vinculos_de_contato()
+    if not vinculos:
+        return
+
+    async def _sincronizar() -> None:
+        try:
+            lidos = await _contatos_nativo_global.reler(
+                [v["contato_id"] for v in vinculos]
+            )
+        except Exception:  # noqa: BLE001 — sem permissão/agenda: segue como está
+            logger.exception("Não foi possível reler os contatos vinculados")
+            return
+
+        # As fotos são atualizadas sempre; o telefone, só quando mudou.
+        for contato in lidos:
+            salvar_foto_contato(contato.get("id", ""), contato.get("foto"), FOTOS_DIR)
+
+        mudancas = mudancas_de_contato(vinculos, lidos)
+        alterados = 0
+        for mudanca in mudancas:
+            alterados += atualizar_telefone_por_contato(
+                mudanca["tabela"], mudanca["id"], mudanca["telefone"]
+            )
+        if alterados:
+            logger.info("Contatos: %d telefone(s) atualizados pela agenda", alterados)
+            mostrar_sucesso(
+                page,
+                f"{alterados} telefone(s) atualizados pelos seus contatos."
+                if alterados > 1
+                else f"Telefone de {mudancas[0]['nome']} atualizado pelos contatos.",
+            )
+        if ao_terminar is not None:
+            ao_terminar()
+
+    page.run_task(_sincronizar)
+
+
+def _campo_telefone(rotulo: str = "Telefone", valor: str = "", **extras) -> ft.TextField:
+    """Campo de telefone que se formata sozinho enquanto é digitado.
+
+    Guardar o número já formatado não atrapalha nada: quem monta o link do
+    WhatsApp tira a pontuação de qualquer jeito.
+    """
+    campo = ft.TextField(
+        label=rotulo,
+        value=mascara_telefone(valor),
+        keyboard_type=ft.KeyboardType.PHONE,
+        **extras,
+    )
+
+    def formatar(e=None):
+        formatado = mascara_telefone(campo.value or "")
+        if formatado != campo.value:
+            campo.value = formatado
+            campo.update()
+
+    campo.on_change = formatar
+    return campo
+
+
 def _botao_buscar_contato(
-    page: ft.Page, campo_telefone: ft.TextField, campo_nome: ft.TextField | None = None
+    page: ft.Page,
+    campo_telefone: ft.TextField,
+    campo_nome: ft.TextField | None = None,
+    estado_vinculo: dict | None = None,
 ) -> ft.Control:
     """Botão que associa a pessoa a um contato do celular.
 
     No celular abre a agenda do próprio sistema (extensão ``flet_contatos``).
     No computador — onde o pacote nativo não existe — e sempre que o seletor
     não estiver disponível, cai no arquivo ``.vcf`` exportado do aparelho.
+
+    ``estado_vinculo`` recebe o ``contato_id`` do escolhido: é o que faz o
+    telefone acompanhar sozinho o que mudar na agenda depois.
     """
 
     def escolher(contato: Contato):
-        campo_telefone.value = contato.telefone
+        campo_telefone.value = mascara_telefone(contato.telefone)
         if campo_nome is not None and not (campo_nome.value or "").strip():
             campo_nome.value = contato.nome
         page.update()
@@ -1334,6 +1459,10 @@ def _botao_buscar_contato(
                 f"{escolhido.get('nome') or 'O contato'} não tem número salvo.",
             )
             return
+        contato_id = escolhido.get("id") or ""
+        if estado_vinculo is not None:
+            estado_vinculo["contato_id"] = contato_id
+        salvar_foto_contato(contato_id, escolhido.get("foto"), FOTOS_DIR)
         escolher(Contato(escolhido.get("nome") or "", telefones))
 
     def ao_clicar(_=None):
@@ -1488,7 +1617,9 @@ def abrir_dialog_orador(
     editando = dados is not None
 
     campo_nome = ft.TextField(label="Nome", value=dados["nome"] if dados else "", expand=True)
-    campo_telefone = ft.TextField(label="Telefone", value=dados["telefone"] if dados else "", expand=True)
+    campo_telefone = _campo_telefone(valor=dados["telefone"] if dados else "", expand=True)
+    # Guarda a que contato da agenda este orador está amarrado.
+    vinculo_orador = {"contato_id": (dados or {}).get("contato_id", "")}
     campo_categoria = ft.Dropdown(
         label="Categoria",
         value=dados["categoria"] if dados else "Ancião",
@@ -1631,6 +1762,7 @@ def abrir_dialog_orador(
             observacoes_final,
             temas_selecionados,
             orador_id=orador_id if editando else None,
+            contato_id=vinculo_orador["contato_id"],
         )
 
         fechar()
@@ -1648,7 +1780,9 @@ def abrir_dialog_orador(
                     campo_nome,
                     campo_telefone,
                     ft.Row(
-                        [_botao_buscar_contato(page, campo_telefone, campo_nome)],
+                        [_botao_buscar_contato(
+                            page, campo_telefone, campo_nome, vinculo_orador
+                        )],
                         alignment=ft.MainAxisAlignment.END,
                     ),
                     linha_campos(campo_categoria, campo_congregacao),
@@ -1743,11 +1877,7 @@ def abrir_dialog_congregacao(
         value=dados["responsavel"] if dados else "",
         expand=True,
     )
-    campo_telefone = ft.TextField(
-        label="Telefone",
-        value=dados["telefone"] if dados else "",
-        expand=True,
-    )
+    campo_telefone = _campo_telefone(valor=dados["telefone"] if dados else "", expand=True)
     campo_endereco = ft.TextField(
         label="Endereço",
         value=dados["endereco"] if dados else "",
@@ -6805,11 +6935,7 @@ def abrir_dialog_arranjo(
         value=dados["responsavel"] if dados else "",
         expand=True,
     )
-    campo_telefone = ft.TextField(
-        label="Telefone",
-        value=dados["telefone"] if dados else "",
-        expand=True,
-    )
+    campo_telefone = _campo_telefone(valor=dados["telefone"] if dados else "", expand=True)
     campo_dia = ft.TextField(
         label="Dia da reunião",
         hint_text="Ex: Domingo",
@@ -7755,10 +7881,8 @@ def tela_ajustes(
         value=config["coordenador_discursos"],
         expand=True,
     )
-    campo_telefone = ft.TextField(
-        label="Telefone do coordenador",
-        value=config["telefone_coordenador"],
-        expand=True,
+    campo_telefone = _campo_telefone(
+        "Telefone do coordenador", config["telefone_coordenador"], expand=True
     )
     campo_dia = ft.TextField(
         label="Dia da reunião de fim de semana",
@@ -9120,6 +9244,8 @@ def abrir_dialog_gerenciar_presidentes(
 ) -> None:
     """Cadastro de presidentes: adicionar, editar, excluir e ordenar o rodízio."""
     estado_edicao: dict = {"id": None}
+    # Contato da agenda amarrado a quem está sendo editado no formulário.
+    vinculo_presidente: dict = {"contato_id": ""}
     cadastro: list[dict] = []
     lista_cadastro = ft.Column(
         spacing=8 if eh_mobile() else 0,
@@ -9132,10 +9258,8 @@ def abrir_dialog_gerenciar_presidentes(
     # No celular os campos vão empilhados em largura total: lado a lado o Flet
     # espremia o nome e quebrava os rótulos letra a letra.
     campo_nome = ft.TextField(label="Nome", expand=not eh_mobile())
-    campo_telefone = ft.TextField(
-        label="Telefone",
+    campo_telefone = _campo_telefone(
         hint_text="(11) 90000-0000",
-        keyboard_type=ft.KeyboardType.PHONE,
         expand=not eh_mobile(),
         width=None if eh_mobile() else 170,
     )
@@ -9155,6 +9279,7 @@ def abrir_dialog_gerenciar_presidentes(
         estado_edicao["id"] = None
         campo_nome.value = ""
         campo_telefone.value = ""
+        vinculo_presidente["contato_id"] = ""
         campo_categoria.value = "Ancião"
         botao_salvar.content = "Adicionar"
         botao_salvar.icon = ft.Icons.ADD
@@ -9187,7 +9312,8 @@ def abrir_dialog_gerenciar_presidentes(
             def editar(_=None, item=item):
                 estado_edicao["id"] = item["id"]
                 campo_nome.value = item["nome"]
-                campo_telefone.value = item.get("telefone", "")
+                campo_telefone.value = mascara_telefone(item.get("telefone", ""))
+                vinculo_presidente["contato_id"] = item.get("contato_id", "")
                 campo_categoria.value = item["categoria"]
                 botao_salvar.content = "Salvar"
                 botao_salvar.icon = ft.Icons.SAVE
@@ -9234,72 +9360,107 @@ def abrir_dialog_gerenciar_presidentes(
                 tooltip="Excluir (remove também as semanas atribuídas)",
                 on_click=excluir,
             )
-            posicao = ft.Text(
-                f"{indice + 1}º", size=fonte(12), color=TEXTO_SECUNDARIO, width=30
+            # Avatar com a posição do rodízio no cantinho: o número some do
+            # meio do texto e continua legível.
+            avatar = ft.Stack(
+                [
+                    _avatar_contato(item["nome"], item.get("contato_id", "")),
+                    ft.Container(
+                        content=ft.Text(
+                            f"{indice + 1}",
+                            size=fonte(9),
+                            weight=ft.FontWeight.W_700,
+                            color=FUNDO_APP,
+                        ),
+                        bgcolor=COR_DESTAQUE_CLARA,
+                        border_radius=8,
+                        width=16,
+                        height=16,
+                        alignment=ft.Alignment.CENTER,
+                        bottom=0,
+                        right=0,
+                    ),
+                ],
+                width=38,
+                height=38,
             )
-            detalhe = " · ".join(
-                parte for parte in (item["categoria"], item.get("telefone", "")) if parte
+            chip_privilegio = ft.Container(
+                content=ft.Text(
+                    "Ancião" if item["categoria"] == "Ancião" else "Servo",
+                    size=fonte(10),
+                    weight=ft.FontWeight.W_600,
+                    color=TEXTO_SECUNDARIO,
+                    no_wrap=True,
+                ),
+                bgcolor=ft.Colors.with_opacity(0.06, TEXTO_PRIMARIO),
+                border_radius=6,
+                padding=ft.Padding.symmetric(horizontal=7, vertical=2),
+            )
+            telefone_formatado = mascara_telefone(item.get("telefone", ""))
+            linha_telefone = ft.Row(
+                [
+                    chip_privilegio,
+                    ft.Text(
+                        telefone_formatado or "sem telefone",
+                        size=fonte(11),
+                        color=TEXTO_SECUNDARIO,
+                        italic=not telefone_formatado,
+                        expand=True,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+            identificacao = ft.Column(
+                [
+                    ft.Text(
+                        item["nome"],
+                        size=fonte(14),
+                        weight=ft.FontWeight.W_600,
+                        color=TEXTO_PRIMARIO,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    linha_telefone,
+                ],
+                spacing=3,
+                tight=True,
+                expand=True,
+            )
+            acoes = ft.Row(
+                [botao_subir, botao_descer, botao_editar, botao_excluir],
+                spacing=0,
+                tight=True,
             )
 
             if eh_mobile():
-                # Nome numa linha, privilégio/telefone e os 4 botões embaixo:
-                # em uma linha só as colunas ficavam com 1 letra de largura.
+                # Avatar + identificação em cima, ações embaixo à direita: numa
+                # linha só sobravam poucos pixels para o nome.
                 return ft.Container(
                     content=ft.Column(
                         [
                             ft.Row(
-                                [
-                                    posicao,
-                                    ft.Text(
-                                        item["nome"],
-                                        size=fonte(14),
-                                        expand=True,
-                                        max_lines=2,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                    ),
-                                ],
-                                spacing=4,
+                                [avatar, identificacao],
+                                spacing=10,
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
-                            ft.Row(
-                                [
-                                    ft.Text(
-                                        detalhe,
-                                        size=fonte(12),
-                                        color=TEXTO_SECUNDARIO,
-                                        expand=True,
-                                        max_lines=1,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                    ),
-                                    botao_subir,
-                                    botao_descer,
-                                    botao_editar,
-                                    botao_excluir,
-                                ],
-                                spacing=0,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
+                            ft.Row([acoes], alignment=ft.MainAxisAlignment.END),
                         ],
-                        spacing=2,
+                        spacing=0,
                         tight=True,
                     ),
-                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    padding=ft.Padding.only(left=10, right=4, top=8, bottom=0),
                     border=ft.Border.all(1, BORDA_SUAVE),
-                    border_radius=8,
+                    border_radius=10,
                 )
 
             return ft.Row(
                 [
-                    posicao,
-                    ft.Text(item["nome"], size=fonte(14), expand=True),
-                    ft.Text(
-                        detalhe, size=fonte(13), color=TEXTO_SECUNDARIO, width=220,
-                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                    botao_subir,
-                    botao_descer,
-                    botao_editar,
-                    botao_excluir,
+                    avatar,
+                    identificacao,
+                    acoes,
                 ],
                 spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -9322,6 +9483,7 @@ def abrir_dialog_gerenciar_presidentes(
                 campo_categoria.value or "Ancião",
                 cadastro_id=estado_edicao["id"],
                 telefone=(campo_telefone.value or "").strip(),
+                contato_id=vinculo_presidente["contato_id"],
             )
         except Exception:
             texto_erro.value = "Já existe um presidente com esse nome."
@@ -9339,7 +9501,9 @@ def abrir_dialog_gerenciar_presidentes(
         ao_fechar()
         page.update()
 
-    botao_contato = _botao_buscar_contato(page, campo_telefone, campo_nome)
+    botao_contato = _botao_buscar_contato(
+        page, campo_telefone, campo_nome, vinculo_presidente
+    )
     if eh_mobile():
         formulario = ft.Column(
             [campo_nome, campo_telefone, campo_categoria,
@@ -10303,6 +10467,8 @@ def main(page: ft.Page):
     page.update()
     navegar(0)
     _verificar_atualizacao(page)
+    # Quem trocou de número na agenda do celular chega aqui já atualizado.
+    sincronizar_contatos_vinculados(page, ao_terminar=recarregar)
     if backup_do_dia:
         _enviar_backup_nuvem_em_segundo_plano(page, backup_do_dia)
 
