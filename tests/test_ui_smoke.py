@@ -7,6 +7,7 @@ pega esse tipo de regressão. Só roda onde o Flet estiver instalado.
 """
 
 import types
+from datetime import date
 
 import pytest
 
@@ -111,15 +112,78 @@ def test_dialogos_de_presidentes_constroem(mobile):
             page,
             "31/10/2026",
             {"id": 1, "nome": "Fábio Moreira", "telefone": "11999998888"},
-            {
-                "orador_nome": "Carlos Menezes",
-                "congregacao_nome": "Jardim Maria Sampaio",
-                "tema_titulo": "Ande no caminho da integridade",
-                "tema_nr": 34,
-            },
+            orador="Carlos Menezes",
+            congregacao="Jardim Maria Sampaio",
+            tema="Ande no caminho da integridade",
         )
         # Sem nada programado na data o diálogo ainda precisa abrir (com aviso).
-        main.abrir_dialog_mensagem_presidencia(page, "31/10/2026", {"nome": "X"}, None)
+        main.abrir_dialog_mensagem_presidencia(page, "31/10/2026", {"nome": "X"})
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_semana_de_data_especial_nao_pede_presidente(mobile):
+    """Assembleia/congresso substituem a reunião: a linha mostra o evento.
+
+    Sem isso a aba Presidentes exibia um seletor vazio na semana da assembleia,
+    como se faltasse alguém — e o rodízio, que pula datas especiais, nunca ia
+    preenchê-lo.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        especial = {
+            "id": 7,
+            "data": "24/01/2026",
+            "tipo": "Assembleia",
+            "presidente_nome": "",
+        }
+        linha = main._linha_presidente_data_especial(
+            _page(), 2026, 1, "Sábado, 24/01", especial, None, lambda: None
+        )
+        assert linha is not None
+        # Presidente que sobrou de antes de a data virar especial: dá para tirar.
+        com_sobra = main._linha_presidente_data_especial(
+            _page(), 2026, 1, "Sábado, 24/01", especial,
+            {"nome": "Gustavo Prado"}, lambda: None,
+        )
+        assert com_sobra is not None
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_tela_inicial_manda_a_mensagem_da_presidencia(mobile):
+    """O botão da mensagem mora na tela inicial (saiu da aba Presidentes).
+
+    Só aparece com presidente definido: sem ele não há para quem mandar.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        data_ref = date(2026, 1, 31)
+        recebidos = {
+            "31/01/2026": {
+                "orador": "Carlos Menezes",
+                "tema_nr": 34,
+                "tema": "Ande no caminho da integridade",
+                "congregacao": "Jardim Maria Sampaio",
+            }
+        }
+        presidentes = {
+            "31/01/2026": {"nome": "Bruno Vidal", "telefone": "11999998888"}
+        }
+        chamadas = []
+        for com_presidente in (presidentes, {}):
+            assert main._linha_agenda_inicio(
+                data_ref, recebidos, com_presidente, {}, chamadas.append
+            ) is not None
+            assert main._card_proxima_reuniao(
+                data_ref, recebidos, com_presidente, {}, chamadas.append
+            ) is not None
     finally:
         armazenamento.definir_layout_mobile(False)
 

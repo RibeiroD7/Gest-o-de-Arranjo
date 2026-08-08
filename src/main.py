@@ -174,7 +174,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.11.1"
+VERSAO_APP = "1.12.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -1884,11 +1884,33 @@ def _linha_agenda_especial(data_ref: date, especial: dict) -> ft.Control:
     )
 
 
+def _botao_mensagem_presidencia(
+    on_mensagem: Callable[[date], None] | None,
+    data_ref: date,
+    tem_presidente: bool,
+) -> ft.Control | None:
+    """Botão que abre a mensagem da presidência daquela data (WhatsApp).
+
+    Só aparece com presidente definido — sem ele não há para quem mandar.
+    """
+    if not on_mensagem or not tem_presidente:
+        return None
+    return ft.IconButton(
+        icon=ft.Icons.CHAT_OUTLINED,
+        icon_size=fonte(18),
+        icon_color="#34D399",
+        tooltip="Mandar a mensagem da presidência (WhatsApp)",
+        style=ft.ButtonStyle(padding=4),
+        on_click=lambda e, d=data_ref: on_mensagem(d),
+    )
+
+
 def _linha_agenda_inicio(
     data_ref: date,
     recebidos: dict[str, dict],
     presidentes: dict[str, dict],
     especiais: dict[str, dict] | None = None,
+    on_mensagem: Callable[[date], None] | None = None,
 ) -> ft.Control:
     data_str = _formatar_data_arranjo(data_ref)
     especial = (especiais or {}).get(data_str)
@@ -1919,6 +1941,10 @@ def _linha_agenda_inicio(
         max_lines=1,
         no_wrap=True,
         overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    botao_mensagem = _botao_mensagem_presidencia(
+        on_mensagem, data_ref, bool(presidente)
     )
 
     if eh_mobile():
@@ -1955,6 +1981,7 @@ def _linha_agenda_inicio(
                     tight=True,
                     expand=True,
                 ),
+                *([botao_mensagem] if botao_mensagem else []),
             ],
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.START,
@@ -1982,6 +2009,7 @@ def _linha_agenda_inicio(
                 overflow=ft.TextOverflow.ELLIPSIS,
             ),
             texto_presidente,
+            *([botao_mensagem] if botao_mensagem else []),
         ],
         spacing=10,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -2059,6 +2087,7 @@ def _card_proxima_reuniao(
     recebidos: dict[str, dict],
     presidentes: dict[str, dict],
     especiais: dict[str, dict],
+    on_mensagem: Callable[[date], None] | None = None,
 ) -> ft.Container:
     """Card em destaque com os detalhes da próxima reunião de fim de semana."""
     data_str = _formatar_data_arranjo(data_ref)
@@ -2198,6 +2227,21 @@ def _card_proxima_reuniao(
             color=TEXTO_SECUNDARIO if rotulo_presidente else COR_ERRO,
         )
     )
+    # A mensagem da presidência é da reunião normal: numa assembleia/congresso
+    # não há o que anunciar, então o botão não aparece.
+    if on_mensagem and presidente and not especial:
+        detalhes.append(
+            ft.Row(
+                [
+                    ft.OutlinedButton(
+                        content="Mensagem da presidência",
+                        icon=ft.Icons.CHAT_OUTLINED,
+                        on_click=lambda e, d=data_ref: on_mensagem(d),
+                    )
+                ],
+                wrap=True,
+            )
+        )
 
     return ft.Container(
         content=ft.Row(
@@ -2349,14 +2393,31 @@ def tela_inicio(
     else:
         kpis = ft.Row(_cards_kpi, spacing=12)
 
+    def mensagem_presidencia(data_ref: date):
+        """Mensagem que o coordenador manda ao presidente daquela reunião."""
+        data_str = _formatar_data_arranjo(data_ref)
+        info = recebidos.get(data_str) or {}
+        abrir_dialog_mensagem_presidencia(
+            page,
+            data_str,
+            presidentes.get(data_str) or {},
+            orador=info.get("orador", ""),
+            congregacao=info.get("congregacao", ""),
+            tema=info.get("tema", ""),
+        )
+
     proximas = _proximas_datas_reuniao(5)
     card_destaque = (
-        _card_proxima_reuniao(proximas[0], recebidos, presidentes, especiais)
+        _card_proxima_reuniao(
+            proximas[0], recebidos, presidentes, especiais, mensagem_presidencia
+        )
         if proximas
         else None
     )
     linhas_agenda = [
-        _linha_agenda_inicio(data_ref, recebidos, presidentes, especiais)
+        _linha_agenda_inicio(
+            data_ref, recebidos, presidentes, especiais, mensagem_presidencia
+        )
         for data_ref in proximas[1:]
     ]
     card_agenda = ft.Container(
@@ -5447,12 +5508,14 @@ def abrir_dialog_mensagem_presidencia(
     page: ft.Page,
     data_str: str,
     presidente: dict,
-    registro_dia: dict | None,
+    orador: str = "",
+    congregacao: str = "",
+    tema: str = "",
 ) -> None:
     """Monta e envia ao presidente do dia a mensagem com os dados da reunião.
 
     O coordenador só digita o número do cântico — orador, congregação e tema
-    saem do que já está programado para a data.
+    chegam prontos de quem chama (o que já está programado para a data).
     """
     campo_cantico = ft.TextField(
         label="Número do cântico",
@@ -5463,11 +5526,6 @@ def abrir_dialog_mensagem_presidencia(
     )
     texto_cantico = ft.Text("", size=fonte(12), color=TEXTO_SECUNDARIO)
     previa = ft.Text("", size=fonte(13), color=TEXTO_PRIMARIO, selectable=True)
-
-    orador = (registro_dia or {}).get("orador_nome", "")
-    congregacao = (registro_dia or {}).get("congregacao_nome", "")
-    # No anúncio vale só o título do tema — o número do S-99 não entra.
-    tema = ((registro_dia or {}).get("tema_titulo") or "").strip()
 
     def mensagem_atual() -> str:
         return montar_mensagem_presidencia(
@@ -5521,7 +5579,7 @@ def abrir_dialog_mensagem_presidencia(
         size=fonte(12),
         color=COR_AVISO,
         italic=True,
-        visible=not registro_dia,
+        visible=not orador.strip(),
     )
 
     page.show_dialog(
@@ -5577,6 +5635,114 @@ def abrir_dialog_mensagem_presidencia(
         )
     )
     page.update()
+
+
+def _linha_presidente_data_especial(
+    page: ft.Page,
+    ano: int,
+    mes: int,
+    rotulo_data: str,
+    especial: dict,
+    presidente_solto: dict | None,
+    atualizar: Callable[[], None],
+) -> ft.Control:
+    """Semana tomada por um evento especial: não pede presidente.
+
+    Assembleia, congresso e afins substituem a reunião normal, então cobrar um
+    presidente aqui é falso alarme — a linha mostra o evento em vez do seletor.
+    Se o evento tiver presidente (visita do superintendente, por exemplo), ele
+    é definido no cadastro da própria data especial, e não em dois lugares.
+    """
+    nome_presidente = (especial.get("presidente_nome") or "").strip()
+    chip = ft.Container(
+        content=ft.Text(
+            especial.get("tipo") or "Data especial",
+            size=fonte(12),
+            weight=ft.FontWeight.W_600,
+            color=COR_AVISO,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.13, COR_AVISO),
+        border_radius=8,
+        padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+    )
+    situacao = ft.Text(
+        f"Presidente: {nome_presidente}" if nome_presidente else "Sem presidente",
+        size=fonte(12),
+        color=TEXTO_SECUNDARIO,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    def editar(_=None):
+        abrir_dialog_data_especial(page, ano, mes, atualizar, especial)
+
+    botao_editar = ft.IconButton(
+        icon=ft.Icons.EDIT_OUTLINED,
+        icon_size=fonte(18),
+        icon_color=COR_DESTAQUE,
+        tooltip="Editar a data especial",
+        on_click=editar,
+    )
+
+    # Sobra de quando a data ainda não era especial: um presidente designado
+    # aqui continuaria contando no rodízio. Oferece limpar.
+    def limpar_sobra(_=None):
+        excluir_presidente(especial["data"])
+        atualizar()
+
+    acoes = [botao_editar]
+    if presidente_solto:
+        situacao.value = (
+            f"Presidente avulso: {presidente_solto['nome']} — a data virou especial"
+        )
+        situacao.color = COR_AVISO
+        acoes.insert(
+            0,
+            ft.IconButton(
+                icon=ft.Icons.DELETE_OUTLINE,
+                icon_size=fonte(18),
+                icon_color=COR_ERRO,
+                tooltip="Tirar o presidente desta data",
+                on_click=limpar_sobra,
+            ),
+        )
+
+    conteudo_texto = ft.Column(
+        [ft.Text(rotulo_data, size=fonte(13), weight=ft.FontWeight.W_600), situacao],
+        spacing=2,
+        tight=True,
+        expand=True,
+    )
+    if eh_mobile():
+        corpo = ft.Column(
+            [
+                ft.Row([conteudo_texto], spacing=8),
+                ft.Row(
+                    [ft.Container(content=chip, expand=True,
+                                  alignment=ft.Alignment.CENTER_LEFT), *acoes],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=4,
+            tight=True,
+        )
+    else:
+        corpo = ft.Row(
+            [ft.Container(content=conteudo_texto, width=260), chip,
+             ft.Container(expand=True), *acoes],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    return ft.Container(
+        content=corpo,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.35, COR_AVISO)),
+        border_radius=8,
+    )
 
 
 def abrir_dialog_trocar_data(
@@ -5752,7 +5918,7 @@ def abrir_dialog_oradores_mes(
             on_status=alterar_status,
             on_mover=mover_data,
         )
-        preencher_presidentes(recebidos)
+        preencher_presidentes()
         preencher_especiais()
 
     def preencher_especiais():
@@ -5900,17 +6066,13 @@ def abrir_dialog_oradores_mes(
 
         lista_especiais.controls = [linha_especial(registro) for registro in do_mes]
 
-    def preencher_presidentes(recebidos: list[dict] | None = None):
+    def preencher_presidentes():
         datas = _semanas_reuniao_mes(ano, mes)
         presidentes = carregar_presidentes_por_ano(ano)
         cadastro = listar_presidentes_cadastro()
-        # O que já está programado em cada data, para a mensagem da presidência.
-        if recebidos is None:
-            recebidos = [
-                r for r in carregar_oradores_arranjo(arranjo_id) if r["tipo"] == "recebido"
-            ]
-        recebido_por_data = {r["data"]: r for r in recebidos if r.get("data")}
-        cadastro_por_id = {item["id"]: item for item in cadastro}
+        # Assembleia, congresso, visita…: a semana existe, mas não é a reunião
+        # normal, então não cobra presidente aqui (quem cuida é a aba Especiais).
+        especiais_mes = listar_datas_especiais_por_ano(ano)
 
         if not cadastro:
             lista_presidentes.controls = [
@@ -5932,6 +6094,19 @@ def abrir_dialog_oradores_mes(
         for data_ref in datas:
             data_str = _formatar_data_arranjo(data_ref)
             atual = presidentes.get(data_str)
+            rotulo_data_texto = (
+                f"{_rotulo_weekday(data_ref.weekday())}, "
+                f"{data_ref.day:02d}/{data_ref.month:02d}"
+            )
+            especial = especiais_mes.get(data_str)
+            if especial:
+                linhas.append(
+                    _linha_presidente_data_especial(
+                        page, ano, mes, rotulo_data_texto, especial,
+                        atual, atualizar_listas,
+                    )
+                )
+                continue
             campo = ft.Dropdown(
                 label="Presidente",
                 options=opcoes,
@@ -5953,8 +6128,7 @@ def abrir_dialog_oradores_mes(
                 page.update()
 
             rotulo_data = ft.Text(
-                f"{_rotulo_weekday(data_ref.weekday())}, "
-                f"{data_ref.day:02d}/{data_ref.month:02d}",
+                rotulo_data_texto,
                 size=fonte(13),
                 weight=ft.FontWeight.W_600,
             )
@@ -5965,29 +6139,6 @@ def abrir_dialog_oradores_mes(
                 tooltip="Remover presidente desta data",
                 on_click=ao_remover,
             )
-
-            def ao_enviar_presidencia(e, data_ref=data_str, campo=campo):
-                if not campo.value:
-                    mostrar_aviso(
-                        page,
-                        "Sem presidente",
-                        "Escolha o presidente desta data antes de enviar a mensagem.",
-                    )
-                    return
-                abrir_dialog_mensagem_presidencia(
-                    page,
-                    data_ref,
-                    cadastro_por_id.get(int(campo.value), {}),
-                    recebido_por_data.get(data_ref),
-                )
-
-            botao_mensagem = ft.IconButton(
-                icon=ft.Icons.CHAT_OUTLINED,
-                icon_size=fonte(18),
-                icon_color="#34D399",
-                tooltip="Mandar a mensagem da presidência (WhatsApp)",
-                on_click=ao_enviar_presidencia,
-            )
             if eh_mobile():
                 # Data em cima, dropdown em largura total embaixo — com a
                 # data ao lado o dropdown ficava estreito demais para o nome.
@@ -5996,8 +6147,8 @@ def abrir_dialog_oradores_mes(
                         [
                             rotulo_data,
                             ft.Row(
-                                [campo, botao_mensagem, botao_remover],
-                                spacing=0,
+                                [campo, botao_remover],
+                                spacing=4,
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
                         ],
@@ -6011,7 +6162,6 @@ def abrir_dialog_oradores_mes(
                         [
                             ft.Container(content=rotulo_data, width=170),
                             campo,
-                            botao_mensagem,
                             botao_remover,
                         ],
                         spacing=12,
@@ -6200,7 +6350,8 @@ def abrir_dialog_oradores_mes(
     secao_presidentes = ft.Column(
         [
             _cabecalho_secao_desc(
-                "Quem preside a reunião de fim de semana em cada data",
+                "Quem preside a reunião de fim de semana em cada data. "
+                "Datas especiais não pedem presidente.",
                 ft.TextButton(
                     content="Refazer",
                     icon=ft.Icons.RESTART_ALT,

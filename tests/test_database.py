@@ -228,3 +228,48 @@ class TestTelefoneDoPresidente:
         database.salvar_presidente_cadastro("Sem Telefone", "Ancião")
         (item,) = database.listar_presidentes_cadastro()
         assert item["telefone"] == ""
+
+
+class TestDadosDaMensagemDaPresidencia:
+    """A tela inicial monta a mensagem com o que estes dois carregadores trazem."""
+
+    def test_recebido_traz_a_congregacao_do_orador(self):
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Jardim Maria Sampaio')")
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+            conn.execute(
+                "INSERT INTO oradores (nome, categoria, congregacao_id) VALUES (?,?,?)",
+                ("Carlos Menezes", "Ancião", cong),
+            )
+            orador = conn.execute("SELECT id FROM oradores").fetchone()[0]
+            conn.execute("INSERT INTO temas (nr, titulo) VALUES (34, 'Ande em integridade')")
+            conn.execute("INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026,1,1)")
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        database.adicionar_orador_arranjo(
+            arranjo, "recebido", orador, 34, congregacao_id=cong, data="31/01/2026"
+        )
+        registro = database.carregar_recebidos_por_ano(2026)["31/01/2026"]
+        assert registro["congregacao"] == "Jardim Maria Sampaio"
+        assert registro["orador"] == "Carlos Menezes"
+
+    def test_presidente_do_ano_traz_o_telefone(self):
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+        pid = database.salvar_presidente_cadastro(
+            "Bruno Vidal", "Ancião", telefone="11999998888"
+        )
+        database.salvar_presidente("31/01/2026", pid)
+        assert database.carregar_presidentes_por_ano(2026)["31/01/2026"]["telefone"] == (
+            "11999998888"
+        )

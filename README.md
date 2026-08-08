@@ -50,9 +50,13 @@ uma planilha (veja abaixo).
   geração de imagem individual da designação (modelo pronto para enviar ao
   orador pelo WhatsApp).
 - **Presidentes** — cadastro de quem pode presidir (nome, telefone e
-  privilégio) e atribuição semana a semana, por ano e mês. Na aba
-  **Presidentes** de cada mês, o botão de WhatsApp monta a **mensagem da
-  presidência** daquele dia: você digita só o número do cântico e o app
+  privilégio) e atribuição semana a semana, por ano e mês. Semanas tomadas por
+  uma **data especial** (assembleia, congresso, visita) não pedem presidente:
+  a linha mostra o evento no lugar do seletor, e o rodízio automático já as
+  pula.
+- **Mensagem da presidência** — na **tela inicial**, tanto no card da próxima
+  reunião quanto nas semanas seguintes, o botão de WhatsApp monta a mensagem
+  para o presidente daquele dia: você digita só o número do cântico e o app
   completa com o título e o texto bíblico (catálogo do *Cante de Coração para
   Jeová*, em [`src/canticos.py`](src/canticos.py)), mais o orador, a
   congregação dele e o tema já programados.

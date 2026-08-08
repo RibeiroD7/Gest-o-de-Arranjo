@@ -952,16 +952,24 @@ def carregar_recebidos_por_ano(ano: int) -> dict[str, dict]:
             SELECT ao.data,
                    COALESCE(o.nome, '') AS orador,
                    ao.tema_nr,
-                   COALESCE(t.titulo, '') AS tema
+                   COALESCE(t.titulo, '') AS tema,
+                   COALESCE(c.nome, '') AS congregacao
             FROM arranjo_oradores ao
             JOIN oradores o ON ao.orador_id = o.id
             LEFT JOIN temas t ON ao.tema_nr = t.nr
+            LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
             WHERE ao.tipo = 'recebido' AND substr(ao.data, 7, 4) = ?
             """,
             (str(ano),),
         ).fetchall()
         return {
-            linha[0]: {"orador": linha[1], "tema_nr": linha[2], "tema": linha[3]}
+            linha[0]: {
+                "orador": linha[1],
+                "tema_nr": linha[2],
+                "tema": linha[3],
+                # De onde o orador vem — vai na mensagem da presidência.
+                "congregacao": linha[4],
+            }
             for linha in linhas
         }
     finally:
@@ -1310,7 +1318,8 @@ def carregar_presidentes_por_ano(ano: int) -> dict[str, dict]:
     try:
         linhas = conn.execute(
             """
-            SELECT p.id, p.data, p.presidente_id, COALESCE(c.nome, '') AS nome
+            SELECT p.id, p.data, p.presidente_id, COALESCE(c.nome, '') AS nome,
+                   COALESCE(c.telefone, '') AS telefone
             FROM presidentes p
             JOIN presidentes_cadastro c ON p.presidente_id = c.id
             WHERE substr(p.data, 7, 4) = ?
@@ -1318,7 +1327,14 @@ def carregar_presidentes_por_ano(ano: int) -> dict[str, dict]:
             (str(ano),),
         ).fetchall()
         return {
-            linha[1]: {"id": linha[0], "data": linha[1], "presidente_id": linha[2], "nome": linha[3]}
+            linha[1]: {
+                "id": linha[0],
+                "data": linha[1],
+                "presidente_id": linha[2],
+                "nome": linha[3],
+                # Destino da mensagem da presidência enviada da tela inicial.
+                "telefone": linha[4],
+            }
             for linha in linhas
         }
     finally:
