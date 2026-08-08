@@ -314,33 +314,6 @@ class TestRelatorios:
         linhas = database.relatorio_presidencias(2026)
         assert [(item["nome"], item["quantidade"]) for item in linhas] == [("Só em 2025", 0)]
 
-    def test_intercambio_separa_recebidos_de_enviados(self):
-        _resetar_banco()
-        conn = get_connection()
-        try:
-            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Vila Progresso')")
-            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
-            conn.execute(
-                "INSERT INTO oradores (nome, categoria, congregacao_id) VALUES (?,?,?)",
-                ("Fulano", "Ancião", cong),
-            )
-            orador = conn.execute("SELECT id FROM oradores").fetchone()[0]
-            conn.execute("INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026,5,5)")
-            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
-            conn.commit()
-        finally:
-            conn.close()
-        database.adicionar_orador_arranjo(
-            arranjo, "recebido", orador, None, congregacao_id=cong, data="09/05/2026"
-        )
-        database.adicionar_orador_arranjo(
-            arranjo, "enviado", orador, None, congregacao_id=cong, data="02/05/2026"
-        )
-        (linha,) = database.relatorio_intercambio_congregacoes(2026)
-        assert linha["congregacao"] == "Vila Progresso"
-        assert (linha["recebidos"], linha["enviados"]) == (1, 1)
-        assert linha["ultima_data"] == "09/05/2026"
-
     def test_conflitos_do_ano_trazem_o_tipo(self):
         """Sem o tipo, o par recebido+enviado do orador local viraria conflito."""
         _resetar_banco()

@@ -73,7 +73,7 @@ def _quadro_resumo(resumo: dict) -> list[list[str]]:
 def gerar_pdf_relatorios(
     frequencia_oradores: list[dict],
     presidencias: list[dict],
-    intercambio: list[dict],
+    meses: list[dict],
     resumo: dict | None = None,
     titulo: str = "Relatórios — Gestão de Arranjo",
     subtitulo: str = "",
@@ -168,28 +168,29 @@ def gerar_pdf_relatorios(
             elementos.append(Paragraph("Nenhum presidente cadastrado.", estilo_info))
 
         elementos.append(Spacer(1, 6))
-        elementos.append(Paragraph("Troca com as congregações", estilo_sub))
+        elementos.append(Paragraph("Mês a mês", estilo_sub))
         elementos.append(
             Paragraph(
-                "Discursos que vieram de cada congregação e os que mandamos para lá.",
+                "Onde estão os buracos: semanas com orador e com presidente em "
+                "cada mês já montado.",
                 estilo_info,
             )
         )
-        if intercambio:
+        if meses:
             linhas = [
                 [
-                    c.get("congregacao", ""),
-                    str(c.get("recebidos", 0)),
-                    str(c.get("enviados", 0)),
-                    c.get("ultima_data") or "—",
+                    m.get("nome", ""),
+                    str(m.get("semanas", 0)),
+                    f"{m.get('cobertas', 0)} de {m.get('semanas', 0)}",
+                    f"{m.get('presidentes', 0)} de {m.get('semanas', 0)}",
                 ]
-                for c in intercambio
+                for m in meses
             ]
             elementos.append(
                 _tabela(
-                    ["Congregação", "Recebidos", "Enviados", "Último"],
+                    ["Mês", "Semanas", "Com orador", "Com presidente"],
                     linhas,
-                    [220, 80, 80, 90],
+                    [180, 70, 110, 110],
                 )
             )
         else:

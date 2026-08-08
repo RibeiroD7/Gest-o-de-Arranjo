@@ -15,6 +15,7 @@ import sys
 import time
 import webbrowser
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Callable
 
 import flet as ft
@@ -29,6 +30,7 @@ from armazenamento import (
     garantir_pastas,
 )
 from canticos import rotulo_cantico, titulo_cantico
+from contatos import Contato, filtrar_contatos, ler_vcard
 from database import (
     adicionar_ano_coluna,
     adicionar_ano_planejamento,
@@ -74,7 +76,6 @@ from database import (
     listar_tipos_evento,
     oradores_com_temas_da_congregacao,
     relatorio_frequencia_oradores,
-    relatorio_intercambio_congregacoes,
     relatorio_presidencias,
     remover_orador_arranjo,
     restaurar_backup,
@@ -177,7 +178,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.14.0"
+VERSAO_APP = "1.15.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -1280,6 +1281,164 @@ def criar_tela_padrao(
 # Formulário de oradores
 # ---------------------------------------------------------------------------
 
+# Agenda lida do .vcf, guardada só enquanto o app está aberto: assim o
+# coordenador escolhe o arquivo uma vez e associa vários nomes na sequência,
+# sem que a agenda dele fique gravada em lugar nenhum.
+_contatos_da_sessao: list[Contato] = []
+
+
+def _botao_buscar_contato(
+    page: ft.Page, campo_telefone: ft.TextField, campo_nome: ft.TextField | None = None
+) -> ft.Control:
+    """Botão que associa a pessoa a um contato do celular (arquivo .vcf).
+
+    O Flet não abre a agenda do aparelho — não existe serviço de contatos, e
+    fazer isso exigiria um plugin nativo. O caminho que funciona com o que o
+    app tem é o arquivo que o próprio celular exporta (Contatos → Exportar):
+    o app lê, mostra a lista e preenche o telefone com o contato escolhido.
+    """
+
+    def escolher(contato: Contato):
+        campo_telefone.value = contato.telefone
+        if campo_nome is not None and not (campo_nome.value or "").strip():
+            campo_nome.value = contato.nome
+        page.update()
+
+    return ft.TextButton(
+        content="Buscar nos contatos",
+        icon=ft.Icons.CONTACT_PHONE_OUTLINED,
+        tooltip="Preencher o telefone a partir da agenda exportada do celular",
+        on_click=lambda _: abrir_dialog_escolher_contato(page, escolher),
+    )
+
+
+def abrir_dialog_escolher_contato(
+    page: ft.Page, ao_escolher: Callable[[Contato], None]
+) -> None:
+    """Lista os contatos do .vcf para o usuário escolher um."""
+    campo_busca = ft.TextField(
+        label="Buscar por nome ou número",
+        prefix_icon=ft.Icons.SEARCH,
+        expand=True,
+    )
+    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=280)
+    aviso = ft.Text("", size=fonte(12), color=TEXTO_SECUNDARIO)
+
+    def fechar(_=None):
+        page.pop_dialog()
+
+    def preencher(_=None):
+        encontrados = filtrar_contatos(_contatos_da_sessao, campo_busca.value or "")
+        aviso.value = (
+            f"{len(encontrados)} de {len(_contatos_da_sessao)} contato(s)"
+            if _contatos_da_sessao
+            else ""
+        )
+        if not _contatos_da_sessao:
+            lista.controls = [
+                ft.Text(
+                    "Nenhuma agenda carregada ainda. Exporte seus contatos no "
+                    "celular (Contatos → Configurações → Exportar) e abra o "
+                    "arquivo .vcf aqui.",
+                    size=fonte(13),
+                    color=TEXTO_SECUNDARIO,
+                    italic=True,
+                )
+            ]
+        elif not encontrados:
+            lista.controls = [
+                ft.Text("Nenhum contato com esse nome ou número.",
+                        size=fonte(13), color=TEXTO_SECUNDARIO, italic=True)
+            ]
+        else:
+            lista.controls = [
+                ft.ListTile(
+                    dense=True,
+                    leading=ft.Icon(ft.Icons.PERSON_OUTLINE, size=fonte(18),
+                                    color=COR_DESTAQUE),
+                    title=ft.Text(contato.nome, size=fonte(13)),
+                    subtitle=ft.Text(" · ".join(contato.telefones), size=fonte(12)),
+                    on_click=lambda e, c=contato: (fechar(), ao_escolher(c)),
+                )
+                for contato in encontrados[:300]
+            ]
+        page.update()
+
+    campo_busca.on_change = preencher
+
+    async def carregar_arquivo(_=None):
+        picker = _file_picker_global
+        if picker is None:
+            mostrar_aviso(page, "Indisponível", "Seletor de arquivos indisponível.")
+            return
+        arquivos = await picker.pick_files(
+            dialog_title="Selecione o arquivo de contatos (.vcf)",
+            allowed_extensions=["vcf", "vcard"],
+            allow_multiple=False,
+        )
+        if not arquivos:
+            return
+        try:
+            texto = Path(arquivos[0].path).read_text(encoding="utf-8", errors="replace")
+            lidos = ler_vcard(texto)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao ler o arquivo de contatos")
+            mostrar_aviso(page, "Não foi possível ler", f"Detalhes: {exc}")
+            return
+        if not lidos:
+            mostrar_aviso(
+                page,
+                "Nenhum contato com telefone",
+                "O arquivo foi lido, mas não tem contatos com número.",
+            )
+            return
+        _contatos_da_sessao.clear()
+        _contatos_da_sessao.extend(lidos)
+        preencher()
+
+    preencher()
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Contatos do celular"),
+            content=ft.Container(
+                width=_largura_dialog(page, 460),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Exporte a agenda no celular (Contatos → "
+                            "Configurações → Exportar) e abra o arquivo .vcf "
+                            "aqui. Só o número escolhido é salvo.",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                        ),
+                        ft.Container(height=8),
+                        ft.Row(
+                            [
+                                ft.OutlinedButton(
+                                    content="Abrir arquivo .vcf",
+                                    icon=ft.Icons.UPLOAD_FILE,
+                                    on_click=lambda _: page.run_task(carregar_arquivo),
+                                )
+                            ],
+                            wrap=True,
+                        ),
+                        ft.Container(height=8),
+                        campo_busca,
+                        aviso,
+                        lista,
+                    ],
+                    spacing=4,
+                    tight=True,
+                ),
+            ),
+            actions=[ft.TextButton("Fechar", on_click=fechar)],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def abrir_dialog_orador(
     page: ft.Page,
     recarregar: Callable[[], None],
@@ -1450,6 +1609,10 @@ def abrir_dialog_orador(
                 [
                     campo_nome,
                     campo_telefone,
+                    ft.Row(
+                        [_botao_buscar_contato(page, campo_telefone, campo_nome)],
+                        alignment=ft.MainAxisAlignment.END,
+                    ),
                     linha_campos(campo_categoria, campo_congregacao),
                     campo_observacoes,
                     texto_erro,
@@ -7099,71 +7262,37 @@ def _barra_proporcao(valor: int, total: int, cor: str, largura: int = 90) -> ft.
     )
 
 
-def _tabela_relatorio(
-    titulo: str,
-    descricao: str,
-    colunas: list[tuple[str, int | None]],
-    linhas: list[list[ft.Control | str]],
-    vazio: str,
-) -> ft.Container:
-    """Quadro do relatório: título, explicação e uma tabela enxuta.
+def _largura_conteudo_relatorio(page: ft.Page) -> int:
+    """Largura útil de um quadro do relatório, já descontado o padding do card.
 
-    ``colunas`` são pares ``(rótulo, largura)``; largura ``None`` ocupa o
-    espaço que sobra. As células aceitam texto ou controle pronto (a barrinha).
+    As colunas do relatório recebem largura EXPLÍCITA a partir daqui. Usar
+    ``expand`` fazia a coluna do nome nascer com zero de largura — dentro de
+    uma coluna rolável a sobra é zero, então o nome simplesmente sumia da tela.
     """
-    def celula(valor, largura, cabecalho=False):
-        if isinstance(valor, ft.Control):
-            return ft.Container(content=valor, width=largura, expand=largura is None)
-        return ft.Text(
-            str(valor),
-            size=fonte(12) if cabecalho else fonte(13),
-            weight=ft.FontWeight.W_700 if cabecalho else ft.FontWeight.W_400,
-            color=TEXTO_SECUNDARIO if cabecalho else TEXTO_PRIMARIO,
-            width=largura,
-            expand=largura is None,
-            max_lines=1,
-            overflow=ft.TextOverflow.ELLIPSIS,
-        )
+    base = _largura_dialog(page, 720)
+    return max(220, base - (32 if eh_mobile() else 40))
 
-    cabecalho = ft.Container(
-        content=ft.Row(
-            [celula(rotulo, largura, cabecalho=True) for rotulo, largura in colunas],
-            spacing=10,
+
+def _barra_proporcao(valor: int, total: int, cor: str, largura: int = 90) -> ft.Control:
+    """Barrinha proporcional — dá a leitura do ranking sem ler os números."""
+    fracao = (valor / total) if total else 0
+    return ft.Container(
+        content=ft.Container(
+            bgcolor=cor,
+            border_radius=4,
+            height=6,
+            width=max(3, round(largura * fracao)) if valor else 0,
         ),
-        bgcolor=ft.Colors.with_opacity(0.06, COR_DESTAQUE),
-        padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        bgcolor=ft.Colors.with_opacity(0.10, cor),
+        border_radius=4,
+        height=6,
+        width=largura,
+        alignment=ft.Alignment.CENTER_LEFT,
     )
-    corpo = [
-        ft.Container(
-            content=ft.Row(
-                [
-                    celula(valor, largura)
-                    for valor, (_rotulo, largura) in zip(linha, colunas)
-                ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=9),
-            border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE))
-            if indice < len(linhas) - 1
-            else None,
-        )
-        for indice, linha in enumerate(linhas)
-    ]
-    if not corpo:
-        corpo = [
-            ft.Container(
-                content=ft.Text(vazio, size=fonte(13), color=TEXTO_SECUNDARIO, italic=True),
-                padding=ft.Padding.symmetric(horizontal=14, vertical=12),
-            )
-        ]
 
-    tabela = ft.Container(
-        content=ft.Column([cabecalho, *corpo], spacing=0, tight=True),
-        border=ft.Border.all(1, BORDA_SUAVE),
-        border_radius=10,
-        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-    )
+
+def _quadro_relatorio(titulo: str, descricao: str, corpo: list[ft.Control]) -> ft.Container:
+    """Card padrão do relatório: título, uma linha de explicação e o conteúdo."""
     return ft.Container(
         content=ft.Column(
             [
@@ -7171,7 +7300,7 @@ def _tabela_relatorio(
                         color=TEXTO_PRIMARIO),
                 ft.Text(descricao, size=fonte(12), color=TEXTO_SECUNDARIO),
                 ft.Container(height=10),
-                tabela,
+                *corpo,
             ],
             spacing=2,
             tight=True,
@@ -7184,13 +7313,164 @@ def _tabela_relatorio(
     )
 
 
+def _lista_ranking_relatorio(
+    itens: list[dict],
+    largura: int,
+    cor: str,
+    vazio: str,
+) -> list[ft.Control]:
+    """Ranking nome + número + barra + detalhe, em larguras fixas.
+
+    ``itens``: ``[{nome, valor, detalhe}]``. No celular a linha é empilhada
+    (nome e número em cima, barra e detalhe embaixo) porque lado a lado sobram
+    poucos pixels para o nome.
+    """
+    if not itens:
+        return [ft.Text(vazio, size=fonte(13), color=TEXTO_SECUNDARIO, italic=True)]
+
+    maior = max((int(item["valor"]) for item in itens), default=0)
+    mobile = eh_mobile()
+    largura_valor = 44
+    largura_detalhe = 96 if mobile else 104
+    if mobile:
+        largura_nome = max(80, largura - largura_valor - 10)
+        largura_barra = max(40, largura - largura_detalhe - 10)
+    else:
+        largura_barra = 140
+        largura_nome = max(
+            120, largura - largura_valor - largura_barra - largura_detalhe - 36
+        )
+
+    def linha(item: dict, ultima: bool) -> ft.Control:
+        nome = ft.Text(
+            item["nome"], size=fonte(13), color=TEXTO_PRIMARIO,
+            weight=ft.FontWeight.W_500, width=largura_nome,
+            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        valor = ft.Text(
+            str(item["valor"]), size=fonte(14), weight=ft.FontWeight.W_700,
+            color=cor, width=largura_valor, text_align=ft.TextAlign.RIGHT,
+        )
+        detalhe = ft.Text(
+            item["detalhe"], size=fonte(11), color=TEXTO_SECUNDARIO,
+            width=largura_detalhe, text_align=ft.TextAlign.RIGHT,
+            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        barra = _barra_proporcao(int(item["valor"]), maior, cor, largura_barra)
+
+        if mobile:
+            conteudo = ft.Column(
+                [
+                    ft.Row([nome, valor], spacing=10,
+                           vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ft.Row([barra, detalhe], spacing=10,
+                           vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                ],
+                spacing=5,
+                tight=True,
+            )
+        else:
+            conteudo = ft.Row(
+                [nome, valor, barra, detalhe],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        return ft.Container(
+            content=conteudo,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=9),
+            border=None if ultima else ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+        )
+
+    return [
+        ft.Container(
+            content=ft.Column(
+                [linha(item, indice == len(itens) - 1) for indice, item in enumerate(itens)],
+                spacing=0,
+                tight=True,
+            ),
+            border=ft.Border.all(1, BORDA_SUAVE),
+            border_radius=10,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+    ]
+
+
+def _lista_meses_relatorio(meses: list[dict], largura: int) -> list[ft.Control]:
+    """Mês a mês: onde estão os buracos de orador e de presidente.
+
+    Cada mês vira uma faixa com dois selos (orador / presidente) que ficam
+    verdes quando a cobertura está completa e âmbar quando falta alguém.
+    """
+    if not meses:
+        return [
+            ft.Text(
+                "Nenhum arranjo cadastrado neste ano.",
+                size=fonte(13), color=TEXTO_SECUNDARIO, italic=True,
+            )
+        ]
+
+    def selo(rotulo: str, feito: int, total: int) -> ft.Control:
+        completo = total and feito >= total
+        cor = COR_SUCESSO if completo else COR_AVISO
+        return ft.Container(
+            content=ft.Text(
+                f"{rotulo} {feito}/{total}",
+                size=fonte(11), weight=ft.FontWeight.W_600, color=cor, no_wrap=True,
+            ),
+            bgcolor=ft.Colors.with_opacity(0.12, cor),
+            border_radius=6,
+            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+        )
+
+    largura_mes = 92 if eh_mobile() else 130
+
+    def linha(mes: dict, ultima: bool) -> ft.Control:
+        selos = ft.Row(
+            [
+                selo("Orador", mes["cobertas"], mes["semanas"]),
+                selo("Pres.", mes["presidentes"], mes["semanas"]),
+            ],
+            spacing=6,
+        )
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text(
+                        mes["nome"], size=fonte(13), weight=ft.FontWeight.W_600,
+                        color=TEXTO_PRIMARIO, width=largura_mes,
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Container(content=selos, width=max(120, largura - largura_mes - 34)),
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=9),
+            border=None if ultima else ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+        )
+
+    return [
+        ft.Container(
+            content=ft.Column(
+                [linha(mes, indice == len(meses) - 1) for indice, mes in enumerate(meses)],
+                spacing=0,
+                tight=True,
+            ),
+            border=ft.Border.all(1, BORDA_SUAVE),
+            border_radius=10,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+    ]
+
+
 def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     """Painel com o retrato do arranjo: o que só aparece somando o ano inteiro.
 
     Fica dentro do app (o PDF virou só uma opção de exportação): números do
-    ano, quem está discursando e presidindo de menos, e como está a troca com
-    cada congregação.
+    ano, quem está discursando e presidindo de menos, e o mês a mês da
+    cobertura.
     """
+    _ = recarregar
     anos = listar_anos_arranjos() or [date.today().year]
     ano_atual = date.today().year
     estado_rel = {"ano": ano_atual if ano_atual in anos else anos[0]}
@@ -7201,7 +7481,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         presidentes = carregar_presidentes_por_ano(ano)
         especiais = listar_datas_especiais_por_ano(ano)
         contagens = contar_designacoes_por_mes(ano)
-        arranjos = {a["mes_inicio"] for a in carregar_arranjos_por_ano(ano)}
+        arranjos = sorted({a["mes_inicio"] for a in carregar_arranjos_por_ano(ano)})
 
         resumo = {
             "semanas": 0, "cobertas": 0, "presidentes": 0,
@@ -7212,20 +7492,22 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         }
         # Só os meses com arranjo cadastrado: mês sem arranjo é planejamento
         # futuro, não buraco na programação.
+        por_mes = []
         for mes_ref in arranjos:
             parcial = _resumo_mes_programacao(
                 ano, mes_ref, recebidos, presidentes, contagens, especiais
             )
             for chave in ("semanas", "cobertas", "presidentes", "recebidos", "enviados"):
                 resumo[chave] += parcial[chave]
+            por_mes.append({"nome": NOMES_MESES[mes_ref], **parcial})
 
         return {
             "resumo": resumo,
+            "meses": por_mes,
             "frequencia": relatorio_frequencia_oradores(
                 int(minha_cong) if minha_cong else None
             ),
             "presidencias": relatorio_presidencias(),
-            "intercambio": relatorio_intercambio_congregacoes(ano),
         }
 
     area = ft.Column(spacing=16, tight=True)
@@ -7241,7 +7523,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 lambda: gerar_pdf_relatorios(
                     dados["frequencia"],
                     dados["presidencias"],
-                    dados["intercambio"],
+                    dados["meses"],
                     dados["resumo"],
                     subtitulo=(
                         f"{config.get('nome_congregacao') or 'Minha congregação'} · {ano}"
@@ -7259,6 +7541,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
 
     def montar():
         ano = estado_rel["ano"]
+        largura = _largura_conteudo_relatorio(page)
         dados = dados_do_ano(ano)
         resumo = dados["resumo"]
         semanas = resumo["semanas"]
@@ -7304,71 +7587,48 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         else:
             grade = ft.Row(cartoes, spacing=12)
 
-        # Frequência: barra proporcional ao maior número da coluna.
-        freq = dados["frequencia"]
-        max_discursos = max((o["quantidade"] for o in freq), default=0)
-        linhas_freq = [
-            [
-                o["nome"],
-                str(o["quantidade"]),
-                _barra_proporcao(o["quantidade"], max_discursos, COR_DESTAQUE_CLARA),
-                o["ultima_data"] or "nunca",
-            ]
-            for o in freq
+        itens_freq = [
+            {
+                "nome": o["nome"],
+                "valor": o["quantidade"],
+                "detalhe": o["ultima_data"] or "nunca",
+            }
+            for o in dados["frequencia"]
+        ]
+        itens_pres = [
+            {
+                "nome": p["nome"],
+                "valor": p["quantidade"],
+                "detalhe": p["ultima_data"] or "nunca",
+            }
+            for p in dados["presidencias"]
         ]
 
-        presidencias = dados["presidencias"]
-        max_pres = max((p["quantidade"] for p in presidencias), default=0)
-        linhas_pres = [
-            [
-                p["nome"],
-                str(p["quantidade"]),
-                _barra_proporcao(p["quantidade"], max_pres, COR_SUCESSO),
-                p["ultima_data"] or "nunca",
-            ]
-            for p in presidencias
-        ]
-
-        linhas_inter = [
-            [
-                c["congregacao"],
-                str(c["recebidos"]),
-                str(c["enviados"]),
-                _saldo_intercambio(c),
-                c["ultima_data"] or "—",
-            ]
-            for c in dados["intercambio"]
-        ]
-
-        largura_nome = None
         area.controls = [
             grade,
-            _tabela_relatorio(
+            _quadro_relatorio(
+                f"Mês a mês em {ano}",
+                "Onde estão os buracos: semanas com orador e com presidente em "
+                "cada mês já montado.",
+                _lista_meses_relatorio(dados["meses"], largura),
+            ),
+            _quadro_relatorio(
                 "Oradores da minha congregação",
                 "Discursos enviados. De quem discursou menos (e há mais tempo) "
                 "para quem discursou mais.",
-                [("Orador", largura_nome), ("Disc.", 46), ("", 90), ("Último", 82)],
-                linhas_freq,
-                "Nenhum orador cadastrado na sua congregação.",
+                _lista_ranking_relatorio(
+                    itens_freq, largura, COR_DESTAQUE_CLARA,
+                    "Nenhum orador cadastrado na sua congregação.",
+                ),
             ),
-            _tabela_relatorio(
+            _quadro_relatorio(
                 "Presidências da reunião",
                 "Quantas vezes cada um presidiu, desde o começo. Quem presidiu "
                 "menos vem primeiro.",
-                [("Presidente", largura_nome), ("Vezes", 46), ("", 90), ("Última", 82)],
-                linhas_pres,
-                "Nenhum presidente cadastrado.",
-            ),
-            _tabela_relatorio(
-                f"Troca com as congregações em {ano}",
-                "Quantos discursos vieram de cada congregação e quantos "
-                "mandamos para lá.",
-                [
-                    ("Congregação", largura_nome), ("Recebidos", 74),
-                    ("Enviados", 68), ("Saldo", 62), ("Último", 82),
-                ],
-                linhas_inter,
-                "Nenhum arranjo cadastrado neste ano.",
+                _lista_ranking_relatorio(
+                    itens_pres, largura, COR_SUCESSO,
+                    "Nenhum presidente cadastrado.",
+                ),
             ),
         ]
 
@@ -7395,7 +7655,8 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
 
     montar()
     controles_topo = (
-        ft.Column([seletor_ano, ft.Row([botao_pdf], wrap=True)], spacing=10, tight=True)
+        ft.Row([seletor_ano, botao_pdf], spacing=10, wrap=True,
+               vertical_alignment=ft.CrossAxisAlignment.CENTER)
         if eh_mobile()
         else ft.Row(
             [seletor_ano, ft.Container(expand=True), botao_pdf],
@@ -7417,21 +7678,6 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         ],
         spacing=0,
         expand=True,
-    )
-
-
-def _saldo_intercambio(registro: dict) -> ft.Control:
-    """Diferença entre o que recebemos e o que mandamos para uma congregação.
-
-    Positivo = viemos recebendo mais do que mandando. É o número que mostra
-    com quem o arranjo está desequilibrado, e para que lado.
-    """
-    saldo = int(registro.get("recebidos", 0)) - int(registro.get("enviados", 0))
-    if saldo == 0:
-        return ft.Text("em dia", size=fonte(12), color=TEXTO_SECUNDARIO)
-    cor = COR_SUCESSO if saldo > 0 else COR_AVISO
-    return ft.Text(
-        f"{saldo:+d}", size=fonte(13), weight=ft.FontWeight.W_600, color=cor,
     )
 
 
@@ -9055,10 +9301,12 @@ def abrir_dialog_gerenciar_presidentes(
         ao_fechar()
         page.update()
 
+    botao_contato = _botao_buscar_contato(page, campo_telefone, campo_nome)
     if eh_mobile():
         formulario = ft.Column(
             [campo_nome, campo_telefone, campo_categoria,
-             ft.Row([botao_salvar], alignment=ft.MainAxisAlignment.END)],
+             ft.Row([botao_contato, botao_salvar],
+                    alignment=ft.MainAxisAlignment.END, spacing=8, wrap=True)],
             spacing=10,
             tight=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -9077,7 +9325,7 @@ def abrir_dialog_gerenciar_presidentes(
         )
     else:
         formulario = ft.Row(
-            [campo_nome, campo_telefone, campo_categoria, botao_salvar],
+            [campo_nome, campo_telefone, campo_categoria, botao_contato, botao_salvar],
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )

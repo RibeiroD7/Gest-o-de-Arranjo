@@ -40,6 +40,13 @@ uma planilha (veja abaixo).
   observações. Importa os títulos dos formulários oficiais S-99/S-99a em PDF.
 - **Congregações** — cadastro das congregações do circuito (responsável,
   telefone, endereço, dia e horário da reunião).
+- **Contatos do celular** — no cadastro de oradores e de presidentes, o botão
+  **Buscar nos contatos** preenche o telefone a partir da agenda do aparelho.
+  O Flet não abre os contatos do celular (precisaria de um plugin nativo), e o
+  caminho que funciona é o arquivo que o próprio celular exporta: em Contatos
+  → Configurações → **Exportar**, escolha `.vcf` e abra esse arquivo no app.
+  A agenda fica só na memória enquanto o app está aberto — o que é gravado (e
+  vai no backup) é apenas o número da pessoa escolhida.
 - **Arranjos** — a programação mensal: oradores recebidos e designações
   enviadas de cada mês, com sugestão automática de datas conforme o dia de
   reunião da congregação e exportação de listas em PNG. Cada **orador
@@ -66,11 +73,9 @@ uma planilha (veja abaixo).
   quadro de anúncios da congregação.
 - **Relatórios** — tela com o retrato do arranjo, o que só aparece somando o
   ano inteiro: números do ano (semanas com e sem orador, com presidente,
-  recebidos, enviados, aguardando confirmação), frequência dos oradores da sua
-  congregação, **quantas vezes cada um presidiu** e a troca com cada
-  congregação — com o **saldo** entre o que veio de lá e o que foi para lá,
-  que é onde o arranjo aparece desequilibrado. Dá para trocar o ano e
-  exportar tudo em PDF.
+  recebidos, enviados, aguardando confirmação), o **mês a mês** da cobertura
+  (onde estão os buracos), a frequência dos oradores da sua congregação e
+  **quantas vezes cada um presidiu**. Dá para trocar o ano e exportar em PDF.
 - **Minha Congregação** — dados da sua congregação (usados nos cabeçalhos dos
   PDFs), backup e restauração.
 - **Importação por planilha** — modelo de planilha para preencher congregações,
@@ -258,6 +263,8 @@ sistemas. As diferenças de plataforma são resolvidas em tempo de execução po
 | `src/pdf_envio.py` | PDF da lista de oradores (Excel no Windows, LibreOffice nos demais) |
 | `src/pdf_temas.py` | Leitura dos formulários oficiais de temas (S-99/S-99a) |
 | `src/pdf_relatorios.py` | Exportação em PDF da tela de Relatórios |
+| `src/contatos.py` | Leitura da agenda do celular exportada em vCard (.vcf) |
+| `src/canticos.py` | Catálogo dos 151 cânticos (número, título e texto bíblico) |
 | `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
 | `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
 | `src/assets/` | Ícones, fontes e a carga inicial de temas (`temas_seed.json`) |

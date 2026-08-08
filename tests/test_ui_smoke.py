@@ -190,6 +190,65 @@ def test_tela_inicial_manda_a_mensagem_da_presidencia(mobile):
 
 
 @pytest.mark.parametrize("mobile", [False, True])
+def test_escolher_contato_constroi_com_e_sem_agenda(mobile):
+    """O seletor precisa abrir mesmo antes de qualquer .vcf ter sido lido."""
+    import armazenamento
+    from contatos import Contato
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        page = _page()
+        main._contatos_da_sessao.clear()
+        main.abrir_dialog_escolher_contato(page, lambda c: None)
+
+        main._contatos_da_sessao.append(Contato("Fábio Moreira", ["11999998888"]))
+        main.abrir_dialog_escolher_contato(page, lambda c: None)
+
+        # O botão preenche o telefone (e o nome, se estiver vazio).
+        campo_tel = flet.TextField()
+        campo_nome = flet.TextField()
+        botao = main._botao_buscar_contato(page, campo_tel, campo_nome)
+        assert botao is not None
+    finally:
+        main._contatos_da_sessao.clear()
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_relatorio_da_largura_para_a_coluna_de_nome(mobile):
+    """A coluna do nome precisa de largura explícita, senão nasce com zero.
+
+    Foi o que aconteceu com `expand=True`: dentro da coluna rolável a sobra é
+    zero e os nomes sumiam do relatório, deixando só os números.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        itens = [{"nome": "Rafael Pires", "valor": 8, "detalhe": "12/09/2026"}]
+        largura = 315 if mobile else 680
+        (tabela,) = main._lista_ranking_relatorio(itens, largura, "#14B8A6", "vazio")
+
+        larguras = []
+
+        def visitar(controle):
+            if isinstance(controle, flet.Text) and controle.value == "Rafael Pires":
+                larguras.append(controle.width)
+            for attr in ("content", "controls"):
+                filho = getattr(controle, attr, None)
+                if isinstance(filho, list):
+                    for f in filho:
+                        visitar(f)
+                elif filho is not None and not isinstance(filho, str):
+                    visitar(filho)
+
+        visitar(tabela)
+        assert larguras and all(w and w > 60 for w in larguras), larguras
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
 def test_ajustes_oferece_concluir_login_pendente(mobile, monkeypatch):
     """O resgate do login do Drive precisa aparecer em Ajustes, não só no diálogo.
 

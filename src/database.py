@@ -932,53 +932,6 @@ def relatorio_presidencias(ano: int | None = None) -> list[dict]:
     return resultado
 
 
-def relatorio_intercambio_congregacoes(ano: int | None = None) -> list[dict]:
-    """Troca de oradores com cada congregação: quantos vieram e quantos foram.
-
-    ``recebidos`` são os discursos que vieram de lá; ``enviados``, os que
-    mandamos para lá. É o quadro que mostra com quem o arranjo está em dia e
-    com quem está desequilibrado.
-    """
-    conn = get_connection()
-    try:
-        filtro_ano = " AND a.ano = ?" if ano is not None else ""
-        params = [ano] if ano is not None else []
-        linhas = conn.execute(
-            f"""
-            SELECT COALESCE(c.nome, '(sem congregação)') AS congregacao,
-                   SUM(CASE WHEN ao.tipo = 'recebido' THEN 1 ELSE 0 END) AS recebidos,
-                   SUM(CASE WHEN ao.tipo = 'enviado' THEN 1 ELSE 0 END) AS enviados,
-                   MAX(
-                       substr(ao.data, 7, 4) || substr(ao.data, 4, 2)
-                       || substr(ao.data, 1, 2)
-                   ) AS ultima_chave
-            FROM arranjo_oradores ao
-            JOIN arranjos a ON ao.arranjo_id = a.id
-            LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
-            WHERE ao.data IS NOT NULL AND ao.data <> ''{filtro_ano}
-            GROUP BY congregacao
-            """,  # noqa: S608 — filtro_ano é literal fixo, sem dado do usuário
-            params,
-        ).fetchall()
-    finally:
-        conn.close()
-
-    resultado = [
-        {
-            "congregacao": congregacao,
-            "recebidos": int(recebidos or 0),
-            "enviados": int(enviados or 0),
-            "ultima_data": _data_de_chave_ordenavel(ultima_chave),
-        }
-        for congregacao, recebidos, enviados, ultima_chave in linhas
-    ]
-    # Mais movimento primeiro: é onde o arranjo realmente acontece.
-    resultado.sort(
-        key=lambda r: (-(r["recebidos"] + r["enviados"]), r["congregacao"])
-    )
-    return resultado
-
-
 def carregar_designacoes_ano(ano: int) -> list[dict]:
     """Todos os registros (recebido/enviado) do ano com data e orador.
 
