@@ -298,6 +298,46 @@ def test_conversar_so_aparece_com_telefone(mobile):
         armazenamento.definir_layout_mobile(False)
 
 
+@pytest.mark.parametrize("mobile", [False, True])
+def test_presidentes_tem_campo_de_telefone_com_rotulo_e_botao_de_contato(mobile):
+    """O botão de contatos sumiu uma vez, junto com o rótulo do campo.
+
+    Ele tinha virado `suffix` do TextField — o campo parou de mostrar o rótulo
+    "Telefone" e o ícone não aparecia. Agora fica ao lado, e isto trava os dois.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        page = _page()
+        capturado = {}
+        page.show_dialog = lambda dialog: capturado.setdefault("dialog", dialog)
+        main.abrir_dialog_gerenciar_presidentes(page, lambda: None)
+
+        encontrados = {"campos": [], "contato": []}
+
+        def visitar(controle):
+            if isinstance(controle, flet.TextField):
+                encontrados["campos"].append(controle.label)
+            # No celular é IconButton; no PC, um TextButton com o mesmo ícone.
+            if getattr(controle, "icon", None) == flet.Icons.CONTACT_PHONE_OUTLINED:
+                encontrados["contato"].append(controle)
+            for attr in ("content", "controls"):
+                filho = getattr(controle, attr, None)
+                if isinstance(filho, list):
+                    for f in filho:
+                        visitar(f)
+                elif filho is not None and not isinstance(filho, str):
+                    visitar(filho)
+
+        visitar(capturado["dialog"])
+        assert "Telefone" in encontrados["campos"]
+        assert "Nome" in encontrados["campos"]
+        assert encontrados["contato"], "botão de buscar contato sumiu"
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
 class TestBotaoBuscarContato:
     """No celular abre a agenda do sistema; no PC (sem a extensão), o .vcf."""
 

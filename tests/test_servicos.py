@@ -247,3 +247,93 @@ class TestMesesDeAtencao:
     def test_quantidade_zero_ainda_cobra_o_mes_atual(self):
         """Nunca devolver lista vazia: sem o mês atual a tela não cobra nada."""
         assert meses_de_atencao(2026, 8, 0) == [(2026, 8)]
+
+
+class TestRodizioOlhaParaOsDoisLados:
+    """Designação futura também conta: olhar só para trás repetia gente.
+
+    Caso real: o irmão preside o Discurso Especial do dia 26; ao refazer o
+    rodízio do mês, ele era escolhido para o dia 12 — no dia 12 a designação
+    do dia 26 ainda estava no futuro, então ele parecia livre.
+    """
+
+    def test_nao_escolhe_quem_ja_preside_semanas_depois(self):
+        historico = {"26/09/2026": 10}  # Discurso Especial do dia 26
+        escolhas = escolher_rodizio_presidentes(
+            [10, 20, 30], ["05/09/2026", "12/09/2026"], {"26/09/2026"}, historico
+        )
+        assert dict(escolhas)["12/09/2026"] != 10, "não pode repetir 14 dias antes"
+        assert 10 not in dict(escolhas).values()
+
+    def test_quem_esta_mais_longe_da_propria_escala_vem_primeiro(self):
+        # 20 preside no dia 05; 30 no dia 26. Para o dia 12, o mais distante
+        # da própria escala é o 10 (nunca) e depois o 30 (14 dias).
+        historico = {"05/09/2026": 20, "26/09/2026": 30}
+        (escolha,) = escolher_rodizio_presidentes(
+            [10, 20, 30], ["12/09/2026"], set(), historico
+        )
+        assert escolha == ("12/09/2026", 10)
+
+    def test_com_todos_ocupados_escolhe_o_menos_apertado(self):
+        """Sem folga para ninguém, vai para quem tem o intervalo maior."""
+        historico = {"05/09/2026": 10, "26/09/2026": 20}
+        (escolha,) = escolher_rodizio_presidentes(
+            [10, 20], ["12/09/2026"], set(), historico
+        )
+        # 10 está a 7 dias; 20 a 14 — o 20 é o menos apertado.
+        assert escolha == ("12/09/2026", 20)
+
+    def test_data_invalida_no_historico_nao_quebra(self):
+        historico = {"data ruim": 10, "26/09/2026": 20}
+        escolhas = escolher_rodizio_presidentes(
+            [10, 20], ["05/09/2026"], set(), historico
+        )
+        assert escolhas == [("05/09/2026", 10)]
+
+
+class TestAlternanciaDePrivilegio:
+    """Evita dois anciãos ou dois servos seguidos — sem atropelar o rodízio."""
+
+    CATS = {10: "Ancião", 20: "Servo Ministerial", 30: "Ancião", 40: "Servo Ministerial"}
+
+    def test_alterna_o_privilegio_semana_a_semana(self):
+        datas = ["05/09/2026", "12/09/2026", "19/09/2026", "26/09/2026"]
+        escolhas = escolher_rodizio_presidentes(
+            [10, 20, 30, 40], datas, set(), {}, self.CATS
+        )
+        privilegios = [self.CATS[pid] for _, pid in escolhas]
+        assert all(
+            atual != seguinte
+            for atual, seguinte in zip(privilegios, privilegios[1:])
+        ), privilegios
+
+    def test_sem_categorias_o_privilegio_nao_influencia(self):
+        """Compatibilidade: quem não passa categorias mantém o comportamento."""
+        datas = ["05/09/2026", "12/09/2026"]
+        assert escolher_rodizio_presidentes([10, 20, 30, 40], datas, set(), {}) == [
+            ("05/09/2026", 10),
+            ("12/09/2026", 20),
+        ]
+
+    def test_alternancia_cede_quando_o_outro_privilegio_nao_tem_folga(self):
+        """"A menos que não tenha outro jeito": o rodízio manda no aperto.
+
+        Só há um ancião, e ele acabou de presidir. Alternar significaria
+        chamá-lo de novo em uma semana — pior do que repetir o privilégio.
+        """
+        cats = {10: "Ancião", 20: "Servo Ministerial", 30: "Servo Ministerial"}
+        historico = {"05/09/2026": 20, "12/09/2026": 10}
+        (escolha,) = escolher_rodizio_presidentes(
+            [10, 20, 30], ["19/09/2026"], set(), historico, cats
+        )
+        assert escolha[1] == 30, "deveria repetir o privilégio em vez de repetir a pessoa"
+
+    def test_alternancia_nao_quebra_a_justica_entre_iguais(self):
+        """Entre dois do privilégio certo, ainda vale quem está há mais tempo."""
+        cats = {10: "Ancião", 20: "Servo Ministerial", 30: "Servo Ministerial"}
+        # 20 presidiu recentemente; 30 nunca. O próximo servo deve ser o 30.
+        historico = {"01/08/2026": 20, "05/09/2026": 10}
+        (escolha,) = escolher_rodizio_presidentes(
+            [10, 20, 30], ["12/09/2026"], set(), historico, cats
+        )
+        assert escolha[1] == 30

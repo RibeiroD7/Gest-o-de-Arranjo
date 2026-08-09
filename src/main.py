@@ -199,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.19.0"
+VERSAO_APP = "1.20.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -5424,6 +5424,8 @@ def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
         datas_alvo,
         especiais,
         designacoes,
+        # Evita dois anciãos ou dois servos seguidos, quando dá.
+        categorias={item["id"]: item["categoria"] for item in cadastro},
     )
     for data_str, presidente_id in escolhas:
         salvar_presidente(data_str, presidente_id)
@@ -9663,22 +9665,26 @@ def abrir_dialog_gerenciar_presidentes(
         page, campo_telefone, campo_nome, vinculo_presidente
     )
     if eh_mobile():
-        # O formulário ocupava mais da metade da tela e sobravam duas linhas
-        # para a lista. Buscar contato virou ícone dentro do próprio campo de
-        # telefone, e privilégio e Salvar dividem a mesma linha: de cinco
-        # linhas para três, e o resto do espaço vai para os cadastrados.
-        campo_telefone.suffix = ft.IconButton(
+        # Formulário em três linhas para sobrar tela para os cadastrados. O
+        # botão de contatos fica AO LADO do campo, não dentro: como `suffix`
+        # ele sumia junto com o rótulo "Telefone" do campo.
+        campo_telefone.expand = True
+        campo_categoria.expand = True
+        icone_contato = ft.IconButton(
             icon=ft.Icons.CONTACT_PHONE_OUTLINED,
-            icon_size=fonte(18),
+            icon_size=fonte(22),
             icon_color=COR_DESTAQUE,
             tooltip="Buscar nos contatos do celular",
             on_click=botao_contato.on_click,
         )
-        campo_categoria.expand = True
         formulario = ft.Column(
             [
                 campo_nome,
-                campo_telefone,
+                ft.Row(
+                    [campo_telefone, icone_contato],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Row(
                     [campo_categoria, botao_salvar],
                     spacing=8,

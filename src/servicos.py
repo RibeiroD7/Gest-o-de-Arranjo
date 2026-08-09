@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Container
+from datetime import date
 
 
 def _chave_data_br(data_str: str) -> tuple[str, str, str]:
@@ -16,24 +17,51 @@ def _chave_data_br(data_str: str) -> tuple[str, str, str]:
     return (data_str[6:10], data_str[3:5], data_str[0:2])
 
 
+def _para_data(data_str: str) -> date | None:
+    """Converte DD/MM/AAAA em date; None se a data não for válida."""
+    try:
+        return date(int(data_str[6:10]), int(data_str[3:5]), int(data_str[0:2]))
+    except (ValueError, IndexError):
+        return None
+
+
+# Folga a partir da qual alguém é considerado livre para presidir de novo. Só
+# entre os livres é que a alternância de privilégio pesa — senão ela passaria
+# por cima do rodízio, chamando quem presidiu semana passada.
+FOLGA_MINIMA_DIAS = 21
+
+
 def escolher_rodizio_presidentes(
     ordem_ids: list[int],
     datas_alvo: list[str],
     especiais: Container[str],
     designacoes_existentes: dict[str, int],
+    categorias: dict[int, str] | None = None,
 ) -> list[tuple[str, int]]:
     """Decide, por rodízio justo, quem preside cada data ainda vazia.
 
-    Para cada data alvo sem presidente, escolhe quem presidiu há mais tempo (ou
-    nunca), desempatando pela ordem do cadastro (rodízio). Assim respeita a
-    sequência inicial quando está tudo vazio, mas se adapta a mudanças manuais.
-    Pula datas especiais e as que já têm alguém designado.
+    Para cada data alvo sem presidente, escolhe quem está **há mais tempo longe
+    de presidir** — e "longe" conta para os dois lados. Olhar só para trás
+    fazia o app repetir alguém que já estava designado poucas semanas depois:
+    quem preside o Discurso Especial do dia 26 era escolhido para o dia 12 do
+    mesmo mês, porque no dia 12 aquela designação ainda estava no futuro.
+
+    Com ``categorias``, evita repetir o mesmo privilégio duas semanas seguidas
+    (dois anciãos ou dois servos ministeriais). É só uma preferência: ela vale
+    entre quem está de fato livre — se ninguém do outro privilégio tem folga, o
+    rodízio manda e a sequência se repete.
+
+    Empates vão para a ordem do cadastro, então com tudo vazio o resultado é a
+    sequência que o usuário definiu. Datas especiais e as que já têm presidente
+    são puladas.
 
     Args:
         ordem_ids: ids dos presidentes na ordem do rodízio (cadastro).
         datas_alvo: datas DD/MM/AAAA das semanas do mês, em ordem cronológica.
         especiais: datas DD/MM/AAAA a pular (feriados/eventos).
         designacoes_existentes: histórico completo {data DD/MM/AAAA: presidente_id}.
+        categorias: {presidente_id: privilégio} para alternar. Sem isso, o
+            privilégio não influencia.
 
     Returns:
         Lista ``[(data_str, presidente_id)]`` só para as datas efetivamente
@@ -43,29 +71,64 @@ def escolher_rodizio_presidentes(
         return []
 
     ordem_pos = {pid: indice for indice, pid in enumerate(ordem_ids)}
-    designacoes = {
-        _chave_data_br(data_str): pid
-        for data_str, pid in designacoes_existentes.items()
-    }
+    # {presidente: [datas em que preside]} — só de quem está no rodízio.
+    agenda: dict[int, list[date]] = defaultdict(list)
+    ocupadas: set[tuple[str, str, str]] = set()
+    for data_str, pid in designacoes_existentes.items():
+        ocupadas.add(_chave_data_br(data_str))
+        dia = _para_data(data_str)
+        if dia is not None and pid in ordem_pos:
+            agenda[pid].append(dia)
+
+    def distancia(pid: int, dia: date) -> int:
+        """Dias até a designação mais próxima desse irmão, em qualquer direção."""
+        datas = agenda.get(pid)
+        if not datas:
+            return 10**6  # nunca presidiu: o mais livre possível
+        return min(abs((dia - outra).days) for outra in datas)
+
+    categorias = categorias or {}
+
+    def categoria_anterior(dia: date) -> str | None:
+        """Privilégio de quem presidiu na data designada mais próxima antes."""
+        anteriores = [
+            (outra, pid)
+            for pid, datas in agenda.items()
+            for outra in datas
+            if outra < dia
+        ]
+        if not anteriores:
+            return None
+        return categorias.get(max(anteriores)[1])
 
     escolhas: list[tuple[str, int]] = []
     for data_str in datas_alvo:
         chave = _chave_data_br(data_str)
-        if data_str in especiais or chave in designacoes:
+        if data_str in especiais or chave in ocupadas:
+            continue
+        dia = _para_data(data_str)
+        if dia is None:
             continue
 
-        # Última vez que cada candidato presidiu antes desta data.
-        ultima: dict[int, tuple] = {}
-        for k, pid in designacoes.items():
-            if k < chave and pid in ordem_pos and k > ultima.get(pid, ()):
-                ultima[pid] = k
-
-        # Quem presidiu há mais tempo (ou nunca); desempate pela ordem do rodízio.
-        escolhido = min(
-            ordem_ids, key=lambda pid: (ultima.get(pid, ()), ordem_pos[pid])
+        anterior = categoria_anterior(dia) if categorias else None
+        # A alternância só vale se alguém do outro privilégio estiver livre;
+        # senão seria chamar quem presidiu semana passada só para alternar.
+        alternar = anterior is not None and any(
+            categorias.get(pid) not in (None, anterior)
+            and distancia(pid, dia) >= FOLGA_MINIMA_DIAS
+            for pid in ordem_ids
         )
+
+        def ordenar(pid: int, anterior=anterior, alternar=alternar, dia=dia):
+            repete_privilegio = (
+                1 if (alternar and categorias.get(pid) == anterior) else 0
+            )
+            return (repete_privilegio, -distancia(pid, dia), ordem_pos[pid])
+
+        escolhido = min(ordem_ids, key=ordenar)
         escolhas.append((data_str, escolhido))
-        designacoes[chave] = escolhido
+        agenda[escolhido].append(dia)
+        ocupadas.add(chave)
 
     return escolhas
 
