@@ -332,3 +332,67 @@ class TestRelatorios:
             )
         registros = database.carregar_designacoes_ano(2026)
         assert sorted(r["tipo"] for r in registros) == ["enviado", "recebido"]
+
+
+class TestRodizioContaDatasEspeciais:
+    """Presidir um discurso especial conta no rodízio.
+
+    Caso real: o irmão presidiu o Discurso Especial de 26/09 e o app o
+    escolheu de novo em 03/10, a semana seguinte. O histórico do rodízio lia
+    só a tabela `presidentes`, e o presidente da data especial mora em
+    `datas_especiais` — então ele parecia não presidir havia meses.
+    """
+
+    def _preparar(self):
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            # datas_especiais aponta para presidentes_cadastro: limpa antes.
+            conn.execute("DELETE FROM datas_especiais")
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            nome: database.salvar_presidente_cadastro(nome, "Ancião")
+            for nome in ("Lucas", "Paulo", "Eduardo")
+        }
+
+    def test_presidente_de_data_especial_entra_no_historico(self):
+        ids = self._preparar()
+        database.salvar_data_especial(
+            "26/09/2026", "Discurso Especial", "", "", ids["Lucas"]
+        )
+        historico = database.carregar_todas_designacoes_presidente()
+        assert historico.get("26/09/2026") == ids["Lucas"]
+
+    def test_quem_presidiu_o_especial_nao_e_o_proximo_do_rodizio(self):
+        from servicos import escolher_rodizio_presidentes
+
+        ids = self._preparar()
+        # Lucas é o 1º da ordem, mas acabou de presidir o especial de 26/09.
+        database.salvar_data_especial(
+            "26/09/2026", "Discurso Especial", "", "", ids["Lucas"]
+        )
+        escolhas = escolher_rodizio_presidentes(
+            list(ids.values()),
+            ["03/10/2026", "10/10/2026", "24/10/2026"],
+            especiais=set(),
+            designacoes_existentes=database.carregar_todas_designacoes_presidente(),
+        )
+        primeiro = dict(escolhas)["03/10/2026"]
+        assert primeiro != ids["Lucas"], "não pode repetir logo depois do especial"
+        # Ele volta ao rodízio depois dos outros, não some da escala.
+        assert ids["Lucas"] in dict(escolhas).values()
+
+    def test_relatorio_conta_a_presidencia_do_especial(self):
+        ids = self._preparar()
+        database.salvar_presidente("05/09/2026", ids["Lucas"])
+        database.salvar_data_especial(
+            "26/09/2026", "Discurso Especial", "", "", ids["Lucas"]
+        )
+        linhas = {item["nome"]: item for item in database.relatorio_presidencias()}
+        assert linhas["Lucas"]["quantidade"] == 2
+        assert linhas["Lucas"]["ultima_data"] == "26/09/2026"
+        assert linhas["Paulo"]["quantidade"] == 0

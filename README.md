@@ -73,7 +73,9 @@ uma planilha (veja abaixo).
   privilégio) e atribuição semana a semana, por ano e mês. Semanas tomadas por
   uma **data especial** (assembleia, congresso, visita) não pedem presidente:
   a linha mostra o evento no lugar do seletor, e o rodízio automático já as
-  pula.
+  pula. Quando a data especial **tem** presidente (discurso especial, por
+  exemplo), isso conta no rodízio: quem presidiu ali não é escolhido logo na
+  semana seguinte.
 - **Mensagem da presidência** — na **tela inicial**, tanto no card da próxima
   reunião quanto nas semanas seguintes, o botão de WhatsApp monta a mensagem
   para o presidente daquele dia: você digita só o número do cântico e o app

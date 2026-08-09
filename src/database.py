@@ -978,20 +978,26 @@ def relatorio_presidencias(ano: int | None = None) -> list[dict]:
     conn = get_connection()
     try:
         # O filtro do ano vai no JOIN (e não no WHERE) para quem ainda não
-        # presidiu continuar aparecendo, com zero.
+        # presidiu continuar aparecendo, com zero. A subconsulta junta as
+        # semanas normais com as datas especiais que têm presidente — presidir
+        # o discurso especial conta igual.
         filtro_ano = " AND substr(p.data, 7, 4) = ?" if ano is not None else ""
         params = [str(ano)] if ano is not None else []
         linhas = conn.execute(
             f"""
             SELECT c.nome, c.categoria,
-                   COUNT(p.id) AS quantidade,
+                   COUNT(p.data) AS quantidade,
                    MAX(
                        substr(p.data, 7, 4) || substr(p.data, 4, 2)
                        || substr(p.data, 1, 2)
                    ) AS ultima_chave
             FROM presidentes_cadastro c
-            LEFT JOIN presidentes p
-                ON p.presidente_id = c.id{filtro_ano}
+            LEFT JOIN (
+                SELECT data, presidente_id FROM presidentes
+                UNION
+                SELECT data, presidente_id FROM datas_especiais
+                WHERE presidente_id IS NOT NULL
+            ) p ON p.presidente_id = c.id{filtro_ano}
             GROUP BY c.id, c.nome, c.categoria
             """,  # noqa: S608 — filtro_ano é literal fixo, sem dado do usuário
             params,
@@ -1560,13 +1566,30 @@ def trocar_ordem_presidentes(id_a: int, id_b: int) -> None:
 
 
 def carregar_todas_designacoes_presidente() -> dict[str, int]:
-    """Todas as designações de presidente já feitas: {data (DD/MM/AAAA): presidente_id}."""
+    """Todas as vezes que alguém presidiu: {data (DD/MM/AAAA): presidente_id}.
+
+    Inclui as **datas especiais** com presidente (discurso especial, visita do
+    superintendente). Sem elas o rodízio ficava cego: quem presidiu o discurso
+    especial parecia não presidir há muito tempo e era escolhido logo na semana
+    seguinte. Se a mesma data estiver nos dois lugares, vale a data especial —
+    é lá que ela é gerenciada.
+    """
     conn = get_connection()
     try:
-        return {
+        designacoes = {
             linha[0]: linha[1]
             for linha in conn.execute("SELECT data, presidente_id FROM presidentes")
         }
+        designacoes.update(
+            {
+                linha[0]: linha[1]
+                for linha in conn.execute(
+                    "SELECT data, presidente_id FROM datas_especiais "
+                    "WHERE presidente_id IS NOT NULL"
+                )
+            }
+        )
+        return designacoes
     finally:
         conn.close()
 
