@@ -69,8 +69,9 @@ uma planilha (veja abaixo).
   orador pelo WhatsApp). No rodapé do mês, **Falar com o responsável** abre o
   WhatsApp do irmão responsável pela congregação anfitriã daquele mês, com uma
   mensagem já começada (o telefone vem do cadastro em Congregações).
-- **Presidentes** — cadastro de quem pode presidir (nome, telefone e
-  privilégio) e atribuição semana a semana, por ano e mês. Semanas tomadas por
+- **Presidentes** — tela própria no menu, com o cadastro de quem pode
+  presidir (nome, telefone e privilégio) e a ordem do rodízio. A atribuição
+  semana a semana continua na Programação, por ano e mês. Semanas tomadas por
   uma **data especial** (assembleia, congresso, visita) não pedem presidente:
   a linha mostra o evento no lugar do seletor, e o rodízio automático já as
   pula. Quando a data especial **tem** presidente (discurso especial, por
@@ -91,8 +92,8 @@ uma planilha (veja abaixo).
   recebidos, enviados, aguardando confirmação), o **mês a mês** da cobertura
   (onde estão os buracos), a frequência dos oradores da sua congregação e
   **quantas vezes cada um presidiu**. Dá para trocar o ano e exportar em PDF.
-- **Minha Congregação** — dados da sua congregação (usados nos cabeçalhos dos
-  PDFs), backup e restauração.
+- **Ajustes** — dados da sua congregação (usados nos cabeçalhos dos PDFs),
+  backup local e na nuvem, carga inicial por planilha e tamanho do texto.
 - **Importação por planilha** — modelo de planilha para preencher congregações,
   oradores e programação de uma vez e importar tudo de volta.
 

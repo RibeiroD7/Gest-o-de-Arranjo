@@ -199,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.20.1"
+VERSAO_APP = "1.21.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -238,6 +238,7 @@ SECOES = [
     {"nome": "Programação", "icone": ft.Icons.CALENDAR_MONTH},
     {"nome": "Oradores", "icone": ft.Icons.PEOPLE},
     {"nome": "Congregações", "icone": ft.Icons.LOCATION_CITY},
+    {"nome": "Presidentes", "icone": ft.Icons.MANAGE_ACCOUNTS},
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
     {"nome": "Quadro de Anúncios", "icone": ft.Icons.CAMPAIGN},
     {"nome": "Calendário", "icone": ft.Icons.CALENDAR_TODAY},
@@ -247,8 +248,9 @@ SECOES = [
 
 # Índices de navegação usados em botões/atalhos (mantidos junto de SECOES
 # para não quebrarem quando a ordem das abas mudar).
-INDICE_RELATORIOS = 7
-INDICE_AJUSTES = 8
+INDICE_PRESIDENTES = 4
+INDICE_RELATORIOS = 8
+INDICE_AJUSTES = 9
 
 # Quantos meses à frente as Pendências do Início cobram. O arranjo se monta com
 # poucos meses de antecedência: cobrar o ano todo enche a lista de meses que
@@ -2962,7 +2964,7 @@ def tela_inicio(
                 ft.OutlinedButton(
                     "Temas",
                     icon=ft.Icons.MENU_BOOK_OUTLINED,
-                    on_click=lambda _: ir_para(4),
+                    on_click=lambda _: ir_para(5),
                 ),
                 ft.OutlinedButton(
                     "Relatórios",
@@ -3005,7 +3007,7 @@ def tela_inicio(
                         ft.TextButton(
                             "Ver temas",
                             icon=ft.Icons.ARROW_FORWARD,
-                            on_click=lambda _: ir_para(4),
+                            on_click=lambda _: ir_para(5),
                         ),
                     ],
                     spacing=8,
@@ -3040,7 +3042,7 @@ def tela_inicio(
                             "Importe os formulários S-99/S-99a (PDF) na aba Temas.",
                             size=fonte(13), color=TEXTO_PRIMARIO, expand=True,
                         ),
-                        ft.TextButton("Abrir Temas", on_click=lambda _: ir_para(4)),
+                        ft.TextButton("Abrir Temas", on_click=lambda _: ir_para(5)),
                     ],
                     spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
@@ -5993,7 +5995,7 @@ def abrir_dialog_mensagem_presidencia(
                 page,
                 "Sem telefone cadastrado",
                 f"{presidente.get('nome', 'O presidente')} não tem telefone no "
-                "cadastro (Ajustes → Gerenciar presidentes). A mensagem foi "
+                "cadastro (tela Presidentes). A mensagem foi "
                 "copiada — cole no WhatsApp.",
             )
             return
@@ -6597,7 +6599,7 @@ def abrir_dialog_oradores_mes(
             lista_presidentes.controls = [
                 ft.Text(
                     "Nenhum presidente cadastrado ainda. "
-                    "Cadastre-os na aba Ajustes → Gerenciar presidentes.",
+                    "Cadastre-os na tela Presidentes, no menu.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
@@ -6834,7 +6836,7 @@ def abrir_dialog_oradores_mes(
                 page,
                 "Nada para preencher",
                 "Todas as semanas já têm presidente (ou não há presidentes cadastrados). "
-                "A ordem do rodízio é definida em Ajustes → Gerenciar presidentes.",
+                "A ordem do rodízio é definida na tela Presidentes.",
             )
 
     def refazer_rodizio(_=None):
@@ -7994,6 +7996,36 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     )
 
 
+def _cabecalho_card_ajustes(icone: str, titulo: str, descricao: str) -> ft.Control:
+    """Título de um card de Ajustes: ícone, nome e uma linha do que ele faz.
+
+    A tela é uma pilha de cards parecidos; o ícone é o que deixa achar o certo
+    sem ler tudo.
+    """
+    return ft.Row(
+        [
+            ft.Container(
+                content=ft.Icon(icone, size=fonte(18), color=COR_DESTAQUE),
+                bgcolor=ft.Colors.with_opacity(0.12, COR_DESTAQUE),
+                border_radius=10,
+                padding=8,
+            ),
+            ft.Column(
+                [
+                    ft.Text(titulo, size=fonte(16), weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO),
+                    ft.Text(descricao, size=fonte(12), color=TEXTO_SECUNDARIO),
+                ],
+                spacing=2,
+                tight=True,
+                expand=True,
+            ),
+        ],
+        spacing=12,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
 def tela_ajustes(
     page: ft.Page,
     recarregar: Callable[[], None],
@@ -8077,14 +8109,12 @@ def tela_ajustes(
     formulario = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Minha congregação", size=fonte(16), weight=ft.FontWeight.W_600),
-                ft.Container(height=4),
-                ft.Text(
+                _cabecalho_card_ajustes(
+                    ft.Icons.HOME_WORK_OUTLINED,
+                    "Minha congregação",
                     "Dados usados nos cabeçalhos dos PDFs e nas exportações.",
-                    size=fonte(13),
-                    color=TEXTO_SECUNDARIO,
                 ),
-                ft.Container(height=8),
+                ft.Container(height=12),
                 campo_nome,
                 campo_endereco,
                 linha_campos(campo_cidade, campo_cep),
@@ -8104,23 +8134,6 @@ def tela_ajustes(
                     spacing=16,
                     wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Divider(height=1, color=BORDA_SUAVE),
-                ft.Text("Presidentes", size=fonte(14), weight=ft.FontWeight.W_600),
-                ft.Text(
-                    "Cadastro de quem pode presidir a reunião de fim de semana "
-                    "(a atribuição semana a semana é feita na Programação).",
-                    size=fonte(13),
-                    color=TEXTO_SECUNDARIO,
-                ),
-                ft.Row(
-                    [
-                        ft.OutlinedButton(
-                            "Gerenciar presidentes",
-                            icon=ft.Icons.MANAGE_ACCOUNTS,
-                            on_click=lambda _: abrir_dialog_gerenciar_presidentes(page, recarregar),
-                        ),
-                    ],
                 ),
             ],
             spacing=16,
@@ -8305,7 +8318,11 @@ def tela_ajustes(
     secao_planilha = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Carga inicial por planilha", size=fonte(16), weight=ft.FontWeight.W_600),
+                _cabecalho_card_ajustes(
+                    ft.Icons.TABLE_VIEW_OUTLINED,
+                    "Carga inicial por planilha",
+                    "Cadastrar muita gente de uma vez, por Excel.",
+                ),
                 ft.Container(height=4),
                 ft.Text(
                     "Cadastre congregações, oradores e presidentes de uma vez por "
@@ -8346,7 +8363,11 @@ def tela_ajustes(
     secao_backup = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Backup dos dados", size=fonte(16), weight=ft.FontWeight.W_600),
+                _cabecalho_card_ajustes(
+                    ft.Icons.SAVE_OUTLINED,
+                    "Backup dos dados",
+                    "Copiar tudo para um arquivo e restaurar quando precisar.",
+                ),
                 ft.Container(height=4),
                 ft.Text(
                     "Salve todos os seus dados num arquivo, para guardar em outro "
@@ -8876,9 +8897,12 @@ def tela_ajustes(
     secao_nuvem = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Backup na nuvem (Google Drive)", size=fonte(16),
-                        weight=ft.FontWeight.W_600),
-                ft.Container(height=4),
+                _cabecalho_card_ajustes(
+                    ft.Icons.CLOUD_OUTLINED,
+                    "Backup na nuvem",
+                    "Guardar o backup na sua conta do Google e restaurar em outro aparelho.",
+                ),
+                ft.Container(height=8),
                 *controles_nuvem,
             ],
             spacing=0,
@@ -8921,7 +8945,11 @@ def tela_ajustes(
     secao_acessibilidade = ft.Container(
         content=ft.Column(
             [
-                ft.Text("Acessibilidade", size=fonte(16), weight=ft.FontWeight.W_600),
+                _cabecalho_card_ajustes(
+                    ft.Icons.TEXT_FIELDS,
+                    "Acessibilidade",
+                    "Tamanho do texto em todo o aplicativo.",
+                ),
                 ft.Container(height=4),
                 ft.Text(
                     "Aumente o texto do aplicativo inteiro. As colunas das tabelas "
@@ -9387,32 +9415,19 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
     )
 
 
-def abrir_dialog_gerenciar_presidentes(
-    page: ft.Page,
-    ao_fechar: Callable[[], None],
-) -> None:
-    """Cadastro de presidentes: adicionar, editar, excluir e ordenar o rodízio."""
+def tela_presidentes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
+    """Cadastro de presidentes: adicionar, editar, excluir e ordenar o rodízio.
+
+    Tem tela própria no menu porque é cadastro do dia a dia, como Oradores e
+    Congregações — antes vivia num diálogo escondido dentro de Ajustes.
+    """
+    _ = recarregar
     estado_edicao: dict = {"id": None}
     # Contato da agenda amarrado a quem está sendo editado no formulário.
     vinculo_presidente: dict = {"contato_id": ""}
     cadastro: list[dict] = []
-    def _altura_lista_cadastro() -> int:
-        """Altura da lista, tirada do que sobra da tela.
-
-        Fixar 200px deixava dois cadastrados visíveis num celular grande. O
-        formulário compacto ocupa altura conhecida; o resto é da lista.
-        """
-        if not eh_mobile():
-            return 260
-        altura = getattr(getattr(page, "window", None), "height", None)
-        return max(220, min(460, int(altura * 0.42))) if altura else 260
-
-    lista_cadastro = ft.Column(
-        spacing=8 if eh_mobile() else 0,
-        tight=True,
-        scroll=ft.ScrollMode.AUTO,
-        height=_altura_lista_cadastro(),
-    )
+    # Numa tela inteira a lista não precisa de altura fixa: quem rola é a tela.
+    lista_cadastro = ft.Column(spacing=8 if eh_mobile() else 0, tight=True)
     # No celular os campos vão empilhados em largura total: lado a lado o Flet
     # espremia o nome e quebrava os rótulos letra a letra.
     campo_nome = ft.TextField(label="Nome", expand=not eh_mobile())
@@ -9654,11 +9669,6 @@ def abrir_dialog_gerenciar_presidentes(
 
     botao_salvar.on_click = salvar
 
-    def fechar(_=None):
-        page.pop_dialog()
-        ao_fechar()
-        page.update()
-
     botao_contato = _botao_buscar_contato(
         page, campo_telefone, campo_nome, vinculo_presidente
     )
@@ -9726,32 +9736,39 @@ def abrir_dialog_gerenciar_presidentes(
         )
 
     preencher_lista()
-    page.show_dialog(
-        ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Gerenciar presidentes"),
-            content=ft.Container(
+    return ft.Column(
+        [
+            criar_cabecalho_tela(
+                "Presidentes",
+                "Quem pode presidir a reunião de fim de semana. A ordem define "
+                "o rodízio automático; a escala semana a semana fica na "
+                "Programação.",
+            ),
+            ft.Container(height=12),
+            ft.Container(
                 content=ft.Column(
-                    [
-                        formulario,
-                        texto_erro,
-                        ft.Container(height=8),
-                        cabecalho_lista,
-                        lista_cadastro,
-                    ],
-                    spacing=12,
+                    [formulario, texto_erro],
+                    spacing=8,
                     tight=True,
-                    width=_largura_dialog(page, 560),
                 ),
-                padding=ft.Padding.only(top=8),
+                padding=16 if eh_mobile() else 20,
+                bgcolor=FUNDO_CARD,
+                border=ft.Border.all(1, BORDA_SUAVE),
+                border_radius=14,
+                width=_largura_dialog(page, 640),
             ),
-            content_padding=ft.Padding.symmetric(
-                horizontal=12 if eh_mobile() else 24, vertical=16
-            ),
-            inset_padding=ft.Padding.all(12 if eh_mobile() else 40),
-            actions=[ft.TextButton("Fechar", on_click=fechar)],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
+            ft.Container(height=16),
+            ft.Container(content=cabecalho_lista, width=_largura_dialog(page, 640)),
+            ft.Container(height=8),
+            ft.Container(content=lista_cadastro, width=_largura_dialog(page, 640)),
+            ft.Container(height=16),
+        ],
+        spacing=0,
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=(
+            ft.CrossAxisAlignment.CENTER if eh_mobile() else ft.CrossAxisAlignment.START
+        ),
     )
 
 
@@ -10535,11 +10552,15 @@ def main(page: ft.Page):
     def mostrar_relatorios():
         area_conteudo.content = tela_relatorios(page, recarregar)
 
+    def mostrar_presidentes():
+        area_conteudo.content = tela_presidentes(page, recarregar)
+
     telas = [
         mostrar_inicio,
         mostrar_programacao,
         mostrar_oradores,
         mostrar_congregacoes,
+        mostrar_presidentes,
         mostrar_temas,
         mostrar_quadro_anuncios,
         mostrar_calendario,

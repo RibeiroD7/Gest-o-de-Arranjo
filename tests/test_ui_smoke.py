@@ -41,6 +41,7 @@ def _telas(page, fp):
         "temas": lambda: main.tela_temas(page, fp),
         "quadro": lambda: main.tela_quadro_anuncios(page, lambda: None),
         "calendario": lambda: main.tela_calendario(page, lambda: None),
+        "presidentes": lambda: main.tela_presidentes(page, lambda: None),
         "relatorios": lambda: main.tela_relatorios(page, lambda: None),
         "ajustes": lambda: main.tela_ajustes(page, lambda: None, fp),
     }
@@ -108,7 +109,7 @@ def test_dialogos_de_presidentes_constroem(mobile):
     armazenamento.definir_layout_mobile(mobile)
     try:
         page = _page()
-        main.abrir_dialog_gerenciar_presidentes(page, lambda: None)
+        assert main.tela_presidentes(page, lambda: None) is not None
         main.abrir_dialog_mensagem_presidencia(
             page,
             "31/10/2026",
@@ -310,9 +311,7 @@ def test_presidentes_tem_campo_de_telefone_com_rotulo_e_botao_de_contato(mobile)
     armazenamento.definir_layout_mobile(mobile)
     try:
         page = _page()
-        capturado = {}
-        page.show_dialog = lambda dialog: capturado.setdefault("dialog", dialog)
-        main.abrir_dialog_gerenciar_presidentes(page, lambda: None)
+        tela = main.tela_presidentes(page, lambda: None)
 
         encontrados = {"campos": [], "contato": []}
 
@@ -330,7 +329,7 @@ def test_presidentes_tem_campo_de_telefone_com_rotulo_e_botao_de_contato(mobile)
                 elif filho is not None and not isinstance(filho, str):
                     visitar(filho)
 
-        visitar(capturado["dialog"])
+        visitar(tela)
         assert "Telefone" in encontrados["campos"]
         assert "Nome" in encontrados["campos"]
         assert encontrados["contato"], "botão de buscar contato sumiu"
