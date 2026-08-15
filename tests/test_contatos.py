@@ -271,3 +271,56 @@ class TestIniciaisDoNome:
     def test_vazio(self):
         assert iniciais_do_nome("") == "?"
         assert iniciais_do_nome("   ") == "?"
+
+
+class TestNumeroProntoDaAgenda:
+    """Número que chega pronto do celular não pode ganhar um DDD inventado."""
+
+    def test_nove_digitos_nao_viram_ddd(self):
+        """988887777 é celular sem DDD — virava "(98) 8887-777"."""
+        assert mascara_telefone("988887777", digitando=False) == "98888-7777"
+
+    def test_oito_digitos_tambem(self):
+        assert mascara_telefone("88877770", digitando=False) == "8887-7770"
+
+    def test_com_ddd_continua_normal(self):
+        assert mascara_telefone("11988887777", digitando=False) == "(11) 98888-7777"
+        assert mascara_telefone("+5511988887777", digitando=False) == "(11) 98888-7777"
+
+    def test_digitando_mantem_o_ddd_progressivo(self):
+        """No formulário os dois primeiros dígitos SÃO o DDD sendo digitado."""
+        assert mascara_telefone("11") == "(11)"
+        assert mascara_telefone("988887777") == "(98) 8887-777"
+
+
+class TestSincronizacaoNaoRepete:
+    """Só o número muda a sincronização — formatação diferente, não.
+
+    O app avisava "telefone atualizado" a cada abertura porque comparava o
+    texto formatado: bastava a máscara mudar entre versões para tudo parecer
+    diferente de novo.
+    """
+
+    def _vinculo(self, telefone):
+        return [
+            {
+                "tabela": "presidentes_cadastro",
+                "id": 1,
+                "contato_id": "c",
+                "nome": "Lucas",
+                "telefone": telefone,
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        "salvo",
+        ["11988887777", "(11) 98888-7777", "+55 (11) 98888-7777", "11 98888 7777"],
+    )
+    def test_mesma_pessoa_mesmo_numero_nao_muda(self, salvo):
+        contatos = [{"id": "c", "nome": "Lucas", "telefones": ["+5511988887777"]}]
+        assert mudancas_de_contato(self._vinculo(salvo), contatos) == []
+
+    def test_numero_realmente_diferente_muda(self):
+        contatos = [{"id": "c", "nome": "Lucas", "telefones": ["11955554444"]}]
+        (mudanca,) = mudancas_de_contato(self._vinculo("(11) 98888-7777"), contatos)
+        assert mudanca["telefone"] == "(11) 95555-4444"

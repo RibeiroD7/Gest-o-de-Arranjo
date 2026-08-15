@@ -199,7 +199,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.20.0"
+VERSAO_APP = "1.20.1"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -1378,14 +1378,11 @@ def sincronizar_contatos_vinculados(page: ft.Page, ao_terminar=None) -> None:
             alterados += atualizar_telefone_por_contato(
                 mudanca["tabela"], mudanca["id"], mudanca["telefone"]
             )
+        # Sem aviso na tela: isto roda toda vez que o app abre, e um pop-up a
+        # cada abertura vira incômodo. Quem quiser conferir vê o número no
+        # cadastro; o log guarda o que mudou.
         if alterados:
             logger.info("Contatos: %d telefone(s) atualizados pela agenda", alterados)
-            mostrar_sucesso(
-                page,
-                f"{alterados} telefone(s) atualizados pelos seus contatos."
-                if alterados > 1
-                else f"Telefone de {mudancas[0]['nome']} atualizado pelos contatos.",
-            )
         if ao_terminar is not None:
             ao_terminar()
 
@@ -1432,7 +1429,8 @@ def _botao_buscar_contato(
     """
 
     def escolher(contato: Contato):
-        campo_telefone.value = mascara_telefone(contato.telefone)
+        # Número vindo pronto da agenda: sem inventar DDD se ele não tiver.
+        campo_telefone.value = mascara_telefone(contato.telefone, digitando=False)
         if campo_nome is not None and not (campo_nome.value or "").strip():
             campo_nome.value = contato.nome
         page.update()

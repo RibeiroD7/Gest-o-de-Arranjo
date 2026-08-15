@@ -103,16 +103,22 @@ def formatar_telefone(numero: str) -> str:
     return ("+" if mais else "") + digitos
 
 
-def mascara_telefone(texto: str) -> str:
-    """Formata um telefone brasileiro enquanto ele é digitado.
+def mascara_telefone(texto: str, digitando: bool = True) -> str:
+    """Formata um telefone brasileiro.
 
     Vai montando a máscara conforme os dígitos chegam — ``11900000000`` vira
     ``(11) 90000-0000`` — sem atrapalhar quem apaga no meio: o que vale são os
     dígitos, os separadores são recalculados a cada tecla.
 
-    Números com país (``+55…``) mantêm o prefixo, e o que não couber em nenhum
-    formato brasileiro conhecido é devolvido só com os dígitos, sem inventar
-    separador no lugar errado.
+    ``digitando=True`` (o padrão, dos campos do formulário) assume que os dois
+    primeiros dígitos são o DDD desde o começo, para o parêntese não pular de
+    lugar. Já um número que chega PRONTO — da agenda do celular — pode não ter
+    DDD nenhum, e aí ``digitando=False`` evita o erro de transformar os dois
+    primeiros dígitos de ``988887777`` num DDD "98" que não existe.
+
+    O ``+55`` é descartado (todo mundo do circuito é do Brasil e o link do
+    WhatsApp recoloca o país). O que não couber em formato brasileiro conhecido
+    é devolvido só com os dígitos, sem separador inventado.
     """
     texto = (texto or "").strip()
     if not texto:
@@ -131,19 +137,24 @@ def mascara_telefone(texto: str) -> str:
     if len(digitos) > 11:
         # Fora dos formatos do Brasil: não force máscara no lugar errado.
         return (pais + digitos).strip()
+
+    def _com_traco(numero: str) -> str:
+        """Separa o assinante: celular corta depois de 5; fixo, depois de 4."""
+        corte = 5 if numero.startswith("9") else 4
+        if len(numero) <= corte:
+            return numero
+        return f"{numero[:corte]}-{numero[corte:]}"
+
+    # Número pronto e curto demais para ter DDD (8 ou 9 dígitos): formata só o
+    # assinante. Fingir um DDD aqui é o que fazia 988887777 virar (98) 8887-777.
+    if not digitando and len(digitos) < 10:
+        return pais + _com_traco(digitos)
+
     if len(digitos) < 2:
         return pais + digitos
     if len(digitos) == 2:
         return f"{pais}({digitos})"
-
-    # Celular começa com 9 e tem 5 dígitos antes do traço; fixo tem 4. Decidir
-    # pelo primeiro dígito mantém o traço no lugar desde o começo da digitação,
-    # em vez de ele pular de posição a cada tecla.
-    resto = digitos[2:]
-    corte = 5 if resto.startswith("9") else 4
-    if len(resto) <= corte:
-        return f"{pais}({digitos[:2]}) {resto}"
-    return f"{pais}({digitos[:2]}) {resto[:corte]}-{resto[corte:]}"
+    return f"{pais}({digitos[:2]}) {_com_traco(digitos[2:])}"
 
 
 def ler_vcard(texto: str) -> list[Contato]:
@@ -284,6 +295,11 @@ def salvar_foto_contato(contato_id: str, foto_base64: str | None, pasta: Path) -
     return caminho
 
 
+def _so_digitos(texto: str) -> str:
+    """Só os dígitos — o que de fato identifica um telefone."""
+    return re.sub(r"\D", "", texto or "")
+
+
 def mudancas_de_contato(
     vinculos: list[dict], contatos: list[dict]
 ) -> list[dict]:
@@ -292,6 +308,10 @@ def mudancas_de_contato(
     Args:
         vinculos: ``[{tabela, id, contato_id, nome, telefone}]`` do banco.
         contatos: ``[{id, nome, telefones, foto}]`` lidos do aparelho.
+
+    A comparação é feita pelos **dígitos**, não pelo texto formatado: assim uma
+    mudança de máscara entre versões do app não faz o telefone de todo mundo
+    "mudar" na abertura seguinte.
 
     Returns:
         Uma entrada por pessoa cujo telefone mudou, no formato
@@ -312,8 +332,16 @@ def mudancas_de_contato(
         ]
         if not telefones:
             continue
-        novo = mascara_telefone(telefones[0])
-        if novo == vinculo.get("telefone"):
+        # O número vem PRONTO da agenda: não inventar DDD se ele não tiver.
+        novo = mascara_telefone(telefones[0], digitando=False)
+        salvo = vinculo.get("telefone", "")
+        # Os dois lados passam pela MESMA normalização antes de comparar: um
+        # número salvo como "+55 (11) 9…" por uma versão antiga tem 13 dígitos
+        # e o novo tem 11 — sem isso eles diferiam para sempre, e o app dizia
+        # "telefone atualizado" a cada abertura.
+        if _so_digitos(novo) == _so_digitos(
+            mascara_telefone(salvo, digitando=False)
+        ):
             continue
         mudancas.append(
             {
