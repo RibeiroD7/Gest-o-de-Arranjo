@@ -19,7 +19,7 @@ Baixe a versão mais recente na página de
 | Linux | `GestaoArranjo-*-linux.tar.gz` | Descompacte e execute `GestaoArranjo` |
 | Android | `GestaoArranjo-*-android.apk` | Instale (celulares atuais). Aparelho antigo de 32 bits? Use `GestaoArranjo-*-android-32bits.apk` |
 
-O app começa vazio: preencha **Ajustes → Minha congregação** com os dados da
+O app começa vazio: preencha **Minha congregação** com os dados da
 sua congregação e cadastre congregações, oradores e temas — ou importe tudo de
 uma planilha (veja abaixo).
 
@@ -69,9 +69,10 @@ uma planilha (veja abaixo).
   orador pelo WhatsApp). No rodapé do mês, **Falar com o responsável** abre o
   WhatsApp do irmão responsável pela congregação anfitriã daquele mês, com uma
   mensagem já começada (o telefone vem do cadastro em Congregações).
-- **Presidentes** — tela própria no menu, com o cadastro de quem pode
-  presidir (nome, telefone e privilégio) e a ordem do rodízio. A atribuição
-  semana a semana continua na Programação, por ano e mês. Semanas tomadas por
+- **Minha congregação** — tela com o que é seu: os **dados** da congregação
+  (usados nos cabeçalhos dos PDFs) e os **presidentes**, com o cadastro de
+  quem pode presidir e a ordem do rodízio. A atribuição semana a semana
+  continua na Programação, por ano e mês. Semanas tomadas por
   uma **data especial** (assembleia, congresso, visita) não pedem presidente:
   a linha mostra o evento no lugar do seletor, e o rodízio automático já as
   pula. Quando a data especial **tem** presidente (discurso especial, por
@@ -92,8 +93,8 @@ uma planilha (veja abaixo).
   recebidos, enviados, aguardando confirmação), o **mês a mês** da cobertura
   (onde estão os buracos), a frequência dos oradores da sua congregação e
   **quantas vezes cada um presidiu**. Dá para trocar o ano e exportar em PDF.
-- **Ajustes** — dados da sua congregação (usados nos cabeçalhos dos PDFs),
-  backup local e na nuvem, carga inicial por planilha e tamanho do texto.
+- **Ajustes** — só manutenção: backup local e na nuvem, carga inicial por
+  planilha e tamanho do texto.
 - **Importação por planilha** — modelo de planilha para preencher congregações,
   oradores e programação de uma vez e importar tudo de volta.
 

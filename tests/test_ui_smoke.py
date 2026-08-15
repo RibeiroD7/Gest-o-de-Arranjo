@@ -41,7 +41,7 @@ def _telas(page, fp):
         "temas": lambda: main.tela_temas(page, fp),
         "quadro": lambda: main.tela_quadro_anuncios(page, lambda: None),
         "calendario": lambda: main.tela_calendario(page, lambda: None),
-        "presidentes": lambda: main.tela_presidentes(page, lambda: None),
+        "minha_congregacao": lambda: main.tela_minha_congregacao(page, lambda: None),
         "relatorios": lambda: main.tela_relatorios(page, lambda: None),
         "ajustes": lambda: main.tela_ajustes(page, lambda: None, fp),
     }
@@ -109,7 +109,7 @@ def test_dialogos_de_presidentes_constroem(mobile):
     armazenamento.definir_layout_mobile(mobile)
     try:
         page = _page()
-        assert main.tela_presidentes(page, lambda: None) is not None
+        assert main.tela_minha_congregacao(page, lambda: None) is not None
         main.abrir_dialog_mensagem_presidencia(
             page,
             "31/10/2026",
@@ -304,14 +304,18 @@ def test_presidentes_tem_campo_de_telefone_com_rotulo_e_botao_de_contato(mobile)
     """O botão de contatos sumiu uma vez, junto com o rótulo do campo.
 
     Ele tinha virado `suffix` do TextField — o campo parou de mostrar o rótulo
-    "Telefone" e o ícone não aparecia. Agora fica ao lado, e isto trava os dois.
+    "Telefone" e o ícone não aparecia. Agora fica ao lado, no diálogo de
+    cadastro do presidente, e isto trava os dois.
     """
     import armazenamento
 
     armazenamento.definir_layout_mobile(mobile)
     try:
         page = _page()
-        tela = main.tela_presidentes(page, lambda: None)
+        capturado = {}
+        page.show_dialog = lambda dialog: capturado.setdefault("dialog", dialog)
+        main.abrir_dialog_presidente(page, None, lambda: None)
+        tela = capturado["dialog"]
 
         encontrados = {"campos": [], "contato": []}
 

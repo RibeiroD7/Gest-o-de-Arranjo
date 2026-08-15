@@ -167,6 +167,7 @@ from ui_comuns import (
     abrir_url,
     aplicar_tema,
     criar_cabecalho_tela,
+    criar_painel_informativo,
     criar_secao_titulo,
     executar_com_progresso,
     linha_campos,
@@ -199,7 +200,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.21.0"
+VERSAO_APP = "1.22.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -238,7 +239,7 @@ SECOES = [
     {"nome": "Programação", "icone": ft.Icons.CALENDAR_MONTH},
     {"nome": "Oradores", "icone": ft.Icons.PEOPLE},
     {"nome": "Congregações", "icone": ft.Icons.LOCATION_CITY},
-    {"nome": "Presidentes", "icone": ft.Icons.MANAGE_ACCOUNTS},
+    {"nome": "Minha congregação", "icone": ft.Icons.HOME_WORK},
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
     {"nome": "Quadro de Anúncios", "icone": ft.Icons.CAMPAIGN},
     {"nome": "Calendário", "icone": ft.Icons.CALENDAR_TODAY},
@@ -248,7 +249,7 @@ SECOES = [
 
 # Índices de navegação usados em botões/atalhos (mantidos junto de SECOES
 # para não quebrarem quando a ordem das abas mudar).
-INDICE_PRESIDENTES = 4
+INDICE_MINHA_CONGREGACAO = 4
 INDICE_RELATORIOS = 8
 INDICE_AJUSTES = 9
 
@@ -5995,7 +5996,7 @@ def abrir_dialog_mensagem_presidencia(
                 page,
                 "Sem telefone cadastrado",
                 f"{presidente.get('nome', 'O presidente')} não tem telefone no "
-                "cadastro (tela Presidentes). A mensagem foi "
+                "cadastro (Minha congregação → Presidentes). A mensagem foi "
                 "copiada — cole no WhatsApp.",
             )
             return
@@ -6599,7 +6600,7 @@ def abrir_dialog_oradores_mes(
             lista_presidentes.controls = [
                 ft.Text(
                     "Nenhum presidente cadastrado ainda. "
-                    "Cadastre-os na tela Presidentes, no menu.",
+                    "Cadastre-os em Minha congregação → Presidentes.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
                     italic=True,
@@ -6836,7 +6837,7 @@ def abrir_dialog_oradores_mes(
                 page,
                 "Nada para preencher",
                 "Todas as semanas já têm presidente (ou não há presidentes cadastrados). "
-                "A ordem do rodízio é definida na tela Presidentes.",
+                "A ordem do rodízio é definida em Minha congregação → Presidentes.",
             )
 
     def refazer_rodizio(_=None):
@@ -8026,12 +8027,12 @@ def _cabecalho_card_ajustes(icone: str, titulo: str, descricao: str) -> ft.Contr
     )
 
 
-def tela_ajustes(
-    page: ft.Page,
-    recarregar: Callable[[], None],
-    file_picker: ft.FilePicker,
-) -> ft.Control:
-    """Formulário para cadastrar/editar as informações da congregação principal."""
+def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
+    """Card com os dados da congregação (nome, endereço, reunião, coordenador).
+
+    Vive na tela Minha congregação. Ficava em Ajustes, misturado com backup
+    e preferências — coisas de manutenção, não o cadastro do dia a dia.
+    """
     config = carregar_configuracao()
 
     campo_nome = ft.TextField(
@@ -8147,6 +8148,15 @@ def tela_ajustes(
         width=_largura_dialog(page, 560),
     )
 
+    return formulario
+
+
+def tela_ajustes(
+    page: ft.Page,
+    recarregar: Callable[[], None],
+    file_picker: ft.FilePicker,
+) -> ft.Control:
+    """Backup, nuvem, carga por planilha e preferências do aplicativo."""
     def exportar_backup_click(_=None):
         try:
             caminho, contagens = exportar_backup()
@@ -8978,10 +8988,9 @@ def tela_ajustes(
                 "Dados da congregação, backup e preferências",
             ),
             ft.Container(height=12 if eh_mobile() else 24),
-            # Ordem: identidade → proteger os dados → começar do zero →
-            # preferências (mexidas uma vez só, ficam por último).
-            formulario,
-            ft.Container(height=24),
+            # Ordem: proteger os dados → começar do zero → preferências
+            # (mexidas uma vez só, ficam por último). Os dados da
+            # congregação saíram daqui para a tela Minha congregação.
             secao_backup,
             ft.Container(height=24),
             secao_nuvem,
@@ -9415,233 +9424,47 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
     )
 
 
-def tela_presidentes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
-    """Cadastro de presidentes: adicionar, editar, excluir e ordenar o rodízio.
+def abrir_dialog_presidente(
+    page: ft.Page,
+    item: dict | None,
+    ao_salvar: Callable[[], None],
+) -> None:
+    """Adiciona ou edita um presidente num diálogo focado.
 
-    Tem tela própria no menu porque é cadastro do dia a dia, como Oradores e
-    Congregações — antes vivia num diálogo escondido dentro de Ajustes.
+    O formulário ficava fixo no topo da lista e mudava de dono quando se
+    tocava no lápis — com a lista rolada, a edição acontecia fora da vista.
+    Num diálogo fica claro quem está sendo editado.
     """
-    _ = recarregar
-    estado_edicao: dict = {"id": None}
-    # Contato da agenda amarrado a quem está sendo editado no formulário.
-    vinculo_presidente: dict = {"contato_id": ""}
-    cadastro: list[dict] = []
-    # Numa tela inteira a lista não precisa de altura fixa: quem rola é a tela.
-    lista_cadastro = ft.Column(spacing=8 if eh_mobile() else 0, tight=True)
-    # No celular os campos vão empilhados em largura total: lado a lado o Flet
-    # espremia o nome e quebrava os rótulos letra a letra.
-    campo_nome = ft.TextField(label="Nome", expand=not eh_mobile())
+    editando = item is not None
+    item = item or {}
+    vinculo = {"contato_id": item.get("contato_id", "")}
+
+    campo_nome = ft.TextField(
+        label="Nome", value=item.get("nome", ""), autofocus=not editando
+    )
     campo_telefone = _campo_telefone(
-        hint_text="(11) 90000-0000",
-        expand=not eh_mobile(),
-        width=None if eh_mobile() else 170,
+        valor=item.get("telefone", ""), hint_text="(11) 90000-0000", expand=True
     )
     campo_categoria = ft.Dropdown(
         label="Privilégio",
-        value="Ancião",
+        value=item.get("categoria") or "Ancião",
         options=[
             ft.dropdown.Option("Ancião"),
             ft.dropdown.Option("Servo Ministerial"),
         ],
-        width=None if eh_mobile() else 190,
     )
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
-    botao_salvar = ft.FilledButton("Adicionar", icon=ft.Icons.ADD)
+    botao_contato = _botao_buscar_contato(page, campo_telefone, campo_nome, vinculo)
+    icone_contato = ft.IconButton(
+        icon=ft.Icons.CONTACT_PHONE_OUTLINED,
+        icon_size=fonte(22),
+        icon_color=COR_DESTAQUE,
+        tooltip="Buscar nos contatos do celular",
+        on_click=botao_contato.on_click,
+    )
 
-    def limpar_formulario():
-        estado_edicao["id"] = None
-        campo_nome.value = ""
-        campo_telefone.value = ""
-        vinculo_presidente["contato_id"] = ""
-        campo_categoria.value = "Ancião"
-        botao_salvar.content = "Adicionar"
-        botao_salvar.icon = ft.Icons.ADD
-        texto_erro.visible = False
-
-    def preencher_lista():
-        nonlocal cadastro
-        cadastro = listar_presidentes_cadastro()
-        if not cadastro:
-            lista_cadastro.controls = [
-                ft.Text(
-                    "Nenhum presidente cadastrado ainda.",
-                    size=fonte(13),
-                    color=TEXTO_SECUNDARIO,
-                    italic=True,
-                )
-            ]
-            return
-
-        def mover(indice: int, delta: int):
-            nova = [item["id"] for item in cadastro]
-            destino = indice + delta
-            if 0 <= destino < len(nova):
-                nova[indice], nova[destino] = nova[destino], nova[indice]
-                salvar_ordem_presidentes(nova)
-                preencher_lista()
-                page.update()
-
-        def linha_cadastro(indice: int, item: dict) -> ft.Control:
-            def editar(_=None, item=item):
-                estado_edicao["id"] = item["id"]
-                campo_nome.value = item["nome"]
-                campo_telefone.value = mascara_telefone(item.get("telefone", ""))
-                vinculo_presidente["contato_id"] = item.get("contato_id", "")
-                campo_categoria.value = item["categoria"]
-                botao_salvar.content = "Salvar"
-                botao_salvar.icon = ft.Icons.SAVE
-                texto_erro.visible = False
-                page.update()
-
-            def excluir(_=None, item=item):
-                try:
-                    excluir_presidente_cadastro(item["id"])
-                except Exception:
-                    texto_erro.value = "Não foi possível excluir este presidente."
-                    texto_erro.visible = True
-                    page.update()
-                    return
-                if estado_edicao["id"] == item["id"]:
-                    limpar_formulario()
-                preencher_lista()
-                page.update()
-
-            botao_subir = ft.IconButton(
-                icon=ft.Icons.ARROW_UPWARD,
-                icon_size=fonte(16),
-                tooltip="Subir no rodízio",
-                disabled=indice == 0,
-                on_click=lambda e, i=indice: mover(i, -1),
-            )
-            botao_descer = ft.IconButton(
-                icon=ft.Icons.ARROW_DOWNWARD,
-                icon_size=fonte(16),
-                tooltip="Descer no rodízio",
-                disabled=indice == len(cadastro) - 1,
-                on_click=lambda e, i=indice: mover(i, 1),
-            )
-            botao_editar = ft.IconButton(
-                icon=ft.Icons.EDIT,
-                icon_size=fonte(18),
-                tooltip="Editar",
-                on_click=editar,
-            )
-            botao_excluir = ft.IconButton(
-                icon=ft.Icons.DELETE_OUTLINE,
-                icon_size=fonte(18),
-                icon_color=COR_ERRO,
-                tooltip="Excluir (remove também as semanas atribuídas)",
-                on_click=excluir,
-            )
-            # Avatar com a posição do rodízio no cantinho: o número some do
-            # meio do texto e continua legível.
-            avatar = ft.Stack(
-                [
-                    _avatar_contato(item["nome"], item.get("contato_id", "")),
-                    ft.Container(
-                        content=ft.Text(
-                            f"{indice + 1}",
-                            size=fonte(9),
-                            weight=ft.FontWeight.W_700,
-                            color=FUNDO_APP,
-                        ),
-                        bgcolor=COR_DESTAQUE_CLARA,
-                        border_radius=8,
-                        width=16,
-                        height=16,
-                        alignment=ft.Alignment.CENTER,
-                        bottom=0,
-                        right=0,
-                    ),
-                ],
-                width=38,
-                height=38,
-            )
-            chip_privilegio = ft.Container(
-                content=ft.Text(
-                    "Ancião" if item["categoria"] == "Ancião" else "Servo",
-                    size=fonte(10),
-                    weight=ft.FontWeight.W_600,
-                    color=TEXTO_SECUNDARIO,
-                    no_wrap=True,
-                ),
-                bgcolor=ft.Colors.with_opacity(0.06, TEXTO_PRIMARIO),
-                border_radius=6,
-                padding=ft.Padding.symmetric(horizontal=7, vertical=2),
-            )
-            telefone_formatado = mascara_telefone(item.get("telefone", ""))
-            linha_telefone = ft.Row(
-                [
-                    chip_privilegio,
-                    ft.Text(
-                        telefone_formatado or "sem telefone",
-                        size=fonte(11),
-                        color=TEXTO_SECUNDARIO,
-                        italic=not telefone_formatado,
-                        expand=True,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                ],
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            )
-            identificacao = ft.Column(
-                [
-                    ft.Text(
-                        item["nome"],
-                        size=fonte(14),
-                        weight=ft.FontWeight.W_600,
-                        color=TEXTO_PRIMARIO,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                    linha_telefone,
-                ],
-                spacing=3,
-                tight=True,
-                expand=True,
-            )
-            acoes = ft.Row(
-                [botao_subir, botao_descer, botao_editar, botao_excluir],
-                spacing=0,
-                tight=True,
-            )
-
-            if eh_mobile():
-                # Avatar + identificação em cima, ações embaixo à direita: numa
-                # linha só sobravam poucos pixels para o nome.
-                return ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Row(
-                                [avatar, identificacao],
-                                spacing=10,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            ft.Row([acoes], alignment=ft.MainAxisAlignment.END),
-                        ],
-                        spacing=0,
-                        tight=True,
-                    ),
-                    padding=ft.Padding.only(left=10, right=4, top=8, bottom=0),
-                    border=ft.Border.all(1, BORDA_SUAVE),
-                    border_radius=10,
-                )
-
-            return ft.Row(
-                [
-                    avatar,
-                    identificacao,
-                    acoes,
-                ],
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            )
-
-        lista_cadastro.controls = [
-            linha_cadastro(indice, item) for indice, item in enumerate(cadastro)
-        ]
+    def fechar(_=None):
+        page.pop_dialog()
 
     def salvar(_=None):
         nome = (campo_nome.value or "").strip()
@@ -9654,113 +9477,366 @@ def tela_presidentes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contro
             salvar_presidente_cadastro(
                 nome,
                 campo_categoria.value or "Ancião",
-                cadastro_id=estado_edicao["id"],
+                cadastro_id=item.get("id"),
                 telefone=(campo_telefone.value or "").strip(),
-                contato_id=vinculo_presidente["contato_id"],
+                contato_id=vinculo["contato_id"],
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — o nome é único no banco
             texto_erro.value = "Já existe um presidente com esse nome."
             texto_erro.visible = True
             page.update()
             return
-        limpar_formulario()
-        preencher_lista()
-        page.update()
+        fechar()
+        ao_salvar()
 
-    botao_salvar.on_click = salvar
+    campo_nome.on_submit = salvar
 
-    botao_contato = _botao_buscar_contato(
-        page, campo_telefone, campo_nome, vinculo_presidente
-    )
-    if eh_mobile():
-        # Formulário em três linhas para sobrar tela para os cadastrados. O
-        # botão de contatos fica AO LADO do campo, não dentro: como `suffix`
-        # ele sumia junto com o rótulo "Telefone" do campo.
-        campo_telefone.expand = True
-        campo_categoria.expand = True
-        icone_contato = ft.IconButton(
-            icon=ft.Icons.CONTACT_PHONE_OUTLINED,
-            icon_size=fonte(22),
-            icon_color=COR_DESTAQUE,
-            tooltip="Buscar nos contatos do celular",
-            on_click=botao_contato.on_click,
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text(
+                "Editar presidente" if editando else "Novo presidente",
+                size=fonte(18),
+                weight=ft.FontWeight.W_600,
+            ),
+            content=ft.Container(
+                width=_largura_dialog(page, 420),
+                content=ft.Column(
+                    [
+                        campo_nome,
+                        ft.Row(
+                            [campo_telefone, icone_contato],
+                            spacing=4,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        campo_categoria,
+                        texto_erro,
+                    ],
+                    spacing=12,
+                    tight=True,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=fechar),
+                ft.FilledButton("Salvar", icon=ft.Icons.SAVE, on_click=salvar),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
         )
-        formulario = ft.Column(
+    )
+    page.update()
+
+
+def _cartao_presidente(
+    indice: int,
+    item: dict,
+    total: int,
+    on_mover: Callable[[int, int], None],
+    on_editar: Callable[[dict], None],
+    on_excluir: Callable[[dict], None],
+) -> ft.Control:
+    """Um presidente na lista: posição do rodízio, avatar, contato e ações."""
+    telefone = mascara_telefone(item.get("telefone", ""))
+    eh_anciao = item["categoria"] == "Ancião"
+    cor_privilegio = COR_DESTAQUE_SUAVE if eh_anciao else COR_AVISO
+
+    posicao = ft.Container(
+        content=ft.Text(
+            f"{indice + 1}",
+            size=fonte(13),
+            weight=ft.FontWeight.W_700,
+            color=TEXTO_SECUNDARIO,
+        ),
+        width=24,
+        alignment=ft.Alignment.CENTER,
+    )
+    chip = ft.Container(
+        content=ft.Text(
+            "Ancião" if eh_anciao else "Servo",
+            size=fonte(10),
+            weight=ft.FontWeight.W_600,
+            color=cor_privilegio,
+            no_wrap=True,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.13, cor_privilegio),
+        border_radius=6,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+    )
+    identificacao = ft.Column(
+        [
+            ft.Text(
+                item["nome"],
+                size=fonte(14),
+                weight=ft.FontWeight.W_600,
+                color=TEXTO_PRIMARIO,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            ft.Row(
+                [
+                    chip,
+                    ft.Text(
+                        telefone or "sem telefone",
+                        size=fonte(11),
+                        color=TEXTO_SECUNDARIO,
+                        italic=not telefone,
+                        expand=True,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        ],
+        spacing=4,
+        tight=True,
+        expand=True,
+    )
+    setas = ft.Column(
+        [
+            ft.IconButton(
+                icon=ft.Icons.KEYBOARD_ARROW_UP,
+                icon_size=fonte(18),
+                tooltip="Subir no rodízio",
+                disabled=indice == 0,
+                style=ft.ButtonStyle(padding=0),
+                on_click=lambda e, i=indice: on_mover(i, -1),
+            ),
+            ft.IconButton(
+                icon=ft.Icons.KEYBOARD_ARROW_DOWN,
+                icon_size=fonte(18),
+                tooltip="Descer no rodízio",
+                disabled=indice == total - 1,
+                style=ft.ButtonStyle(padding=0),
+                on_click=lambda e, i=indice: on_mover(i, 1),
+            ),
+        ],
+        spacing=0,
+        tight=True,
+    )
+    excluir = ft.IconButton(
+        icon=ft.Icons.DELETE_OUTLINE,
+        icon_size=fonte(18),
+        icon_color=COR_ERRO,
+        tooltip="Excluir (remove também as semanas atribuídas)",
+        on_click=lambda e, i=dict(item): on_excluir(i),
+    )
+
+    # O cartão inteiro abre a edição: é o gesto que as pessoas tentam primeiro.
+    return ft.Container(
+        content=ft.Row(
             [
-                campo_nome,
-                ft.Row(
-                    [campo_telefone, icone_contato],
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Row(
-                    [campo_categoria, botao_salvar],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
+                posicao,
+                _avatar_contato(item["nome"], item.get("contato_id", "")),
+                identificacao,
+                excluir,
+                setas,
             ],
             spacing=8,
-            tight=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        )
-        cabecalho_lista = ft.Row(
-            [
-                ft.Text("Cadastrados", weight=ft.FontWeight.W_600, size=fonte(13)),
-                ft.Text(
-                    "· a ordem define o rodízio",
-                    size=fonte(11),
-                    color=TEXTO_SECUNDARIO,
-                    expand=True,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-            ],
-            spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-    else:
-        formulario = ft.Row(
-            [campo_nome, campo_telefone, campo_categoria, botao_contato, botao_salvar],
-            spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        cabecalho_lista = ft.Row(
-            [
-                ft.Text("Cadastrados", weight=ft.FontWeight.W_600, size=fonte(13), expand=True),
-                ft.Text(
-                    "A ordem define o rodízio automático",
-                    size=fonte(12),
-                    color=TEXTO_SECUNDARIO,
-                ),
-            ],
-        )
+        ),
+        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+        bgcolor=FUNDO_CARD,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=12,
+        ink=True,
+        tooltip="Tocar para editar",
+        on_click=lambda e, i=dict(item): on_editar(i),
+    )
 
-    preencher_lista()
+
+def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Control:
+    """Lista dos presidentes com a ordem do rodízio; edição em diálogo."""
+    cadastro = listar_presidentes_cadastro()
+
+    def mover(indice: int, delta: int):
+        ids = [item["id"] for item in cadastro]
+        destino = indice + delta
+        if 0 <= destino < len(ids):
+            ids[indice], ids[destino] = ids[destino], ids[indice]
+            salvar_ordem_presidentes(ids)
+            ao_mudar()
+
+    def editar(item: dict):
+        abrir_dialog_presidente(page, item, ao_mudar)
+
+    def adicionar(_=None):
+        abrir_dialog_presidente(page, None, ao_mudar)
+
+    def excluir(item: dict):
+        def fechar(_=None):
+            page.pop_dialog()
+
+        def confirmar(_=None):
+            fechar()
+            try:
+                excluir_presidente_cadastro(item["id"])
+            except Exception:  # noqa: BLE001
+                mostrar_aviso(page, "Erro", "Não foi possível excluir este presidente.")
+                return
+            ao_mudar()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Excluir presidente"),
+                content=ft.Text(
+                    f"Remover {item['nome']} do cadastro? As semanas já "
+                    "atribuídas a ele também são apagadas.",
+                    size=fonte(13),
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=fechar),
+                    ft.FilledButton(
+                        "Excluir",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        style=ft.ButtonStyle(bgcolor=COR_ERRO, color="#FFFFFF"),
+                        on_click=confirmar,
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+        page.update()
+
+    anciaos = sum(1 for item in cadastro if item["categoria"] == "Ancião")
+    resumo = (
+        f"{len(cadastro)} cadastrados · {anciaos} anciãos e "
+        f"{len(cadastro) - anciaos} servos"
+        if cadastro
+        else "Ninguém cadastrado ainda"
+    )
+    botao_adicionar = ft.FilledButton(
+        "Adicionar", icon=ft.Icons.PERSON_ADD_ALT, on_click=adicionar
+    )
+    cabecalho = ft.Row(
+        [
+            ft.Column(
+                [
+                    ft.Text(resumo, size=fonte(13), weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO),
+                    ft.Text(
+                        "A ordem desta lista define o rodízio automático.",
+                        size=fonte(11),
+                        color=TEXTO_SECUNDARIO,
+                    ),
+                ],
+                spacing=2,
+                tight=True,
+                expand=True,
+            ),
+            botao_adicionar,
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    if not cadastro:
+        corpo: list[ft.Control] = [
+            criar_painel_informativo(
+                "Nenhum presidente cadastrado",
+                "Cadastre quem pode presidir a reunião de fim de semana. A "
+                "ordem que você definir aqui é a do rodízio automático da "
+                "Programação.",
+                ft.Icons.MANAGE_ACCOUNTS,
+            )
+        ]
+    else:
+        corpo = [
+            _cartao_presidente(indice, item, len(cadastro), mover, editar, excluir)
+            for indice, item in enumerate(cadastro)
+        ]
+
+    return ft.Column(
+        [cabecalho, ft.Container(height=12), *corpo],
+        spacing=8,
+        tight=True,
+    )
+
+
+def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
+    """Tudo que é da própria congregação: os dados dela e quem preside.
+
+    Antes os dados moravam em Ajustes (junto de backup e preferências) e os
+    presidentes numa aba separada. São a mesma coisa do ponto de vista de quem
+    usa: o cadastro da minha congregação.
+    """
+    estado_aba = {"atual": "dados"}
+    area = ft.Column(spacing=0, tight=True)
+
+    def montar():
+        if estado_aba["atual"] == "dados":
+            area.controls = [_secao_dados_congregacao(page)]
+        else:
+            area.controls = [_secao_presidentes(page, atualizar)]
+
+    def atualizar():
+        montar()
+        page.update()
+
+    def trocar_aba(valor: str):
+        estado_aba["atual"] = valor
+        for nome, (chip, texto) in chips.items():
+            ativo = nome == valor
+            chip.bgcolor = (
+                ft.Colors.with_opacity(0.18, COR_DESTAQUE_CLARA)
+                if ativo else ft.Colors.TRANSPARENT
+            )
+            chip.border = ft.Border.all(1, COR_DESTAQUE if ativo else BORDA_SUAVE)
+            texto.color = COR_DESTAQUE_SUAVE if ativo else TEXTO_SECUNDARIO
+            texto.weight = ft.FontWeight.W_700 if ativo else ft.FontWeight.W_500
+        atualizar()
+
+    chips: dict[str, tuple[ft.Container, ft.Text]] = {}
+
+    def _chip(valor: str, rotulo: str, icone: str) -> ft.Container:
+        ativo = valor == estado_aba["atual"]
+        texto = ft.Text(
+            rotulo,
+            size=fonte(13),
+            no_wrap=True,
+            color=COR_DESTAQUE_SUAVE if ativo else TEXTO_SECUNDARIO,
+            weight=ft.FontWeight.W_700 if ativo else ft.FontWeight.W_500,
+        )
+        chip = ft.Container(
+            content=ft.Row(
+                [ft.Icon(icone, size=fonte(15), color=texto.color), texto],
+                spacing=6,
+                tight=True,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            border_radius=18,
+            bgcolor=(
+                ft.Colors.with_opacity(0.18, COR_DESTAQUE_CLARA)
+                if ativo else ft.Colors.TRANSPARENT
+            ),
+            border=ft.Border.all(1, COR_DESTAQUE if ativo else BORDA_SUAVE),
+            on_click=lambda e, v=valor: trocar_aba(v),
+            ink=True,
+        )
+        chips[valor] = (chip, texto)
+        return chip
+
+    alternador = ft.Row(
+        [
+            _chip("dados", "Dados", ft.Icons.HOME_WORK_OUTLINED),
+            _chip("presidentes", "Presidentes", ft.Icons.MANAGE_ACCOUNTS),
+        ],
+        spacing=8,
+        tight=True,
+    )
+
+    montar()
     return ft.Column(
         [
             criar_cabecalho_tela(
-                "Presidentes",
-                "Quem pode presidir a reunião de fim de semana. A ordem define "
-                "o rodízio automático; a escala semana a semana fica na "
-                "Programação.",
+                "Minha congregação",
+                "Os dados da sua congregação e quem preside a reunião.",
             ),
             ft.Container(height=12),
-            ft.Container(
-                content=ft.Column(
-                    [formulario, texto_erro],
-                    spacing=8,
-                    tight=True,
-                ),
-                padding=16 if eh_mobile() else 20,
-                bgcolor=FUNDO_CARD,
-                border=ft.Border.all(1, BORDA_SUAVE),
-                border_radius=14,
-                width=_largura_dialog(page, 640),
-            ),
+            alternador,
             ft.Container(height=16),
-            ft.Container(content=cabecalho_lista, width=_largura_dialog(page, 640)),
-            ft.Container(height=8),
-            ft.Container(content=lista_cadastro, width=_largura_dialog(page, 640)),
+            ft.Container(content=area, width=_largura_dialog(page, 640)),
             ft.Container(height=16),
         ],
         spacing=0,
@@ -10321,10 +10397,10 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
 
     def ir_ajustes(_=None):
         page.pop_dialog()
-        navegar(INDICE_AJUSTES)  # Ajustes → Minha Congregação
+        navegar(INDICE_MINHA_CONGREGACAO)
 
     passos = [
-        ("1. Sua congregação", "Preencha os dados em Ajustes → Minha Congregação."),
+        ("1. Sua congregação", "Preencha os dados na tela Minha congregação."),
         ("2. Congregações", "Cadastre as congregações com que você faz arranjos."),
         ("3. Oradores e temas", "Adicione oradores e importe os temas (S-99/S-99a)."),
         ("4. Programação", "Monte os arranjos do mês — ou importe tudo de uma planilha."),
@@ -10552,15 +10628,15 @@ def main(page: ft.Page):
     def mostrar_relatorios():
         area_conteudo.content = tela_relatorios(page, recarregar)
 
-    def mostrar_presidentes():
-        area_conteudo.content = tela_presidentes(page, recarregar)
+    def mostrar_minha_congregacao():
+        area_conteudo.content = tela_minha_congregacao(page, recarregar)
 
     telas = [
         mostrar_inicio,
         mostrar_programacao,
         mostrar_oradores,
         mostrar_congregacoes,
-        mostrar_presidentes,
+        mostrar_minha_congregacao,
         mostrar_temas,
         mostrar_quadro_anuncios,
         mostrar_calendario,
