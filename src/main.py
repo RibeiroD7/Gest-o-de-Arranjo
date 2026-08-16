@@ -200,7 +200,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.22.0"
+VERSAO_APP = "1.23.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -4116,6 +4116,7 @@ def _criar_lista_congregacoes_mobile(
     df: pd.DataFrame,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
+    on_conversar: Callable[[int], None] | None = None,
 ) -> ft.Control:
     """Lista de congregações em cards empilhados (a tabela não cabe no celular)."""
     if df.empty:
@@ -4140,11 +4141,42 @@ def _criar_lista_congregacoes_mobile(
         )
 
         detalhes: list[ft.Control] = []
+        telefone = mascara_telefone(telefone)
         contato = " · ".join(p for p in (responsavel, telefone) if p)
         if contato:
+            # Falar com o responsável é a ação mais comum aqui: fica ao lado
+            # do nome dele, não escondida atrás de editar.
             detalhes.append(
-                ft.Text(contato, size=fonte(12), color=TEXTO_SECUNDARIO,
-                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.PERSON_OUTLINE, size=fonte(13),
+                                color=TEXTO_SECUNDARIO),
+                        ft.Text(contato, size=fonte(12), color=TEXTO_SECUNDARIO,
+                                expand=True, max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS),
+                        *(
+                            [
+                                ft.IconButton(
+                                    icon=ft.Icons.CHAT_OUTLINED,
+                                    icon_size=fonte(17),
+                                    icon_color="#34D399",
+                                    tooltip=f"Falar com {responsavel or 'o responsável'}",
+                                    style=ft.ButtonStyle(padding=2),
+                                    on_click=lambda e, rid=cong_id: on_conversar(rid),
+                                )
+                            ]
+                            if on_conversar and telefone
+                            else []
+                        ),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
+        else:
+            detalhes.append(
+                ft.Text("Sem responsável cadastrado", size=fonte(12),
+                        color=TEXTO_SECUNDARIO, italic=True)
             )
         if reuniao:
             detalhes.append(
@@ -4236,10 +4268,33 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
     def abrir_excluir(congregacao_id: int):
         confirmar_exclusao_congregacao(page, recarregar, congregacao_id)
 
+    def conversar_com_responsavel(congregacao_id: int):
+        """Abre o WhatsApp do irmão responsável pela congregação."""
+        cong = carregar_congregacao(congregacao_id) or {}
+        telefone = (cong.get("telefone") or "").strip()
+        if not telefone:
+            mostrar_aviso(
+                page,
+                "Sem telefone",
+                f"A congregação {cong.get('nome') or ''} não tem telefone "
+                "cadastrado.".replace("  ", " "),
+            )
+            return
+        config = carregar_configuracao()
+        responsavel = (cong.get("responsavel") or "").strip()
+        mensagem = (
+            f"Olá{', ' + responsavel.split()[0] if responsavel else ''}! Aqui é "
+            f"{config.get('coordenador_discursos') or 'o coordenador'} de discursos "
+            f"da {config.get('nome_congregacao') or 'nossa congregação'}."
+        )
+        abrir_url(page, gerar_link_whatsapp(telefone, mensagem))
+
     renderizador = None
     if eh_mobile():
         def renderizador(df_filtrado: pd.DataFrame) -> ft.Control:
-            return _criar_lista_congregacoes_mobile(df_filtrado, abrir_editar, abrir_excluir)
+            return _criar_lista_congregacoes_mobile(
+                df_filtrado, abrir_editar, abrir_excluir, conversar_com_responsavel
+            )
 
     return criar_tela_padrao(
         page=page,
@@ -9623,8 +9678,68 @@ def _cartao_presidente(
     )
 
     # O cartão inteiro abre a edição: é o gesto que as pessoas tentam primeiro.
-    return ft.Container(
-        content=ft.Row(
+    if eh_mobile():
+        # Nome ocupa a linha inteira e o telefone a de baixo. Lado a lado com
+        # avatar, lixeira e setas sobravam ~90px e os dois saíam cortados
+        # ("Fábio Morei…", "(11)…") — justamente o que se precisa ler.
+        conteudo = ft.Column(
+            [
+                ft.Row(
+                    [
+                        posicao,
+                        _avatar_contato(item["nome"], item.get("contato_id", "")),
+                        ft.Text(
+                            item["nome"],
+                            size=fonte(14),
+                            weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO,
+                            expand=True,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    [
+                        chip,
+                        ft.Text(
+                            telefone or "sem telefone",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                            italic=not telefone,
+                            expand=True,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.KEYBOARD_ARROW_UP,
+                            icon_size=fonte(18),
+                            tooltip="Subir no rodízio",
+                            disabled=indice == 0,
+                            style=ft.ButtonStyle(padding=2),
+                            on_click=lambda e, i=indice: on_mover(i, -1),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.KEYBOARD_ARROW_DOWN,
+                            icon_size=fonte(18),
+                            tooltip="Descer no rodízio",
+                            disabled=indice == total - 1,
+                            style=ft.ButtonStyle(padding=2),
+                            on_click=lambda e, i=indice: on_mover(i, 1),
+                        ),
+                        excluir,
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=6,
+            tight=True,
+        )
+    else:
+        conteudo = ft.Row(
             [
                 posicao,
                 _avatar_contato(item["nome"], item.get("contato_id", "")),
@@ -9634,8 +9749,11 @@ def _cartao_presidente(
             ],
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+        )
+
+    return ft.Container(
+        content=conteudo,
+        padding=ft.Padding.symmetric(horizontal=10, vertical=10),
         bgcolor=FUNDO_CARD,
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=12,

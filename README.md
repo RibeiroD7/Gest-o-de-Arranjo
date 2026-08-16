@@ -40,7 +40,9 @@ uma planilha (veja abaixo).
 - **Temas** — os discursos públicos numerados, com controle de uso por ano e
   observações. Importa os títulos dos formulários oficiais S-99/S-99a em PDF.
 - **Congregações** — cadastro das congregações do circuito (responsável,
-  telefone, endereço, dia e horário da reunião).
+  telefone, endereço, dia e horário da reunião). Cada uma com telefone tem
+  o botão de **WhatsApp** ao lado do responsável, para falar com ele sem
+  abrir o cadastro.
 - **Contatos do celular** — no cadastro de oradores e de presidentes, o botão
   **Buscar nos contatos** preenche o telefone a partir da agenda do aparelho.
   No **Android** abre o seletor do próprio sistema; no **computador**, e se o
