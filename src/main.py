@@ -200,7 +200,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.23.0"
+VERSAO_APP = "1.24.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -5059,25 +5059,47 @@ def abrir_seletor_oradores(
                 uso_txt = f"último uso: {ultimos.get(nr) or '—'}"
             return f"{nr} - {titulo}\n{uso_txt}"
 
-        def montar(cong_id: str):
+        def montar(cong_id: str, orador_id: str | None = None):
             oradores = oradores_com_temas_da_congregacao(int(cong_id))
             for orador in oradores:
                 orador["qualquer_tema"] = obs_tem_qualquer_tema(
                     orador.get("observacoes", "")
                 )
-            sugestoes = sugerir_recebidos(oradores, prioritarios, uso, limite=15)
+            # Com um orador escolhido, mostra TODOS os temas dele em ordem de
+            # prioridade — é o que responde "o que ele pode fazer agora?".
+            # Sem escolha, mistura os melhores pares da congregação inteira.
+            se_um = [o for o in oradores if str(o["id"]) == str(orador_id)]
+            if se_um:
+                sugestoes = sugerir_recebidos(
+                    se_um, prioritarios, uso, limite=300, max_por_orador=300
+                )
+            else:
+                sugestoes = sugerir_recebidos(oradores, prioritarios, uso, limite=15)
+
             if not sugestoes:
+                vazio = (
+                    f"{se_um[0]['nome']} não tem temas cadastrados. Cadastre os "
+                    "temas dele em Oradores."
+                    if se_um
+                    else "Nenhum orador desta congregação tem temas cadastrados. "
+                    "Cadastre os temas de cada orador em Oradores."
+                )
                 lista.controls = [
                     ft.Container(
                         content=ft.Text(
-                            "Nenhum orador desta congregação tem temas cadastrados. "
-                            "Cadastre os temas de cada orador em Oradores.",
-                            size=fonte(12), color=TEXTO_SECUNDARIO, italic=True,
+                            vazio, size=fonte(12), color=TEXTO_SECUNDARIO, italic=True
                         ),
                         padding=12,
                     )
                 ]
                 return
+
+            def titulo_linha(posicao: int, s: dict) -> str:
+                if se_um:
+                    # O nome já está no seletor: aqui vale a ordem.
+                    return f"{posicao}º" + ("  ·  prioritário" if s["prioritario"] else "")
+                return s["orador_nome"] + ("  ·  tema prioritário" if s["prioritario"] else "")
+
             lista.controls = [
                 ft.ListTile(
                     dense=True,
@@ -5087,14 +5109,20 @@ def abrir_seletor_oradores(
                         color=COR_AVISO if s["prioritario"] else TEXTO_SECUNDARIO,
                     ),
                     title=ft.Text(
-                        s["orador_nome"]
-                        + ("  ·  tema prioritário" if s["prioritario"] else ""),
+                        titulo_linha(posicao, s),
                         size=fonte(13), weight=ft.FontWeight.W_600,
                     ),
                     subtitle=ft.Text(subtitulo_sugestao(s), size=fonte(12)),
                     on_click=lambda e, s=dict(s): escolher_sugestao(s),
                 )
-                for s in sugestoes
+                for posicao, s in enumerate(sugestoes, start=1)
+            ]
+
+        def opcoes_de_orador(cong_id: str) -> list[ft.dropdown.Option]:
+            """Oradores da congregação, com 'Todos' para a visão misturada."""
+            return [ft.dropdown.Option(key="", text="Todos os oradores")] + [
+                ft.dropdown.Option(key=str(o["id"]), text=o["nome"])
+                for o in oradores_com_temas_da_congregacao(int(cong_id))
             ]
 
         seletor_cong = ft.Dropdown(
@@ -5106,12 +5134,30 @@ def abrir_seletor_oradores(
             enable_filter=True,
         )
 
+        seletor_orador = ft.Dropdown(
+            label="Orador (opcional)",
+            options=opcoes_de_orador(inicial),
+            value="",
+            expand=True,
+            editable=True,
+            enable_filter=True,
+        )
+
         def trocar_congregacao(_=None):
             if seletor_cong.value:
+                # Trocar de congregação zera o orador: ele era de outra lista.
+                seletor_orador.options = opcoes_de_orador(seletor_cong.value)
+                seletor_orador.value = ""
                 montar(seletor_cong.value)
                 page.update()
 
+        def trocar_orador(_=None):
+            if seletor_cong.value:
+                montar(seletor_cong.value, seletor_orador.value or None)
+                page.update()
+
         seletor_cong.on_select = trocar_congregacao
+        seletor_orador.on_select = trocar_orador
         montar(inicial)
 
         page.show_dialog(
@@ -5127,13 +5173,17 @@ def abrir_seletor_oradores(
                     content=ft.Column(
                         [
                             ft.Text(
-                                "Sugere orador + tema começando pelos que você marcou "
-                                "como prioritários (★) e pelos há mais tempo sem fazer. "
+                                "Começa pelos temas que você marcou como "
+                                "prioritários (★) e pelos há mais tempo sem fazer. "
+                                "Escolha um orador para ver todos os temas dele em "
+                                "ordem; sem escolher, mistura a congregação inteira. "
                                 "Toque para preencher.",
                                 size=fonte(12), color=TEXTO_SECUNDARIO,
                             ),
                             ft.Container(height=8),
                             seletor_cong,
+                            ft.Container(height=8),
+                            seletor_orador,
                             ft.Container(height=4),
                             lista,
                         ],

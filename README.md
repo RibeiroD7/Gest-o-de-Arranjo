@@ -39,6 +39,9 @@ uma planilha (veja abaixo).
   oradores para envio ao superintendente de circuito.
 - **Temas** — os discursos públicos numerados, com controle de uso por ano e
   observações. Importa os títulos dos formulários oficiais S-99/S-99a em PDF.
+  Ao adicionar um orador recebido, a **escolha assistida** sugere pares
+  orador+tema pelos prioritários (★) e pelos há mais tempo sem fazer —
+  escolhendo um orador, ela lista **todos** os temas dele nessa ordem.
 - **Congregações** — cadastro das congregações do circuito (responsável,
   telefone, endereço, dia e horário da reunião). Cada uma com telefone tem
   o botão de **WhatsApp** ao lado do responsável, para falar com ele sem

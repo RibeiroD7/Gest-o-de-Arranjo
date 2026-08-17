@@ -337,3 +337,35 @@ class TestAlternanciaDePrivilegio:
             [10, 20, 30], ["12/09/2026"], set(), historico, cats
         )
         assert escolha[1] == 30
+
+
+class TestTodosOsTemasDeUmOrador:
+    """Escolhido um orador, a lista mostra os temas DELE em ordem.
+
+    Antes o diálogo misturava a congregação inteira e mostrava no máximo três
+    temas por pessoa — não dava para ver o que aquele irmão tem preparado.
+    """
+
+    def _um_orador(self):
+        return [{"id": 1, "nome": "Danilo", "temas": list(range(1, 12)),
+                 "qualquer_tema": False}]
+
+    def test_traz_todos_os_temas_sem_o_limite_de_tres(self):
+        uso = {n: "" for n in range(1, 12)}
+        sugestoes = sugerir_recebidos(
+            self._um_orador(), set(), uso, limite=300, max_por_orador=300
+        )
+        assert len(sugestoes) == 11
+
+    def test_ordem_prioritario_nunca_feito_mais_antigo(self):
+        uso = {1: "202610", 2: "", 3: "202501", 4: "202508"}
+        oradores = [{"id": 1, "nome": "X", "temas": [1, 2, 3, 4],
+                     "qualquer_tema": False}]
+        ordem = [
+            s["tema_nr"]
+            for s in sugerir_recebidos(
+                oradores, {4}, uso, limite=300, max_por_orador=300
+            )
+        ]
+        # 4 é prioritário; depois o nunca feito (2); depois do mais antigo.
+        assert ordem == [4, 2, 3, 1]
