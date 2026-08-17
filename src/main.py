@@ -200,7 +200,7 @@ from util import (
 # ---------------------------------------------------------------------------
 
 # Versão exibida no app. O release.sh mantém este valor igual à tag/pyproject.
-VERSAO_APP = "1.24.0"
+VERSAO_APP = "1.25.0"
 
 # Verificação de atualização (só no desktop): consulta a última release no
 # GitHub e avisa se houver versão mais nova. Falha em silêncio se offline.
@@ -5039,6 +5039,19 @@ def abrir_seletor_oradores(
         uso = {int(nr): (c or "") for nr, c in zip(df["nr"], df["ultimo_uso_chave"])}
         titulos = {int(nr): (t or "") for nr, t in zip(df["nr"], df["titulo"])}
         ultimos = {int(nr): (u or "") for nr, u in zip(df["nr"], df["ultimo_uso"])}
+        # "restricoes" já traz a observação do tema ou o limite de uso; o "—"
+        # é o texto que o catálogo usa para "sem nada anotado".
+        observacoes_tema = {
+            int(nr): (o or "").strip()
+            for nr, o in zip(df["nr"], df["restricoes"])
+            if (o or "").strip() not in ("", "—")
+        }
+        # Quem já está no mês não deve ser sugerido de novo.
+        ja_no_mes = {
+            int(r["orador_id"])
+            for r in carregar_oradores_arranjo(arranjo_id)
+            if r.get("orador_id") and r["tipo"] == tipo
+        }
 
         lista = ft.Column(spacing=2, tight=True, scroll=ft.ScrollMode.AUTO,
                           expand=True)
@@ -5057,10 +5070,21 @@ def abrir_seletor_oradores(
                 uso_txt = "nunca feito na sua congregação"
             else:
                 uso_txt = f"último uso: {ultimos.get(nr) or '—'}"
-            return f"{nr} - {titulo}\n{uso_txt}"
+            linhas = [f"{nr} - {titulo}", uso_txt]
+            # A observação do tema (uso restrito, limite de data, recado do
+            # catálogo) precisa aparecer na hora de escolher, não só na aba
+            # Temas — é ali que ela muda a decisão.
+            observacao = observacoes_tema.get(nr)
+            if observacao:
+                linhas.append(f"⚠ {_resumir_texto_tabela(observacao, 64)}")
+            return "\n".join(linhas)
 
         def montar(cong_id: str, orador_id: str | None = None):
-            oradores = oradores_com_temas_da_congregacao(int(cong_id))
+            oradores = [
+                o
+                for o in oradores_com_temas_da_congregacao(int(cong_id))
+                if int(o["id"]) not in ja_no_mes
+            ]
             for orador in oradores:
                 orador["qualquer_tema"] = obs_tem_qualquer_tema(
                     orador.get("observacoes", "")
@@ -5077,13 +5101,21 @@ def abrir_seletor_oradores(
                 sugestoes = sugerir_recebidos(oradores, prioritarios, uso, limite=15)
 
             if not sugestoes:
-                vazio = (
-                    f"{se_um[0]['nome']} não tem temas cadastrados. Cadastre os "
-                    "temas dele em Oradores."
-                    if se_um
-                    else "Nenhum orador desta congregação tem temas cadastrados. "
-                    "Cadastre os temas de cada orador em Oradores."
-                )
+                if se_um:
+                    vazio = (
+                        f"{se_um[0]['nome']} não tem temas cadastrados. Cadastre "
+                        "os temas dele em Oradores."
+                    )
+                elif ja_no_mes:
+                    vazio = (
+                        "Todos os oradores desta congregação com temas cadastrados "
+                        "já estão neste mês. Escolha outra congregação."
+                    )
+                else:
+                    vazio = (
+                        "Nenhum orador desta congregação tem temas cadastrados. "
+                        "Cadastre os temas de cada orador em Oradores."
+                    )
                 lista.controls = [
                     ft.Container(
                         content=ft.Text(
@@ -5119,10 +5151,11 @@ def abrir_seletor_oradores(
             ]
 
         def opcoes_de_orador(cong_id: str) -> list[ft.dropdown.Option]:
-            """Oradores da congregação, com 'Todos' para a visão misturada."""
+            """Oradores da congregação, sem quem já está no mês."""
             return [ft.dropdown.Option(key="", text="Todos os oradores")] + [
                 ft.dropdown.Option(key=str(o["id"]), text=o["nome"])
                 for o in oradores_com_temas_da_congregacao(int(cong_id))
+                if int(o["id"]) not in ja_no_mes
             ]
 
         seletor_cong = ft.Dropdown(

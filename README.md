@@ -41,7 +41,11 @@ uma planilha (veja abaixo).
   observações. Importa os títulos dos formulários oficiais S-99/S-99a em PDF.
   Ao adicionar um orador recebido, a **escolha assistida** sugere pares
   orador+tema pelos prioritários (★) e pelos há mais tempo sem fazer —
-  escolhendo um orador, ela lista **todos** os temas dele nessa ordem.
+  escolhendo um orador, ela lista **todos** os temas dele nessa ordem, com a
+  observação do tema (⚠ uso restrito, limite de data) e sem repetir quem já
+  está naquele mês.
+  Ocultar a coluna de um ano esconde só a **coluna**: o histórico de uso
+  continua contando na ordenação.
 - **Congregações** — cadastro das congregações do circuito (responsável,
   telefone, endereço, dia e horário da reunião). Cada uma com telefone tem
   o botão de **WhatsApp** ao lado do responsável, para falar com ele sem

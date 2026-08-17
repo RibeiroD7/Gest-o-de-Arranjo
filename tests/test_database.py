@@ -396,3 +396,53 @@ class TestRodizioContaDatasEspeciais:
         assert linhas["Lucas"]["quantidade"] == 2
         assert linhas["Lucas"]["ultima_data"] == "26/09/2026"
         assert linhas["Paulo"]["quantidade"] == 0
+
+
+class TestAnoOcultoNaoApagaHistorico:
+    """Ocultar a coluna de um ano some com a COLUNA, não com o uso.
+
+    A sugestão de temas ordena pelo último uso; se ocultar 2024 fizesse os
+    temas de 2024 parecerem "nunca feitos", eles voltariam para o topo da fila
+    indevidamente.
+    """
+
+    def _preparar(self):
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM tema_uso_por_ano")
+            conn.execute("DELETE FROM temas_anos_colunas")
+            conn.execute("INSERT OR REPLACE INTO temas (nr, titulo) VALUES (7, 'Tema 7')")
+            conn.commit()
+        finally:
+            conn.close()
+        database.adicionar_ano_coluna(2025)
+        database.adicionar_ano_coluna(2026)
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO tema_uso_por_ano (tema_nr, ano_coluna, data_uso) "
+                "VALUES (7, 2026, '08/2026')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _tema7(self):
+        df = database.carregar_dataframe_temas()
+        return df[df["nr"] == 7].iloc[0]
+
+    def test_com_o_ano_visivel(self):
+        self._preparar()
+        linha = self._tema7()
+        assert linha["ultimo_uso"] == "08/2026"
+        assert "2026" in database.carregar_dataframe_temas().columns
+
+    def test_ocultando_o_ano_o_ultimo_uso_permanece(self):
+        self._preparar()
+        database.definir_visibilidade_ano_coluna(2026, False)
+        linha = self._tema7()
+        assert linha["ultimo_uso"] == "08/2026", "o uso não pode sumir com a coluna"
+        assert linha["ultimo_uso_chave"] == "2026-08"
+        # A coluna, essa sim, desaparece da tabela.
+        assert "2026" not in database.carregar_dataframe_temas().columns
