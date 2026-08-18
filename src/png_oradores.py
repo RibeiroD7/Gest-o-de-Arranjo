@@ -15,6 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from armazenamento import ASSETS_DIR, EXPORTS_DIR
+from log_app import logger
 
 ESCALA = 3
 DPI = 300
@@ -529,31 +530,84 @@ def copiar_imagem_para_area_transferencia(caminho: str | Path) -> bool:
 
     É o que permite colar a imagem (Ctrl+V) direto na conversa do WhatsApp
     Web/Desktop, já que não existe um jeito programático de anexar arquivo
-    num link ``wa.me`` — o formulário de composição não aceita isso. Só
-    funciona no Windows (``pywin32``, já uma dependência opcional do projeto);
-    nos demais sistemas, ou se algo falhar, devolve False sem levantar exceção
-    — quem chamou decide o que fazer (ex: sugerir anexar o arquivo à mão).
+    num link ``wa.me`` — o formulário de composição não aceita isso.
+
+    Fala com a API do Windows por ``ctypes``, da biblioteca padrão. A primeira
+    versão usava ``pywin32``, que funciona rodando do código-fonte mas não
+    sobrevive ao empacotamento do Flet (os ``.pyd`` e as DLLs de
+    ``pywin32_system32`` não vão para o instalador), então no app instalado o
+    import falhava e o envio caía silenciosamente no texto.
+
+    Fora do Windows, ou se algo falhar, devolve False sem levantar exceção —
+    quem chamou decide o que fazer (ex: mandar o texto e anexar à mão).
     """
     if platform.system() != "Windows":
         return False
+
+    CF_DIB = 8
+    GMEM_MOVEABLE = 0x0002
+
     try:
-        import win32clipboard  # type: ignore[import-not-found]
+        import ctypes
+        from ctypes import wintypes
 
         imagem = Image.open(caminho).convert("RGB")
         buffer_bmp = io.BytesIO()
         imagem.save(buffer_bmp, format="BMP")
-        # O clipboard do Windows usa CF_DIB: o mesmo BMP, sem os 14 bytes
-        # iniciais do BITMAPFILEHEADER (que só existem no arquivo em disco).
+        # O clipboard usa CF_DIB: o mesmo BMP, sem os 14 bytes iniciais do
+        # BITMAPFILEHEADER (que só existem no arquivo em disco).
         dados_dib = buffer_bmp.getvalue()[14:]
 
-        win32clipboard.OpenClipboard()
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        # Sem declarar os tipos, o ctypes trunca os ponteiros para 32 bits e o
+        # handle chega corrompido do outro lado no Windows 64 bits.
+        kernel32.GlobalAlloc.argtypes = (wintypes.UINT, ctypes.c_size_t)
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalLock.argtypes = (wintypes.HGLOBAL,)
+        kernel32.GlobalLock.restype = wintypes.LPVOID
+        kernel32.GlobalUnlock.argtypes = (wintypes.HGLOBAL,)
+        kernel32.GlobalUnlock.restype = wintypes.BOOL
+        kernel32.GlobalFree.argtypes = (wintypes.HGLOBAL,)
+        kernel32.GlobalFree.restype = wintypes.HGLOBAL
+        user32.OpenClipboard.argtypes = (wintypes.HWND,)
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.EmptyClipboard.restype = wintypes.BOOL
+        user32.SetClipboardData.argtypes = (wintypes.UINT, wintypes.HANDLE)
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.CloseClipboard.restype = wintypes.BOOL
+
+        # O bloco precisa ser GMEM_MOVEABLE: o clipboard assume a posse dele.
+        bloco = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(dados_dib))
+        if not bloco:
+            logger.warning("Clipboard: GlobalAlloc falhou")
+            return False
+
+        destino = kernel32.GlobalLock(bloco)
+        if not destino:
+            kernel32.GlobalFree(bloco)
+            logger.warning("Clipboard: GlobalLock falhou")
+            return False
+        ctypes.memmove(destino, dados_dib, len(dados_dib))
+        kernel32.GlobalUnlock(bloco)
+
+        if not user32.OpenClipboard(None):
+            kernel32.GlobalFree(bloco)
+            logger.warning("Clipboard: OpenClipboard falhou (outro app segurando?)")
+            return False
         try:
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(win32clipboard.CF_DIB, dados_dib)
+            user32.EmptyClipboard()
+            if not user32.SetClipboardData(CF_DIB, bloco):
+                # Só continuamos donos do bloco se a entrega falhou.
+                kernel32.GlobalFree(bloco)
+                logger.warning("Clipboard: SetClipboardData falhou")
+                return False
         finally:
-            win32clipboard.CloseClipboard()
+            user32.CloseClipboard()
         return True
     except Exception:  # noqa: BLE001 — recurso opcional, nunca deve travar o envio
+        logger.exception("Falha ao copiar a imagem para a área de transferência")
         return False
 
 

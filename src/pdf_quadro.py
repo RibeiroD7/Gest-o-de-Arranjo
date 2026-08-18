@@ -144,9 +144,9 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
             linha[0]: linha[1]
             for linha in conn.execute(
                 """
-                SELECT p.data, COALESCE(c.nome, '')
+                SELECT p.data, COALESCE(c.nome, p.nome_avulso, '')
                 FROM presidentes p
-                JOIN presidentes_cadastro c ON p.presidente_id = c.id
+                LEFT JOIN presidentes_cadastro c ON p.presidente_id = c.id
                 WHERE substr(p.data, 7, 4) = ? AND substr(p.data, 4, 2) = ?
                 """,
                 (str(ano), mes_str),

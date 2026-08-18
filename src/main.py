@@ -99,6 +99,7 @@ from database import (
     salvar_orador,
     salvar_ordem_presidentes,
     salvar_presidente,
+    salvar_presidente_avulso,
     salvar_presidente_cadastro,
     salvar_tema,
     sincronizar_uso_temas,
@@ -5555,6 +5556,90 @@ def abrir_dialog_selecao_exportacao_png(
     page.update()
 
 
+# Chaves internas do seletor de presidente (não são IDs de cadastro).
+CHAVE_PRESIDENTE_AVULSO = "__avulso__"
+CHAVE_PRESIDENTE_AVULSO_ATUAL = "__avulso_atual__"
+
+
+def abrir_dialog_presidente_avulso(
+    page: ft.Page,
+    data_str: str,
+    ao_concluir: Callable[[], None],
+    nome_atual: str = "",
+) -> None:
+    """Digita o nome de quem vai presidir sem estar no cadastro.
+
+    É o caso do irmão que saiu da congregação: a semana dele precisa continuar
+    aparecendo preenchida na programação e no quadro, mas ele não está mais na
+    escala — então o nome fica FORA do revezamento.
+    """
+    campo_nome = ft.TextField(
+        label="Nome de quem vai presidir",
+        hint_text="Ex: Otávio Vilela",
+        value=nome_atual,
+        autofocus=True,
+        expand=True,
+    )
+    texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
+
+    def fechar(_=None):
+        page.pop_dialog()
+
+    def salvar(_=None):
+        nome = (campo_nome.value or "").strip()
+        if not nome:
+            texto_erro.value = "Digite o nome de quem vai presidir."
+            texto_erro.visible = True
+            page.update()
+            return
+        salvar_presidente_avulso(data_str, nome)
+        fechar()
+        ao_concluir()
+        mostrar_sucesso(page, f"{nome} ficou como presidente de {data_str[:5]}.")
+
+    campo_nome.on_submit = salvar
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Presidente fora do rodízio"),
+            content=ft.Container(
+                width=_largura_dialog(page, 420),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            f"Sábado {data_str[:5]} — para quem não está no "
+                            "cadastro de presidentes (por exemplo, o irmão que "
+                            "saiu da congregação).",
+                            size=fonte(13),
+                            color=TEXTO_SECUNDARIO,
+                        ),
+                        ft.Container(height=8),
+                        campo_nome,
+                        texto_erro,
+                        ft.Container(height=4),
+                        ft.Text(
+                            "Este nome não entra no revezamento: não conta como "
+                            "presidência para ninguém e não muda a ordem do rodízio.",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                            italic=True,
+                        ),
+                    ],
+                    spacing=0,
+                    tight=True,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=fechar),
+                ft.FilledButton("Salvar", icon=ft.Icons.CHECK, on_click=salvar),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
     """Preenche as semanas sem presidente do mês por rodízio justo.
 
@@ -6781,6 +6866,12 @@ def abrir_dialog_oradores_mes(
             ft.dropdown.Option(key=str(item["id"]), text=f"{item['nome']} ({item['categoria']})")
             for item in cadastro
         ]
+        # Última opção: quem não está no cadastro (o irmão que saiu da
+        # congregação, um visitante) entra pelo nome, sem virar cadastro nem
+        # pesar no revezamento.
+        opcoes.append(
+            ft.dropdown.Option(key=CHAVE_PRESIDENTE_AVULSO, text="✏️  Digitar outro nome…")
+        )
         linhas: list[ft.Control] = []
         for data_ref in datas:
             data_str = _formatar_data_arranjo(data_ref)
@@ -6798,15 +6889,44 @@ def abrir_dialog_oradores_mes(
                     )
                 )
                 continue
+            eh_avulso = bool(atual and atual.get("avulso"))
+            nome_avulso = atual["nome"] if eh_avulso else ""
+            opcoes_data = opcoes
+            if eh_avulso:
+                # O nome digitado não existe entre as opções: entra como uma
+                # opção própria para o campo não aparecer vazio.
+                opcoes_data = [
+                    ft.dropdown.Option(
+                        key=CHAVE_PRESIDENTE_AVULSO_ATUAL,
+                        text=f"{nome_avulso} (fora do rodízio)",
+                    ),
+                    *opcoes,
+                ]
+                valor_atual = CHAVE_PRESIDENTE_AVULSO_ATUAL
+            elif atual:
+                valor_atual = str(atual["presidente_id"])
+            else:
+                valor_atual = None
             campo = ft.Dropdown(
                 label="Presidente",
-                options=opcoes,
-                value=str(atual["presidente_id"]) if atual else None,
+                options=opcoes_data,
+                value=valor_atual,
                 expand=True,
             )
 
-            def ao_mudar(e, data_ref=data_str, campo=campo):
-                if campo.value:
+            # `nome` e `anterior` vêm como padrão porque o callback roda depois
+            # do laço: sem isso, todas as datas leriam a última iteração.
+            def ao_mudar(e, data_ref=data_str, campo=campo, anterior=valor_atual,
+                         nome=nome_avulso):
+                if campo.value == CHAVE_PRESIDENTE_AVULSO:
+                    # Volta ao valor de antes: só o diálogo confirma a troca.
+                    campo.value = anterior
+                    abrir_dialog_presidente_avulso(
+                        page, data_ref, atualizar_listas, nome_atual=nome,
+                    )
+                elif campo.value == CHAVE_PRESIDENTE_AVULSO_ATUAL:
+                    pass  # continua o mesmo avulso: nada a gravar
+                elif campo.value:
                     salvar_presidente(data_ref, int(campo.value))
                 else:
                     excluir_presidente(data_ref)

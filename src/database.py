@@ -63,6 +63,42 @@ def _migrar_presidentes_para_cadastro(conn) -> None:
     conn.commit()
 
 
+def _migrar_presidentes_avulsos(conn) -> None:
+    """Permite gravar um presidente pelo NOME, sem estar no cadastro.
+
+    Acontece de um ancião ou servo ministerial sair da congregação: a semana
+    que era dele fica vazia, mas quem presidiu (ou vai presidir) precisa
+    aparecer na programação mesmo assim. Esse nome avulso não entra no
+    revezamento — por isso ``presidente_id`` passa a aceitar NULL e a linha
+    guarda ``nome_avulso``.
+
+    SQLite não afrouxa um NOT NULL com ALTER, então a tabela é reconstruída.
+    """
+    cursor = conn.cursor()
+    colunas = [linha[1] for linha in cursor.execute("PRAGMA table_info(presidentes)")]
+    if not colunas or "nome_avulso" in colunas:
+        return
+
+    cursor.execute("""
+        CREATE TABLE presidentes_avulso_nova (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL UNIQUE,
+            presidente_id INTEGER,
+            nome_avulso TEXT,
+            FOREIGN KEY (presidente_id) REFERENCES presidentes_cadastro(id)
+        )
+    """)
+    cursor.execute(
+        """
+        INSERT INTO presidentes_avulso_nova (id, data, presidente_id, nome_avulso)
+        SELECT id, data, presidente_id, NULL FROM presidentes
+        """
+    )
+    cursor.execute("DROP TABLE presidentes")
+    cursor.execute("ALTER TABLE presidentes_avulso_nova RENAME TO presidentes")
+    conn.commit()
+
+
 TIPOS_EVENTO_PADRAO = [
     "Assembleia de Circuito",
     "Congresso Regional",
@@ -322,12 +358,14 @@ def create_tables(conn):
         CREATE TABLE IF NOT EXISTS presidentes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             data TEXT NOT NULL UNIQUE,
-            presidente_id INTEGER NOT NULL,
+            presidente_id INTEGER,
+            nome_avulso TEXT,
             FOREIGN KEY (presidente_id) REFERENCES presidentes_cadastro(id)
         )
     """)
 
     _migrar_presidentes_para_cadastro(conn)
+    _migrar_presidentes_avulsos(conn)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS anos_planejamento (
@@ -1535,16 +1573,22 @@ def excluir_orador(orador_id: int) -> None:
 
 
 def carregar_presidentes_por_ano(ano: int) -> dict[str, dict]:
-    """Retorna os presidentes designados no ano, indexados por data (DD/MM/AAAA)."""
+    """Retorna os presidentes designados no ano, indexados por data (DD/MM/AAAA).
+
+    Inclui os avulsos (nome digitado à mão, de quem não está no cadastro):
+    eles vêm com ``presidente_id`` nulo, ``avulso=True`` e sem telefone.
+    """
     conn = get_connection()
     try:
         linhas = conn.execute(
             """
-            SELECT p.id, p.data, p.presidente_id, COALESCE(c.nome, '') AS nome,
+            SELECT p.id, p.data, p.presidente_id,
+                   COALESCE(c.nome, p.nome_avulso, '') AS nome,
                    COALESCE(c.telefone, '') AS telefone
             FROM presidentes p
-            JOIN presidentes_cadastro c ON p.presidente_id = c.id
+            LEFT JOIN presidentes_cadastro c ON p.presidente_id = c.id
             WHERE substr(p.data, 7, 4) = ?
+              AND (c.id IS NOT NULL OR COALESCE(p.nome_avulso, '') <> '')
             """,
             (str(ano),),
         ).fetchall()
@@ -1556,6 +1600,7 @@ def carregar_presidentes_por_ano(ano: int) -> dict[str, dict]:
                 "nome": linha[3],
                 # Destino da mensagem da presidência enviada da tela inicial.
                 "telefone": linha[4],
+                "avulso": linha[2] is None,
             }
             for linha in linhas
         }
@@ -1569,10 +1614,41 @@ def salvar_presidente(data: str, presidente_id: int) -> None:
     try:
         conn.execute(
             """
-            INSERT INTO presidentes (data, presidente_id) VALUES (?, ?)
-            ON CONFLICT(data) DO UPDATE SET presidente_id = excluded.presidente_id
+            INSERT INTO presidentes (data, presidente_id, nome_avulso)
+            VALUES (?, ?, NULL)
+            ON CONFLICT(data) DO UPDATE SET
+                presidente_id = excluded.presidente_id,
+                nome_avulso = NULL
             """,
             (data, presidente_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def salvar_presidente_avulso(data: str, nome: str) -> None:
+    """Grava um presidente pelo NOME, para quem não está no cadastro.
+
+    Serve para tapar a semana de quem saiu da congregação: o nome aparece na
+    programação e no quadro, mas fica FORA do revezamento — não conta como
+    "presidiu" para o rodízio nem para o relatório de presidências, porque
+    essa pessoa não está mais na escala.
+    """
+    nome_limpo = (nome or "").strip()
+    if not nome_limpo:
+        raise ValueError("O nome do presidente avulso não pode ser vazio.")
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO presidentes (data, presidente_id, nome_avulso)
+            VALUES (?, NULL, ?)
+            ON CONFLICT(data) DO UPDATE SET
+                presidente_id = NULL,
+                nome_avulso = excluded.nome_avulso
+            """,
+            (data, nome_limpo),
         )
         conn.commit()
     finally:
@@ -1635,7 +1711,7 @@ def trocar_ordem_presidentes(id_a: int, id_b: int) -> None:
         conn.close()
 
 
-def carregar_todas_designacoes_presidente() -> dict[str, int]:
+def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
     """Todas as vezes que alguém presidiu: {data (DD/MM/AAAA): presidente_id}.
 
     Inclui as **datas especiais** com presidente (discurso especial, visita do
@@ -1643,12 +1719,19 @@ def carregar_todas_designacoes_presidente() -> dict[str, int]:
     especial parecia não presidir há muito tempo e era escolhido logo na semana
     seguinte. Se a mesma data estiver nos dois lugares, vale a data especial —
     é lá que ela é gerenciada.
+
+    Os presidentes **avulsos** (nome digitado, fora do cadastro) entram com
+    ``None``: a data conta como ocupada — o rodízio não tenta preenchê-la de
+    novo — mas ninguém do revezamento fica "devendo" por ela.
     """
     conn = get_connection()
     try:
         designacoes = {
             linha[0]: linha[1]
-            for linha in conn.execute("SELECT data, presidente_id FROM presidentes")
+            for linha in conn.execute(
+                "SELECT data, presidente_id FROM presidentes "
+                "WHERE presidente_id IS NOT NULL OR COALESCE(nome_avulso, '') <> ''"
+            )
         }
         designacoes.update(
             {
@@ -1673,6 +1756,7 @@ def ultimo_presidente_antes(data_br: str) -> int | None:
             """
             SELECT presidente_id FROM presidentes
             WHERE substr(data, 7, 4) || substr(data, 4, 2) || substr(data, 1, 2) < ?
+              AND presidente_id IS NOT NULL
             ORDER BY substr(data, 7, 4) || substr(data, 4, 2) || substr(data, 1, 2) DESC
             LIMIT 1
             """,
