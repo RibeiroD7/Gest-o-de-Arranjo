@@ -524,6 +524,39 @@ def abrir_pasta_do_arquivo(caminho: str | Path) -> None:
         subprocess.run(["xdg-open", str(pasta)], check=False)
 
 
+def copiar_imagem_para_area_transferencia(caminho: str | Path) -> bool:
+    """Copia o PNG para a área de transferência do Windows, como bitmap.
+
+    É o que permite colar a imagem (Ctrl+V) direto na conversa do WhatsApp
+    Web/Desktop, já que não existe um jeito programático de anexar arquivo
+    num link ``wa.me`` — o formulário de composição não aceita isso. Só
+    funciona no Windows (``pywin32``, já uma dependência opcional do projeto);
+    nos demais sistemas, ou se algo falhar, devolve False sem levantar exceção
+    — quem chamou decide o que fazer (ex: sugerir anexar o arquivo à mão).
+    """
+    if platform.system() != "Windows":
+        return False
+    try:
+        import win32clipboard  # type: ignore[import-not-found]
+
+        imagem = Image.open(caminho).convert("RGB")
+        buffer_bmp = io.BytesIO()
+        imagem.save(buffer_bmp, format="BMP")
+        # O clipboard do Windows usa CF_DIB: o mesmo BMP, sem os 14 bytes
+        # iniciais do BITMAPFILEHEADER (que só existem no arquivo em disco).
+        dados_dib = buffer_bmp.getvalue()[14:]
+
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_DIB, dados_dib)
+        finally:
+            win32clipboard.CloseClipboard()
+        return True
+    except Exception:  # noqa: BLE001 — recurso opcional, nunca deve travar o envio
+        return False
+
+
 DIAS_SEMANA_PT = [
     "segunda-feira",
     "terça-feira",

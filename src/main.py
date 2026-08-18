@@ -123,6 +123,7 @@ from pdf_relatorios import gerar_pdf_relatorios
 from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from png_oradores import (
     abrir_pasta_do_arquivo,
+    copiar_imagem_para_area_transferencia,
     gerar_link_whatsapp,
     gerar_png_designacao_envio,
     gerar_png_oradores,
@@ -5984,11 +5985,26 @@ async def _dialog_whatsapp_designacao_envio(
                 fechar_dialog()
                 return
 
-            # No PC: abre o WhatsApp Web com o texto (a imagem é anexada à parte).
+            # No PC: não existe um jeito programático de anexar arquivo num
+            # link do WhatsApp Web, então copia a IMAGEM para a área de
+            # transferência (Windows) — falta só colar (Ctrl+V) na conversa e
+            # enviar, do mesmo jeito que o celular manda só a imagem. Sem
+            # esse recurso (Linux, ou sem pywin32), cai no texto de antes,
+            # pré-preenchido no WhatsApp Web, com a imagem anexada à parte.
             config = carregar_configuracao()
             tel = telefone_destino.strip() or config.get("telefone_coordenador", "")
+            imagem_copiada = copiar_imagem_para_area_transferencia(caminho)
             if tel:
-                webbrowser.open(gerar_link_whatsapp(tel, mensagem))
+                webbrowser.open(gerar_link_whatsapp(tel, "" if imagem_copiada else mensagem))
+                if imagem_copiada:
+                    mostrar_sucesso(
+                        page, "Imagem copiada — cole (Ctrl+V) na conversa que abriu e envie."
+                    )
+            elif imagem_copiada:
+                mostrar_sucesso(
+                    page,
+                    "Imagem copiada — abra o WhatsApp, cole (Ctrl+V) na conversa e envie.",
+                )
             else:
                 copiar_texto(
                     page, mensagem,
