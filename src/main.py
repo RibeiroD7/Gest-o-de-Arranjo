@@ -120,7 +120,7 @@ from pdf_quadro import (
 from pdf_quadro import (
     par_meses_do_mes as par_meses_do_mes_quadro,
 )
-from pdf_relatorios import gerar_pdf_relatorios
+from pdf_relatorios import gerar_pdf_relatorios, gerar_pdf_secoes
 from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from png_oradores import (
     abrir_pasta_do_arquivo,
@@ -2095,6 +2095,53 @@ def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
     page.run_task(_salvar)
 
 
+def exportar_relatorio_pdf(
+    page: ft.Page,
+    montar_secoes: Callable[[], list[dict]],
+    titulo: str,
+    nome_arquivo: str,
+    subtitulo: str = "",
+) -> None:
+    """Gera e entrega o relatório em PDF de uma tela.
+
+    ``montar_secoes`` só é chamada aqui dentro (e não pelo chamador) para a
+    leitura do banco acontecer junto com o anel de progresso — em ano cheio,
+    montar a programação inteira demora o bastante para a tela travar sem ele.
+    """
+    config = carregar_configuracao()
+    rodape = config.get("nome_congregacao") or "Minha congregação"
+    try:
+        caminho, erro = executar_com_progresso(
+            page,
+            "Gerando PDF...",
+            lambda: gerar_pdf_secoes(
+                montar_secoes(),
+                titulo,
+                subtitulo=f"{rodape} · {subtitulo}" if subtitulo else rodape,
+                nome_arquivo=nome_arquivo,
+            ),
+        )
+        if erro:
+            mostrar_aviso(page, "Não foi possível exportar", erro)
+            return
+        entregar_arquivo(page, caminho, abrir_arquivo)
+        if not eh_mobile():
+            mostrar_sucesso(page, f"Relatório gerado: {caminho}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Falha ao gerar relatório em PDF")
+        mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
+
+
+def botao_relatorio_tela(on_click: Callable) -> ft.Control:
+    """Botão padrão de 'Relatório' usado no topo de cada tela."""
+    return ft.OutlinedButton(
+        content="Relatório",
+        icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
+        tooltip="Exportar em PDF o que esta tela mostra",
+        on_click=on_click,
+    )
+
+
 def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
     """Gera o PDF de envio de oradores selecionados ou exibe aviso."""
     if not orador_ids:
@@ -3494,6 +3541,23 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
             shadow=_sombra_card(0.25),
         )
 
+    def exportar_relatorio(_=None):
+        from relatorios import secoes_oradores
+
+        # O relatório sai do que está filtrado na tela: se o usuário está
+        # vendo só as outras congregações, é isso que ele quer imprimir.
+        registros = df_filtrado_congregacao().to_dict("records")
+        exportar_relatorio_pdf(
+            page,
+            lambda: secoes_oradores(registros),
+            "Oradores",
+            "Oradores",
+            subtitulo=(
+                "Minha congregação" if estado_filtro["modo"] == "minha"
+                else "Outras congregações"
+            ),
+        )
+
     return criar_tela_padrao(
         page=page,
         titulo="Oradores",
@@ -3514,6 +3578,7 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                 icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
                 on_click=gerar_pdf_envio,
             ),
+            botao_relatorio_tela(exportar_relatorio),
         ],
         on_editar=abrir_editar,
         on_excluir=abrir_excluir,
@@ -4054,6 +4119,13 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         on_click=abrir_anos,
     )
 
+    def exportar_relatorio(_=None):
+        from relatorios import secoes_temas
+
+        exportar_relatorio_pdf(page, secoes_temas, "Catálogo de temas", "Temas")
+
+    botao_relatorio = botao_relatorio_tela(exportar_relatorio)
+
     if eh_mobile():
         # Celular: busca em cima; botões e filtros dentro de um painel
         # recolhido — sobra altura para a tabela, que ficava minúscula.
@@ -4068,7 +4140,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
                 tile_padding=ft.Padding.symmetric(horizontal=8),
                 controls_padding=ft.Padding.only(left=8, right=8, bottom=12),
                 controls=[
-                    ft.Row([botao_importar, botao_gerenciar], spacing=8, wrap=True),
+                    ft.Row([botao_importar, botao_gerenciar, botao_relatorio], spacing=8, wrap=True),
                     ft.Container(height=12),
                     ft.Column(
                         [filtro_assunto, filtro_uso, filtro_ordem],
@@ -4081,7 +4153,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     else:
         controles_topo = [
             ft.Row(
-                [campo_busca, botao_importar, botao_gerenciar],
+                [campo_busca, botao_importar, botao_gerenciar, botao_relatorio],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -4313,6 +4385,18 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
                 df_filtrado, abrir_editar, abrir_excluir, conversar_com_responsavel
             )
 
+    def exportar_relatorio(_=None):
+        from relatorios import secoes_congregacoes
+
+        exportar_relatorio_pdf(
+            page,
+            lambda: secoes_congregacoes(
+                carregar_dados(SQL_CONGREGACOES).to_dict("records")
+            ),
+            "Congregações do circuito",
+            "Congregacoes",
+        )
+
     return criar_tela_padrao(
         page=page,
         titulo="Congregações",
@@ -4325,6 +4409,7 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
                 icon=ft.Icons.ADD,
                 on_click=abrir_nova,
             ),
+            botao_relatorio_tela(exportar_relatorio),
         ],
         on_editar=abrir_editar,
         on_excluir=abrir_excluir,
@@ -7778,6 +7863,18 @@ def tela_programacao(
     def abrir_adicionar_ano(_=None):
         abrir_dialog_adicionar_ano(page, ao_adicionar_ano)
 
+    def exportar_relatorio(_=None):
+        from relatorios import secoes_programacao
+
+        ano = estado["ano"]
+        exportar_relatorio_pdf(
+            page,
+            lambda: secoes_programacao(ano),
+            f"Programação de {ano}",
+            "Programacao",
+            subtitulo=str(ano),
+        )
+
     montar_blocos()
 
     return ft.Column(
@@ -7795,6 +7892,8 @@ def tela_programacao(
                         tooltip="Adicionar ano",
                         on_click=abrir_adicionar_ano,
                     ),
+                    ft.Container(expand=True),
+                    botao_relatorio_tela(exportar_relatorio),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.END,
@@ -8258,13 +8357,52 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         on_click=exportar_pdf,
     )
 
+    def exportar_tudo(_=None):
+        """Junta num PDF só o relatório de todas as telas.
+
+        Um arquivo em vez de cinco: é o que se leva impresso ou se manda pelo
+        WhatsApp de uma vez, e no celular não obriga a salvar cinco vezes.
+        """
+        from relatorios import (
+            secoes_congregacoes,
+            secoes_oradores,
+            secoes_presidentes,
+            secoes_programacao,
+            secoes_temas,
+        )
+
+        ano = estado_rel["ano"]
+
+        def montar() -> list[dict]:
+            secoes: list[dict] = []
+            secoes += secoes_programacao(ano)
+            secoes += secoes_oradores(carregar_dados(SQL_ORADORES).to_dict("records"))
+            secoes += secoes_congregacoes(
+                carregar_dados(SQL_CONGREGACOES).to_dict("records")
+            )
+            secoes += secoes_presidentes()
+            secoes += secoes_temas()
+            return secoes
+
+        exportar_relatorio_pdf(
+            page, montar, f"Relatório completo de {ano}",
+            "Relatorio_Completo", subtitulo=str(ano),
+        )
+
+    botao_tudo = ft.FilledButton(
+        content="Gerar todos",
+        icon=ft.Icons.LIBRARY_BOOKS_OUTLINED,
+        tooltip="Um PDF com programação, oradores, congregações, presidentes e temas",
+        on_click=exportar_tudo,
+    )
+
     montar()
     controles_topo = (
-        ft.Row([seletor_ano, botao_pdf], spacing=10, wrap=True,
+        ft.Row([seletor_ano, botao_pdf, botao_tudo], spacing=10, wrap=True,
                vertical_alignment=ft.CrossAxisAlignment.CENTER)
         if eh_mobile()
         else ft.Row(
-            [seletor_ano, ft.Container(expand=True), botao_pdf],
+            [seletor_ano, ft.Container(expand=True), botao_pdf, botao_tudo],
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
@@ -10061,6 +10199,14 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
     botao_adicionar = ft.FilledButton(
         "Adicionar", icon=ft.Icons.PERSON_ADD_ALT, on_click=adicionar
     )
+
+    def exportar_relatorio(_=None):
+        from relatorios import secoes_presidentes
+
+        exportar_relatorio_pdf(
+            page, secoes_presidentes, "Presidentes e rodízio", "Presidentes"
+        )
+
     cabecalho = ft.Row(
         [
             ft.Column(
@@ -10077,9 +10223,11 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
                 tight=True,
                 expand=True,
             ),
+            botao_relatorio_tela(exportar_relatorio),
             botao_adicionar,
         ],
         spacing=8,
+        wrap=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 

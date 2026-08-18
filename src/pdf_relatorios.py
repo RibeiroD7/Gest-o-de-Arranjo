@@ -200,3 +200,65 @@ def gerar_pdf_relatorios(
         return str(caminho), None
     except Exception as exc:  # noqa: BLE001
         return None, f"Não foi possível gerar o relatório: {exc}"
+
+
+def gerar_pdf_secoes(
+    secoes: list[dict],
+    titulo: str,
+    subtitulo: str = "",
+    nome_arquivo: str = "Relatorio",
+) -> tuple[str | None, str | None]:
+    """Desenha uma lista de seções (ver ``relatorios.py``) num PDF.
+
+    É o motor dos relatórios por tela: cada seção vira um título opcional, uma
+    linha de descrição e uma tabela. Seção sem título encosta na anterior — é
+    como um mês da programação junta as suas quatro tabelas num bloco só.
+
+    Retorna ``(caminho, erro)``.
+    """
+    try:
+        garantir_pastas()
+        caminho = EXPORTS_DIR / f"{nome_arquivo}_{datetime.now():%Y-%m-%d_%H-%M-%S}.pdf"
+        doc = SimpleDocTemplate(
+            str(caminho),
+            pagesize=A4,
+            title=titulo,
+            topMargin=36,
+            bottomMargin=36,
+            leftMargin=36,
+            rightMargin=36,
+        )
+
+        estilo_titulo = ParagraphStyle(
+            "titulo", fontName="Helvetica-Bold", fontSize=16, spaceAfter=2
+        )
+        estilo_sub = ParagraphStyle(
+            "sub", fontName="Helvetica-Bold", fontSize=12, spaceBefore=14, spaceAfter=6
+        )
+        estilo_info = ParagraphStyle(
+            "info", fontName="Helvetica", fontSize=9, textColor=colors.grey, spaceAfter=4
+        )
+
+        rodape = f"Gerado em {datetime.now():%d/%m/%Y %H:%M}"
+        elementos: list = [
+            Paragraph(titulo, estilo_titulo),
+            Paragraph(f"{subtitulo} · {rodape}" if subtitulo else rodape, estilo_info),
+        ]
+
+        for secao in secoes:
+            if secao.get("titulo"):
+                elementos.append(Paragraph(secao["titulo"], estilo_sub))
+            if secao.get("descricao"):
+                elementos.append(Paragraph(secao["descricao"], estilo_info))
+            if secao.get("linhas"):
+                elementos.append(
+                    _tabela(secao["cabecalhos"], secao["linhas"], secao["larguras"])
+                )
+                elementos.append(Spacer(1, 6))
+            elif secao.get("vazio"):
+                elementos.append(Paragraph(secao["vazio"], estilo_info))
+
+        doc.build(elementos)
+        return str(caminho), None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Não foi possível gerar o relatório: {exc}"
