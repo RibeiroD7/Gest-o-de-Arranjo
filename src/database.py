@@ -2233,13 +2233,14 @@ def formatar_mes_ano(data_uso) -> str:
 
 
 def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
-    """Monta DataFrame de temas com uma coluna por ano (como na planilha)."""
-    import pandas as pd
+    """Monta a tabela de temas com uma coluna por ano (como na planilha)."""
+    from tabela import Tabela
 
     conn = get_connection()
     try:
         anos = listar_anos_colunas(apenas_visiveis=apenas_anos_visiveis)
-        temas_df = pd.read_sql_query(
+        temas = Tabela.de_consulta(
+            conn,
             """
             SELECT nr,
                    titulo,
@@ -2260,54 +2261,44 @@ def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
             FROM temas
             ORDER BY nr
             """,
-            conn,
         )
-
-        uso_df = pd.read_sql_query(
-            "SELECT tema_nr, ano_coluna, data_uso FROM tema_uso_por_ano",
-            conn,
-        )
+        usos = conn.execute(
+            "SELECT tema_nr, ano_coluna, data_uso FROM tema_uso_por_ano"
+        ).fetchall()
     finally:
         conn.close()
 
-    # Último uso considera todos os anos registrados, mesmo colunas ocultas
+    # Último uso considera todos os anos registrados, mesmo colunas ocultas.
     ultimo_uso: dict[int, str] = {}
-    if not uso_df.empty:
-        chaves = uso_df.assign(chave=uso_df["data_uso"].map(_chave_mes_ano))
-        chaves = chaves[chaves["chave"] != ""]
-        if not chaves.empty:
-            ultimo_uso = chaves.groupby("tema_nr")["chave"].max().to_dict()
-
-    temas_df["ultimo_uso_chave"] = temas_df["nr"].map(lambda nr: ultimo_uso.get(nr, ""))
-    temas_df["ultimo_uso"] = temas_df["ultimo_uso_chave"].map(
-        lambda chave: _exibir_chave_mes_ano(chave) if chave else "Nunca"
-    )
-
-    if not uso_df.empty and anos:
-        anos_visiveis = {item["ano"] for item in anos}
-        uso_visivel = uso_df[uso_df["ano_coluna"].isin(anos_visiveis)]
-        if not uso_visivel.empty:
-            pivot = uso_visivel.pivot(index="tema_nr", columns="ano_coluna", values="data_uso")
-            pivot.columns = [str(int(c)) for c in pivot.columns]
-            temas_df = temas_df.merge(pivot, left_on="nr", right_index=True, how="left")
-
-    for item in anos:
-        coluna = str(item["ano"])
-        if coluna not in temas_df.columns:
-            temas_df[coluna] = "—"
-        else:
-            temas_df[coluna] = (
-                temas_df[coluna].fillna("—").replace("", "—").map(formatar_mes_ano)
-            )
+    # Uso por (tema, ano) só das colunas visíveis, para virar coluna na tela.
+    anos_visiveis = {item["ano"] for item in anos}
+    por_ano: dict[tuple[int, int], str] = {}
+    for tema_nr, ano_coluna, data_uso in usos:
+        chave = _chave_mes_ano(data_uso)
+        if not chave:
+            continue
+        tema_nr = int(tema_nr)
+        if chave > ultimo_uso.get(tema_nr, ""):
+            ultimo_uso[tema_nr] = chave
+        if ano_coluna in anos_visiveis:
+            por_ano[(tema_nr, int(ano_coluna))] = data_uso
 
     colunas_ano = [str(item["ano"]) for item in anos]
-    return temas_df[
-        [
-            "nr", "titulo", "assunto", *colunas_ano, "ultimo_uso",
-            "restricoes", "data_limite_uso", "restrito", "tem_observacao",
-            "ultimo_uso_chave", "prioritario",
-        ]
+    for linha in temas.linhas:
+        nr = int(linha["nr"])
+        chave = ultimo_uso.get(nr, "")
+        linha["ultimo_uso_chave"] = chave
+        linha["ultimo_uso"] = _exibir_chave_mes_ano(chave) if chave else "Nunca"
+        for item in anos:
+            valor = por_ano.get((nr, item["ano"]))
+            linha[str(item["ano"])] = formatar_mes_ano(valor) if valor else "—"
+
+    temas.colunas = [
+        "nr", "titulo", "assunto", *colunas_ano, "ultimo_uso",
+        "restricoes", "data_limite_uso", "restrito", "tem_observacao",
+        "ultimo_uso_chave", "prioritario",
     ]
+    return temas
 
 
 def _importar_temas_seed_json(conn, caminho) -> int:
@@ -2370,18 +2361,14 @@ def importar_temas_planilha(conn, caminho: str | None = None) -> int:
         if seed_json is not None:
             return _importar_temas_seed_json(conn, seed_json)
 
-    import pandas as pd
+    from tabela import ler_planilha_crua
 
     arquivo = Path(caminho) if caminho and Path(caminho).exists() else caminho_temas_embutido()
     if arquivo is None:
         print("Aviso: arquivo Temas.xlsx não encontrado — temas não importados.")
         return 0
 
-    try:
-        raw = pd.read_excel(arquivo, engine="calamine", header=None)
-    except ImportError:
-        # python-calamine indisponível (ex.: Android) — usa o engine padrão
-        raw = pd.read_excel(arquivo, header=None)
+    raw = ler_planilha_crua(arquivo)
     colunas_ano = _extrair_colunas_ano_planilha(raw)
 
     cursor = conn.cursor()

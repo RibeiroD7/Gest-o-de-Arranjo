@@ -233,12 +233,12 @@ def secoes_temas() -> list[dict]:
     df = carregar_dataframe_temas(apenas_anos_visiveis=True)
     linhas = [
         [
-            str(linha.nr),
-            linha.titulo,
-            linha.assunto if linha.assunto != "—" else "",
-            linha.ultimo_uso,
+            str(linha["nr"]),
+            linha["titulo"],
+            linha["assunto"] if linha["assunto"] != "—" else "",
+            linha["ultimo_uso"],
         ]
-        for linha in df.itertuples()
+        for linha in df
     ]
     nunca = sum(1 for linha in linhas if linha[3] == "Nunca")
     return [

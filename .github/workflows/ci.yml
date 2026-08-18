@@ -22,7 +22,7 @@ jobs:
       - name: Instalar dependências de teste
         # Flet + libs de exportação permitem o smoke de UI (construir as telas
         # sem abrir janela), que pega regressões como o crash de layout.
-        run: pip install pandas python-dateutil pytest ruff flet reportlab Pillow openpyxl pypdf
+        run: pip install pytest ruff flet reportlab Pillow openpyxl pypdf
 
       - name: Ruff (lint)
         run: ruff check src tests extensoes

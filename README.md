@@ -138,11 +138,10 @@ importados de `data/Temas.xlsx`.
 ### Testes e lint
 
 A lógica pura (datas, rodízio de presidentes, backup) tem testes em
-[`tests/`](tests/). Rodam sem Flet — bastam `pandas`, `python-dateutil`,
-`pytest` e `ruff`:
+[`tests/`](tests/). Rodam sem Flet — bastam `pytest` e `ruff`:
 
 ```bash
-pip install pandas python-dateutil pytest ruff
+pip install pytest ruff
 ruff check src tests
 pytest -q
 ```

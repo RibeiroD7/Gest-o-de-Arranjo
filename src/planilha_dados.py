@@ -157,15 +157,10 @@ def _extrair_numeros_temas(valor, avisos: list[str], contexto: str) -> list[int]
 
 
 def _ler_aba(caminho: str, aba: str):
-    """Lê uma aba da planilha; retorna DataFrame ou None se a aba não existir."""
-    import pandas as pd
+    """Lê uma aba da planilha; retorna list[dict] ou None se a aba não existir."""
+    from tabela import ler_aba_com_cabecalho
 
-    try:
-        return pd.read_excel(caminho, sheet_name=aba, dtype=str)
-    except ValueError as exc:
-        if "Worksheet" in str(exc):  # aba ausente; outros ValueError = arquivo inválido
-            return None
-        raise
+    return ler_aba_com_cabecalho(caminho, aba)
 
 
 def importar_planilha_dados(caminho: str) -> dict:
@@ -219,7 +214,7 @@ def importar_planilha_dados(caminho: str) -> dict:
             return congregacoes[chave]
 
         if df_cong is not None:
-            for i, row in df_cong.iterrows():
+            for i, row in enumerate(df_cong):
                 nome = _texto(row.get("Nome*"))
                 if not nome:
                     continue
@@ -269,7 +264,7 @@ def importar_planilha_dados(caminho: str) -> dict:
                 )
                 temas_existentes.add(nr)
                 temas_pendentes_criados = True
-            for i, row in df_orad.iterrows():
+            for i, row in enumerate(df_orad):
                 nome = _texto(row.get("Nome*"))
                 if not nome:
                     continue
@@ -318,7 +313,7 @@ def importar_planilha_dados(caminho: str) -> dict:
                 nome.strip().lower()
                 for (nome,) in cursor.execute("SELECT nome FROM presidentes_cadastro")
             }
-            for i, row in df_pres.iterrows():
+            for i, row in enumerate(df_pres):
                 nome = _texto(row.get("Nome*"))
                 if not nome:
                     continue

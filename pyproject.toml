@@ -6,11 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "flet>=0.85.3",
-    "pandas",
+    # Sem pandas: ele e o numpy custavam ~27 MB no APK (mais que todo o resto
+    # do Python empacotado) para serem usados só como "lista de linhas com
+    # colunas nomeadas". Esse papel agora é do src/tabela.py, com a biblioteca
+    # padrão. O python-dateutil saiu junto: só existia por causa do pandas.
     "reportlab",
     "Pillow",
     "openpyxl",
-    "python-dateutil",
     "pypdf",
     # Só no desktop: leitura do Temas.xlsx (S-99) via engine calamine. No
     # Android o app usa temas_seed.json, então este pacote nativo é excluído

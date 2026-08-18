@@ -437,7 +437,7 @@ class TestAnoOcultoNaoApagaHistorico:
         linha = self._tema7()
         assert linha["ultimo_uso"] == "Ago/2026"
         assert linha["2026"] == "Ago/2026", "a coluna do ano também usa o mês por extenso"
-        assert "2026" in database.carregar_dataframe_temas().columns
+        assert "2026" in database.carregar_dataframe_temas().colunas
 
     def test_ocultando_o_ano_o_ultimo_uso_permanece(self):
         self._preparar()
@@ -446,7 +446,7 @@ class TestAnoOcultoNaoApagaHistorico:
         assert linha["ultimo_uso"] == "Ago/2026", "o uso não pode sumir com a coluna"
         assert linha["ultimo_uso_chave"] == "2026-08"
         # A coluna, essa sim, desaparece da tabela.
-        assert "2026" not in database.carregar_dataframe_temas().columns
+        assert "2026" not in database.carregar_dataframe_temas().colunas
 
 
 class TestUsoVaiParaAColunaDoProprioAno:

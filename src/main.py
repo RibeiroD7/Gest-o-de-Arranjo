@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Callable
 
 import flet as ft
-import pandas as pd
 
 import nuvem_drive
 import tema as _tema  # apelidado: `tema` é usado como variável local (título) em várias telas
@@ -139,6 +138,8 @@ from servicos import (
     sugerir_recebidos,
     weekdays_sugeridos,
 )
+from tabela import Tabela
+from tabela import filtrar as filtrar_tabela
 from tema import (
     BORDA_SUAVE,
     COR_AVISO,
@@ -384,11 +385,11 @@ CONFIG_TABELA_ORADORES = {
 # Banco de dados
 # ---------------------------------------------------------------------------
 
-def carregar_dados(query: str) -> pd.DataFrame:
-    """Executa uma consulta SQL e retorna o resultado como DataFrame."""
+def carregar_dados(query: str) -> Tabela:
+    """Executa uma consulta SQL e retorna o resultado como Tabela."""
     conn = get_connection()
     try:
-        return pd.read_sql_query(query, conn)
+        return Tabela.de_consulta(conn, query)
     finally:
         conn.close()
 
@@ -783,7 +784,7 @@ def carregar_oradores_com_congregacao_opcoes(
     query += " ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome"
     conn = get_connection()
     try:
-        df = pd.read_sql_query(query, conn, params=params or None)
+        df = Tabela.de_consulta(conn, query, params or None)
     finally:
         conn.close()
     opcoes: list[ft.dropdown.Option] = []
@@ -816,11 +817,11 @@ def carregar_congregacao(congregacao_id: int) -> dict | None:
     """Carrega uma congregação pelo ID para edição."""
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
+        df = Tabela.de_consulta(
+            conn,
             "SELECT id, nome, responsavel, telefone, endereco, dia_semana, horario, observacoes "
             "FROM congregacoes WHERE id = ?",
-            conn,
-            params=(congregacao_id,),
+            (congregacao_id,),
         )
     finally:
         conn.close()
@@ -843,11 +844,11 @@ def carregar_orador(orador_id: int) -> dict | None:
     """Carrega um orador pelo ID para edição."""
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
+        df = Tabela.de_consulta(
+            conn,
             "SELECT id, nome, telefone, categoria, congregacao_id, observacoes, "
             "COALESCE(contato_id, '') AS contato_id FROM oradores WHERE id = ?",
-            conn,
-            params=(orador_id,),
+            (orador_id,),
         )
     finally:
         conn.close()
@@ -859,7 +860,9 @@ def carregar_orador(orador_id: int) -> dict | None:
         "nome": row["nome"] or "",
         "telefone": row["telefone"] or "",
         "categoria": row["categoria"] or "Ancião",
-        "congregacao_id": str(row["congregacao_id"]) if pd.notna(row["congregacao_id"]) else None,
+        "congregacao_id": (
+            str(row["congregacao_id"]) if row["congregacao_id"] is not None else None
+        ),
         "observacoes": row["observacoes"] or "",
         "contato_id": row["contato_id"] or "",
         "temas_nr": carregar_temas_de_orador(int(row["id"])),
@@ -872,27 +875,14 @@ def carregar_orador(orador_id: int) -> dict | None:
 
 def formatar_valor(valor) -> str:
     """Converte um valor de célula para texto exibível."""
-    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+    if valor is None:
         return ""
     return str(valor)
 
 
-def filtrar_dataframe(df: pd.DataFrame, termo: str, colunas: list[str]) -> pd.DataFrame:
-    """Filtra o DataFrame pelas colunas informadas."""
-    termo = termo.strip().lower()
-    if not termo:
-        return df.copy()
-
-    mascara = pd.Series(False, index=df.index)
-    for coluna in colunas:
-        if coluna in df.columns:
-            mascara |= (
-                df[coluna]
-                .astype(str)
-                .str.lower()
-                .str.contains(termo, na=False)
-            )
-    return df[mascara].copy()
+def filtrar_dataframe(df: Tabela, termo: str, colunas: list[str]) -> Tabela:
+    """Filtra a Tabela pelas colunas informadas (busca das telas)."""
+    return filtrar_tabela(df, termo, colunas)
 
 
 def alinhamento_celula(nome_coluna: str) -> ft.TextAlign:
@@ -945,7 +935,7 @@ def formatar_temas_orador(temas: str, observacoes: str) -> str:
 
 
 def criar_tabela(
-    df: pd.DataFrame,
+    df: Tabela,
     on_editar: Callable[[int], None] | None = None,
     on_excluir: Callable[[int], None] | None = None,
     coluna_id: str = "id",
@@ -960,7 +950,7 @@ def criar_tabela(
     habilitar_selecao = config.get("habilitar_selecao", False)
     estado_selecao = config.get("estado_selecao")
 
-    colunas_exibir = [c for c in df.columns if c not in colunas_ocultas]
+    colunas_exibir = [c for c in df.colunas if c not in colunas_ocultas]
 
     rotulo_acoes = config.get("rotulo_coluna_acoes", "Ações")
 
@@ -984,7 +974,7 @@ def criar_tabela(
             )
         for nome in colunas_exibir
     )
-    if coluna_id in df.columns:
+    if coluna_id in df.colunas:
         if acoes_separadas:
             if on_editar:
                 colunas.append(
@@ -1007,7 +997,7 @@ def criar_tabela(
 
     linhas = []
     for indice, linha in enumerate(df.itertuples(index=False, name=None)):
-        mapa = dict(zip(df.columns, linha))
+        mapa = dict(zip(df.colunas, linha))
         if config.get("destacar_observacao") and int(mapa.get("tem_observacao", 0) or 0) == 1:
             cor_linha = ft.Colors.with_opacity(0.18, COR_DESTAQUE)
         elif config.get("destacar_restrito") and int(mapa.get("restrito", 0) or 0) == 1:
@@ -1017,7 +1007,7 @@ def criar_tabela(
         else:
             cor_linha = None
         celulas = []
-        registro_id = int(mapa[coluna_id]) if coluna_id in df.columns else None
+        registro_id = int(mapa[coluna_id]) if coluna_id in df.colunas else None
 
         if habilitar_selecao and registro_id is not None and estado_selecao is not None:
 
@@ -1153,7 +1143,7 @@ def criar_tabela(
 
 
 def criar_area_tabela(
-    df: pd.DataFrame,
+    df: Tabela,
     on_editar: Callable[[int], None] | None = None,
     on_excluir: Callable[[int], None] | None = None,
     config: dict | None = None,
@@ -1189,7 +1179,7 @@ def criar_tela_padrao(
     page: ft.Page,
     titulo: str,
     descricao: str,
-    df: pd.DataFrame | Callable[[], pd.DataFrame],
+    df: Tabela | Callable[[], Tabela],
     colunas_filtro: list[str],
     barra_acoes: list[ft.Control] | None = None,
     on_editar: Callable[[int], None] | None = None,
@@ -1197,7 +1187,7 @@ def criar_tela_padrao(
     config_tabela: dict | None = None,
     controles_filtro: list[ft.Control] | None = None,
     on_atualizar_disponivel: Callable[[Callable[[str], None]], None] | None = None,
-    renderizador_tabela: Callable[[pd.DataFrame], ft.Control] | None = None,
+    renderizador_tabela: Callable[[Tabela], ft.Control] | None = None,
 ) -> ft.Column:
     """
     Layout padronizado para telas com tabela, busca e barra de ações.
@@ -3038,11 +3028,10 @@ def tela_inicio(
     )
 
     # Sugestões: temas há mais tempo sem fazer (ignora os "(Não use.)" e pendentes)
-    df_sugestoes = df_temas[~df_temas["titulo"].str.startswith("(")]
+    df_sugestoes = df_temas[df_temas["titulo"].nao_comeca_com("(")]
     df_sugestoes = df_sugestoes.sort_values(["ultimo_uso_chave", "nr"]).head(6)
     linhas_sugestoes = [
-        _linha_sugestao_tema(dict(zip(df_sugestoes.columns, linha)))
-        for linha in df_sugestoes.itertuples(index=False, name=None)
+        _linha_sugestao_tema(dict(linha)) for linha in df_sugestoes
     ]
     card_sugestoes = ft.Container(
         content=ft.Column(
@@ -3197,7 +3186,7 @@ def _iniciais_nome(nome: str) -> str:
 
 
 def _criar_lista_oradores(
-    df: pd.DataFrame,
+    df: Tabela,
     estado_selecao: dict,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
@@ -3220,7 +3209,7 @@ def _criar_lista_oradores(
 
     linhas: list[ft.Control] = []
     registros = list(df.itertuples(index=False, name=None))
-    colunas = list(df.columns)
+    colunas = list(df.colunas)
     for indice, linha in enumerate(registros):
         mapa = dict(zip(colunas, linha))
         orador_id = int(mapa["id"])
@@ -3419,13 +3408,16 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     estado_filtro = {"modo": "minha" if id_minha_congregacao else "outras"}
     referencia_atualizar: dict[str, Callable[[str], None]] = {}
 
-    def df_filtrado_congregacao() -> pd.DataFrame:
+    def df_filtrado_congregacao() -> Tabela:
         if not id_minha_congregacao:
             return df_completo
-        coluna_congregacao = df_completo["congregacao_id"].astype("Int64").astype(str)
+        # O id vem do banco como inteiro; comparar como texto evitava o
+        # NaN do pandas, que não existe mais aqui.
+        minha = int(id_minha_congregacao)
+        coluna_congregacao = df_completo["congregacao_id"]
         if estado_filtro["modo"] == "minha":
-            return df_completo[coluna_congregacao == str(id_minha_congregacao)]
-        resultado = df_completo[coluna_congregacao != str(id_minha_congregacao)]
+            return df_completo[coluna_congregacao == minha]
+        resultado = df_completo[coluna_congregacao != minha]
         return resultado.sort_values(["congregacao", "categoria", "nome"])
 
     def abrir_novo(_=None):
@@ -3480,7 +3472,7 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         ],
     )
 
-    def renderizar_oradores(df_filtrado: pd.DataFrame) -> ft.Control:
+    def renderizar_oradores(df_filtrado: Tabela) -> ft.Control:
         if estado_filtro["modo"] != "outras":
             return _criar_lista_oradores(
                 df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
@@ -3493,8 +3485,8 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                 conversar_com_orador,
             )
 
-        def bloco_congregacao(nome_congregacao: str, grupo: pd.DataFrame) -> ft.Control:
-            cong_ids = [c for c in grupo["congregacao_id"].dropna().unique()]
+        def bloco_congregacao(nome_congregacao: str, grupo: Tabela) -> ft.Control:
+            cong_ids = grupo["congregacao_id"].dropna().unique()
             cong_id = int(cong_ids[0]) if len(cong_ids) else None
 
             def adicionar_aqui(_=None, cong_id=cong_id):
@@ -3993,7 +3985,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         spacing=4,
     )
 
-    def _df_temas() -> pd.DataFrame:
+    def _df_temas() -> Tabela:
         if estado_temas["df"] is None:
             estado_temas["df"] = carregar_dataframe_temas(apenas_anos_visiveis=True)
         return estado_temas["df"]
@@ -4004,7 +3996,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         df_cache = estado_temas.get("df")
         if df_cache is not None:
             # Atualiza o cache em memória em vez de recarregar todos os temas.
-            df_cache.loc[df_cache["nr"] == tema_nr, "prioritario"] = 1 if novo else 0
+            df_cache.definir(df_cache["nr"] == tema_nr, "prioritario", 1 if novo else 0)
         atualizar_view()
 
     def atualizar_view(_=None):
@@ -4202,7 +4194,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
 
 
 def _criar_lista_congregacoes_mobile(
-    df: pd.DataFrame,
+    df: Tabela,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
     on_conversar: Callable[[int], None] | None = None,
@@ -4217,7 +4209,7 @@ def _criar_lista_congregacoes_mobile(
 
     linhas: list[ft.Control] = []
     registros = list(df.itertuples(index=False, name=None))
-    colunas = list(df.columns)
+    colunas = list(df.colunas)
     for indice, linha in enumerate(registros):
         mapa = dict(zip(colunas, linha))
         cong_id = int(mapa["id"])
@@ -4380,7 +4372,7 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
 
     renderizador = None
     if eh_mobile():
-        def renderizador(df_filtrado: pd.DataFrame) -> ft.Control:
+        def renderizador(df_filtrado: Tabela) -> ft.Control:
             return _criar_lista_congregacoes_mobile(
                 df_filtrado, abrir_editar, abrir_excluir, conversar_com_responsavel
             )

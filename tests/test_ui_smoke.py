@@ -260,19 +260,18 @@ def test_escolher_contato_constroi_com_e_sem_agenda(mobile):
 @pytest.mark.parametrize("mobile", [False, True])
 def test_conversar_so_aparece_com_telefone(mobile):
     """Botão de WhatsApp na lista de oradores: sem número não há para onde ir."""
-    import pandas as pd
-
     import armazenamento
+    from tabela import Tabela
 
     armazenamento.definir_layout_mobile(mobile)
     try:
         colunas = ["id", "nome", "categoria", "telefone", "observacoes", "temas"]
-        df = pd.DataFrame(
+        df = Tabela(
             [
-                (1, "Com Telefone", "Ancião", "(11) 90000-0000", "", "1, 2"),
-                (2, "Sem Telefone", "Ancião", "", "", ""),
+                dict(zip(colunas, (1, "Com Telefone", "Ancião", "(11) 90000-0000", "", "1, 2"))),
+                dict(zip(colunas, (2, "Sem Telefone", "Ancião", "", "", ""))),
             ],
-            columns=colunas,
+            colunas,
         )
         nada = lambda *a, **k: None  # noqa: E731
         lista = main._criar_lista_oradores(df, {"ids": set()}, nada, nada, nada)
