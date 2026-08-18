@@ -32,6 +32,15 @@ def _linhas(secoes):
     return [linha for secao in secoes for linha in secao["linhas"]]
 
 
+def _tabelas(secoes):
+    """Só as seções que têm tabela (pula as tarjas de bloco)."""
+    return [s for s in secoes if s["linhas"] or s["cabecalhos"]]
+
+
+def _faixas(secoes):
+    return [s["titulo"] for s in secoes if s.get("faixa")]
+
+
 class TestProgramacao:
     def _montar_mes(self):
         _limpar()
@@ -66,7 +75,7 @@ class TestProgramacao:
         self._montar_mes()
         linhas = _linhas(relatorios.secoes_programacao(2026))
         assert any("Zé da Silva" in linha for linha in linhas)
-        assert any("74 - Tema Setenta" in linha for linha in linhas)
+        assert any("74 — Tema Setenta" in linha for linha in linhas)
 
     def test_ano_sem_arranjo_nao_quebra(self):
         _limpar()
@@ -90,7 +99,7 @@ class TestProgramacao:
 
         linhas = _linhas(relatorios.secoes_programacao(2026))
         linha = next(li for li in linhas if "Lucas" in li)
-        assert "no rodízio" in linha
+        assert linha[2] == "", "quem está no cadastro não recebe observação"
 
     def test_so_entram_as_datas_daquele_mes(self):
         self._montar_mes()
@@ -111,14 +120,13 @@ class TestOradores:
                  "congregacao": "Vila", "telefone": "", "temas": ""},
             ]
         )
-        titulos = [s["titulo"] for s in secoes]
-        assert titulos == ["Central", "Vila"]
-        assert secoes[1]["linhas"][0][2] == "—", "sem telefone vira travessão"
+        assert _faixas(secoes) == ["Central", "Vila"]
+        assert _tabelas(secoes)[1]["linhas"][0][2] == "—", "sem telefone vira travessão"
 
     def test_lista_vazia_nao_quebra(self):
         secoes = relatorios.secoes_oradores([])
-        assert secoes[0]["linhas"] == []
-        assert "Nenhum orador" in secoes[0]["vazio"]
+        assert _linhas(secoes) == []
+        assert any("Nenhum orador" in s["vazio"] for s in secoes)
 
 
 class TestCongregacoes:
@@ -127,11 +135,10 @@ class TestCongregacoes:
             [{"nome": "Central", "responsavel": "João", "telefone": "9",
               "dia_semana": "Domingo", "horario": "09:00", "endereco": "Rua A"}]
         )
-        assert secoes[0]["linhas"][0][3] == "Domingo 09:00"
+        assert _tabelas(secoes)[0]["linhas"][0][3] == "Domingo 09:00"
 
     def test_sem_congregacao_nao_quebra(self):
-        secoes = relatorios.secoes_congregacoes([])
-        assert secoes[0]["linhas"] == []
+        assert _linhas(relatorios.secoes_congregacoes([])) == []
 
 
 class TestTemasEPresidentes:
@@ -145,15 +152,15 @@ class TestTemasEPresidentes:
         finally:
             conn.close()
         secoes = relatorios.secoes_temas()
-        assert len(secoes[0]["linhas"]) == 2
-        assert "2 nunca apresentado" in secoes[0]["descricao"]
+        assert len(_linhas(secoes)) == 2
+        assert any("2 ainda não apresentado" in s["descricao"] for s in secoes)
 
     def test_presidentes_saem_na_ordem_do_rodizio(self):
         _limpar()
         database.salvar_presidente_cadastro("Primeiro", "Ancião")
         database.salvar_presidente_cadastro("Segundo", "Servo Ministerial")
 
-        linhas = relatorios.secoes_presidentes()[0]["linhas"]
+        linhas = _linhas(relatorios.secoes_presidentes())
         assert [li[0] for li in linhas] == ["1", "2"]
         assert [li[1] for li in linhas] == ["Primeiro", "Segundo"]
 

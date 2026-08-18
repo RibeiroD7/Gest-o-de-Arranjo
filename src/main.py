@@ -119,7 +119,7 @@ from pdf_quadro import (
 from pdf_quadro import (
     par_meses_do_mes as par_meses_do_mes_quadro,
 )
-from pdf_relatorios import gerar_pdf_relatorios, gerar_pdf_secoes
+from pdf_relatorios import gerar_pdf_secoes
 from planilha_dados import gerar_planilha_modelo, importar_planilha_dados
 from png_oradores import (
     abrir_pasta_do_arquivo,
@@ -2090,7 +2090,6 @@ def exportar_relatorio_pdf(
     montar_secoes: Callable[[], list[dict]],
     titulo: str,
     nome_arquivo: str,
-    subtitulo: str = "",
 ) -> None:
     """Gera e entrega o relatório em PDF de uma tela.
 
@@ -2098,8 +2097,9 @@ def exportar_relatorio_pdf(
     leitura do banco acontecer junto com o anel de progresso — em ano cheio,
     montar a programação inteira demora o bastante para a tela travar sem ele.
     """
-    config = carregar_configuracao()
-    rodape = config.get("nome_congregacao") or "Minha congregação"
+    from relatorios import identificacao_congregacao
+
+    congregacao, contato = identificacao_congregacao()
     try:
         caminho, erro = executar_com_progresso(
             page,
@@ -2107,7 +2107,8 @@ def exportar_relatorio_pdf(
             lambda: gerar_pdf_secoes(
                 montar_secoes(),
                 titulo,
-                subtitulo=f"{rodape} · {subtitulo}" if subtitulo else rodape,
+                congregacao=congregacao,
+                contato=contato,
                 nome_arquivo=nome_arquivo,
             ),
         )
@@ -3539,15 +3540,12 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         # O relatório sai do que está filtrado na tela: se o usuário está
         # vendo só as outras congregações, é isso que ele quer imprimir.
         registros = df_filtrado_congregacao().to_dict("records")
+        titulo = (
+            "Oradores da minha congregação" if estado_filtro["modo"] == "minha"
+            else "Oradores de outras congregações"
+        )
         exportar_relatorio_pdf(
-            page,
-            lambda: secoes_oradores(registros),
-            "Oradores",
-            "Oradores",
-            subtitulo=(
-                "Minha congregação" if estado_filtro["modo"] == "minha"
-                else "Outras congregações"
-            ),
+            page, lambda: secoes_oradores(registros), titulo, "Oradores"
         )
 
     return criar_tela_padrao(
@@ -7864,7 +7862,6 @@ def tela_programacao(
             lambda: secoes_programacao(ano),
             f"Programação de {ano}",
             "Programacao",
-            subtitulo=str(ano),
         )
 
     montar_blocos()
@@ -8209,31 +8206,20 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     area = ft.Column(spacing=16, tight=True)
 
     def exportar_pdf(_=None):
+        from relatorios import secoes_resumo_ano
+
         ano = estado_rel["ano"]
-        dados = dados_do_ano(ano)
-        config = carregar_configuracao()
-        try:
-            caminho, erro = executar_com_progresso(
-                page,
-                "Gerando PDF...",
-                lambda: gerar_pdf_relatorios(
-                    dados["frequencia"],
-                    dados["presidencias"],
-                    dados["meses"],
-                    dados["resumo"],
-                    subtitulo=(
-                        f"{config.get('nome_congregacao') or 'Minha congregação'} · {ano}"
-                    ),
-                ),
+
+        def montar_secoes() -> list[dict]:
+            dados = dados_do_ano(ano)
+            return secoes_resumo_ano(
+                dados["resumo"], dados["meses"],
+                dados["frequencia"], dados["presidencias"],
             )
-            if erro:
-                mostrar_aviso(page, "Não foi possível exportar", erro)
-                return
-            entregar_arquivo(page, caminho, abrir_arquivo)
-            if not eh_mobile():
-                mostrar_sucesso(page, f"Relatório gerado: {caminho}")
-        except Exception as exc:  # noqa: BLE001
-            mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
+
+        exportar_relatorio_pdf(
+            page, montar_secoes, f"Resumo de {ano}", "Resumo"
+        )
 
     def montar():
         ano = estado_rel["ano"]
@@ -8356,29 +8342,41 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         WhatsApp de uma vez, e no celular não obriga a salvar cinco vezes.
         """
         from relatorios import (
+            faixa,
             secoes_congregacoes,
             secoes_oradores,
             secoes_presidentes,
             secoes_programacao,
+            secoes_resumo_ano,
             secoes_temas,
         )
 
         ano = estado_rel["ano"]
 
         def montar() -> list[dict]:
-            secoes: list[dict] = []
+            dados = dados_do_ano(ano)
+            # Cada parte entra atrás da sua tarja: num PDF de vinte páginas,
+            # é o que deixa achar onde começa cada assunto.
+            secoes: list[dict] = [faixa(f"Resumo de {ano}")]
+            secoes += secoes_resumo_ano(
+                dados["resumo"], dados["meses"],
+                dados["frequencia"], dados["presidencias"],
+            )
             secoes += secoes_programacao(ano)
+            secoes.append(faixa("Oradores"))
             secoes += secoes_oradores(carregar_dados(SQL_ORADORES).to_dict("records"))
+            secoes.append(faixa("Congregações do circuito"))
             secoes += secoes_congregacoes(
                 carregar_dados(SQL_CONGREGACOES).to_dict("records")
             )
+            secoes.append(faixa("Presidentes da reunião"))
             secoes += secoes_presidentes()
+            secoes.append(faixa("Catálogo de temas (S-99)"))
             secoes += secoes_temas()
             return secoes
 
         exportar_relatorio_pdf(
-            page, montar, f"Relatório completo de {ano}",
-            "Relatorio_Completo", subtitulo=str(ano),
+            page, montar, f"Relatório completo de {ano}", "Relatorio_Completo"
         )
 
     botao_tudo = ft.FilledButton(
