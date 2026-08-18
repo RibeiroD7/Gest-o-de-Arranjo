@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unicodedata
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 # Dia da semana (texto) -> weekday do Python (0=segunda … 6=domingo).
 MAP_DIA_SEMANA = {
@@ -139,3 +139,24 @@ def ha_versao_mais_nova(remota: str, atual: str) -> bool:
     if not remota:
         return False
     return _versao_como_tupla(remota) > _versao_como_tupla(atual)
+
+
+# São Paulo está em UTC-3 o ano inteiro desde 2019 (o horário de verão
+# brasileiro foi extinto). Um offset fixo evita depender do banco de fusos,
+# que nem sempre existe no empacotamento para celular.
+FUSO_SAO_PAULO = timezone(timedelta(hours=-3))
+
+
+def formatar_data_hora_sao_paulo(iso_utc: str | None) -> str:
+    """Converte data/hora ISO em UTC (ex.: do Google Drive) para o horário de
+    São Paulo no formato brasileiro: "18/08/2026 09:28"."""
+    texto = (iso_utc or "").strip()
+    if not texto:
+        return "—"
+    try:
+        momento = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except ValueError:
+        return texto
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=timezone.utc)
+    return momento.astimezone(FUSO_SAO_PAULO).strftime("%d/%m/%Y %H:%M")

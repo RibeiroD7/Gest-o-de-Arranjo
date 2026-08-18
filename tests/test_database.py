@@ -435,14 +435,81 @@ class TestAnoOcultoNaoApagaHistorico:
     def test_com_o_ano_visivel(self):
         self._preparar()
         linha = self._tema7()
-        assert linha["ultimo_uso"] == "08/2026"
+        assert linha["ultimo_uso"] == "Ago/2026"
+        assert linha["2026"] == "Ago/2026", "a coluna do ano também usa o mês por extenso"
         assert "2026" in database.carregar_dataframe_temas().columns
 
     def test_ocultando_o_ano_o_ultimo_uso_permanece(self):
         self._preparar()
         database.definir_visibilidade_ano_coluna(2026, False)
         linha = self._tema7()
-        assert linha["ultimo_uso"] == "08/2026", "o uso não pode sumir com a coluna"
+        assert linha["ultimo_uso"] == "Ago/2026", "o uso não pode sumir com a coluna"
         assert linha["ultimo_uso_chave"] == "2026-08"
         # A coluna, essa sim, desaparece da tabela.
         assert "2026" not in database.carregar_dataframe_temas().columns
+
+
+class TestUsoVaiParaAColunaDoProprioAno:
+    """A planilha/S-99 gravava as datas em colunas posicionais.
+
+    Um uso de 04/2025 embaixo de 2023 desaparecia da grade assim que essa
+    coluna era ocultada, e o tema parecia nunca feito.
+    """
+
+    def _preparar(self, usos):
+        _resetar_banco()
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM temas_anos_colunas")
+            conn.execute(
+                "INSERT OR REPLACE INTO temas (nr, titulo) VALUES (30, 'Tema 30')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        for ano in sorted({ano for ano, _ in usos}):
+            database.adicionar_ano_coluna(ano)
+        conn = get_connection()
+        try:
+            for ano, data in usos:
+                conn.execute(
+                    "INSERT INTO tema_uso_por_ano (tema_nr, ano_coluna, data_uso) "
+                    "VALUES (30, ?, ?)",
+                    (ano, data),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _usos(self):
+        conn = get_connection()
+        try:
+            return sorted(
+                conn.execute(
+                    "SELECT ano_coluna, data_uso FROM tema_uso_por_ano WHERE tema_nr = 30"
+                )
+            )
+        finally:
+            conn.close()
+
+    def test_a_data_muda_para_a_coluna_do_seu_ano(self):
+        self._preparar([(2023, "04/2025"), (2026, "08/2026")])
+        assert database.realocar_uso_para_ano_da_data() == 1
+        assert self._usos() == [(2025, "04/2025"), (2026, "08/2026")]
+
+    def test_dois_usos_no_mesmo_ano_ficam_com_o_mais_recente(self):
+        self._preparar([(2023, "04/2025"), (2024, "03/2025")])
+        database.realocar_uso_para_ano_da_data()
+        assert self._usos() == [(2025, "04/2025")]
+
+    def test_a_coluna_do_ano_e_criada_quando_falta(self):
+        self._preparar([(2023, "07/2027")])
+        database.realocar_uso_para_ano_da_data()
+        anos = [item["ano"] for item in database.listar_anos_colunas(apenas_visiveis=False)]
+        assert 2027 in anos
+        assert self._usos() == [(2027, "07/2027")]
+
+    def test_nada_a_fazer_nao_mexe_no_banco(self):
+        self._preparar([(2025, "04/2025"), (2026, "08/2026")])
+        assert database.realocar_uso_para_ano_da_data() == 0
+        assert self._usos() == [(2025, "04/2025"), (2026, "08/2026")]

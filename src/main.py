@@ -88,6 +88,7 @@ from database import (
     listar_tipos_evento,
     listar_vinculos_de_contato,
     oradores_com_temas_da_congregacao,
+    realocar_uso_para_ano_da_data,
     relatorio_frequencia_oradores,
     relatorio_presidencias,
     remover_orador_arranjo,
@@ -192,6 +193,7 @@ from util import (
     _parse_data_arranjo,
     _rotulo_weekday,
     _weekday_mais_usado,
+    formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
 )
 
@@ -429,6 +431,9 @@ def garantir_tabelas() -> None:
     try:
         create_tables(conn)
         garantir_configuracao_inicial(conn)
+        # Datas vindas da planilha/S-99 ficavam em colunas posicionais: põe
+        # cada uma na coluna do seu próprio ano antes de somar os arranjos.
+        realocar_uso_para_ano_da_data(conn)
         # Traz para o catálogo de Temas o uso dos arranjos já cadastrados
         # (quem instala uma versão nova já vê as datas preenchidas).
         sincronizar_uso_temas(conn)
@@ -3518,8 +3523,13 @@ def _colunas_filtro_temas() -> list[str]:
     return ["nr", "titulo", "assunto", *anos, "ultimo_uso", "restricoes"]
 
 
-def _validar_mes_ano(valor: str) -> bool:
-    """Aceita vazio ou data no formato MM/AAAA."""
+def _validar_mes_ano(valor: str, ano_esperado: int | None = None) -> bool:
+    """Aceita vazio ou data MM/AAAA; com ``ano_esperado``, o ano precisa bater.
+
+    Cada coluna é um ano, então gravar 04/2025 embaixo de 2023 esconde o uso
+    quando essa coluna é ocultada — foi o que aconteceu com a carga da
+    planilha. A validação impede que volte a acontecer na mão.
+    """
     texto = (valor or "").strip()
     if not texto or texto == "—":
         return True
@@ -3529,9 +3539,11 @@ def _validar_mes_ano(valor: str) -> bool:
     try:
         mes = int(partes[0])
         ano = int(partes[1])
-        return 1 <= mes <= 12 and 2000 <= ano <= 2100
     except ValueError:
         return False
+    if not (1 <= mes <= 12 and 2000 <= ano <= 2100):
+        return False
+    return ano_esperado is None or ano == ano_esperado
 
 
 def abrir_dialog_tema(
@@ -3601,7 +3613,7 @@ def abrir_dialog_tema(
             valor = ""
         campo = ft.TextField(
             label=str(ano),
-            hint_text="MM/AAAA",
+            hint_text=f"MM/{ano}",
             value=valor,
             width=110,
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -3621,8 +3633,11 @@ def abrir_dialog_tema(
             return
 
         for ano, campo in campos_ano.items():
-            if not _validar_mes_ano(campo.value or ""):
-                texto_erro.value = f"Data inválida em {ano}. Use o formato MM/AAAA."
+            if not _validar_mes_ano(campo.value or "", ano):
+                texto_erro.value = (
+                    f"Data inválida em {ano}. Use MM/{ano} — a coluna guarda "
+                    f"o uso daquele ano."
+                )
                 texto_erro.visible = True
                 page.update()
                 return
@@ -8871,7 +8886,7 @@ def tela_ajustes(
                           "Envie um backup a partir de outro aparelho primeiro.")
             return
 
-        quando = (mais_novo.get("modifiedTime") or "")[:16].replace("T", " ")
+        quando = formatar_data_hora_sao_paulo(mais_novo.get("modifiedTime"))
 
         def confirmar(_=None):
             page.pop_dialog()
@@ -8903,7 +8918,7 @@ def tela_ajustes(
                 modal=True,
                 title=ft.Text("Restaurar da nuvem?"),
                 content=ft.Text(
-                    f"O backup mais recente da nuvem é de {quando} (UTC).\n\n"
+                    f"O backup mais recente da nuvem é de {quando} (horário de Brasília).\n\n"
                     "Os dados atuais deste aparelho serão SUBSTITUÍDOS. Uma cópia "
                     "de segurança do estado atual é salva antes, na pasta de backups.",
                     size=fonte(13),

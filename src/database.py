@@ -697,6 +697,76 @@ def sincronizar_uso_temas(conn=None) -> int:
             conn.close()
 
 
+def realocar_uso_para_ano_da_data(conn=None) -> int:
+    """Põe cada data de uso na coluna do ano a que ela pertence.
+
+    A carga vinda da planilha/S-99 gravava as datas em colunas posicionais
+    ("1ª data usada", "2ª data usada"), então um uso de 04/2025 podia acabar
+    embaixo de 2023 — e sumia da grade quando essa coluna era ocultada, dando
+    a impressão de que o tema nunca foi feito.
+
+    Cada registro passa a ficar na coluna do próprio ano. Como a tabela guarda
+    uma data por ano, quando o tema tem mais de um uso no mesmo ano fica o mais
+    recente. Devolve quantos registros mudaram de coluna.
+    """
+    proprio = conn is None
+    conn = get_connection() if proprio else conn
+    try:
+        cursor = conn.cursor()
+        linhas = cursor.execute(
+            "SELECT tema_nr, ano_coluna, data_uso FROM tema_uso_por_ano"
+        ).fetchall()
+
+        # Por (tema, ano da data), guarda a data mais recente.
+        melhor: dict[tuple[int, int], str] = {}
+        fora_do_lugar = 0
+        origens: list[tuple[int, int]] = []
+        for tema_nr, ano_coluna, data_uso in linhas:
+            chave = _chave_mes_ano(data_uso)
+            if not chave:
+                # Texto que não é data (ou célula vazia): fica onde está.
+                continue
+            ano = int(chave[0:4])
+            origens.append((int(tema_nr), int(ano_coluna)))
+            if int(ano_coluna) != ano:
+                fora_do_lugar += 1
+            alvo = (int(tema_nr), ano)
+            if alvo not in melhor or chave > melhor[alvo]:
+                melhor[alvo] = chave
+
+        if not fora_do_lugar:
+            return 0
+
+        for tema_nr, ano_coluna in origens:
+            cursor.execute(
+                "DELETE FROM tema_uso_por_ano WHERE tema_nr = ? AND ano_coluna = ?",
+                (tema_nr, ano_coluna),
+            )
+        for (tema_nr, ano), chave in melhor.items():
+            # A coluna do ano precisa existir para o uso aparecer na tela.
+            cursor.execute(
+                """
+                INSERT INTO temas_anos_colunas (ano, visivel, ordem)
+                VALUES (?, 1, (SELECT COALESCE(MAX(ordem), -1) + 1 FROM temas_anos_colunas))
+                ON CONFLICT(ano) DO NOTHING
+                """,
+                (ano,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO tema_uso_por_ano (tema_nr, ano_coluna, data_uso)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tema_nr, ano_coluna) DO UPDATE SET data_uso = excluded.data_uso
+                """,
+                (tema_nr, ano, f"{chave[5:7]}/{chave[0:4]}"),
+            )
+        conn.commit()
+        return fora_do_lugar
+    finally:
+        if proprio:
+            conn.close()
+
+
 def remover_orador_arranjo(registro_id: int) -> None:
     """Remove um orador da lista de recebidos/enviados do arranjo."""
     conn = get_connection()
@@ -2059,6 +2129,25 @@ def _chave_mes_ano(data_uso) -> str:
     return f"{match.group(2)}-{int(match.group(1)):02d}"
 
 
+ABREVIACOES_MESES = [
+    "", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+]
+
+
+def _exibir_chave_mes_ano(chave: str) -> str:
+    """Chave "AAAA-MM" vira "Mmm/AAAA" (ex.: 2024-12 -> Dez/2024)."""
+    return f"{ABREVIACOES_MESES[int(chave[5:7])]}/{chave[0:4]}"
+
+
+def formatar_mes_ano(data_uso) -> str:
+    """Exibe "MM/AAAA" como "Mmm/AAAA"; o que não for data volta como está."""
+    chave = _chave_mes_ano(data_uso)
+    if not chave:
+        return str(data_uso or "").strip()
+    return _exibir_chave_mes_ano(chave)
+
+
 def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
     """Monta DataFrame de temas com uma coluna por ano (como na planilha)."""
     import pandas as pd
@@ -2107,7 +2196,7 @@ def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
 
     temas_df["ultimo_uso_chave"] = temas_df["nr"].map(lambda nr: ultimo_uso.get(nr, ""))
     temas_df["ultimo_uso"] = temas_df["ultimo_uso_chave"].map(
-        lambda chave: f"{chave[5:7]}/{chave[0:4]}" if chave else "Nunca"
+        lambda chave: _exibir_chave_mes_ano(chave) if chave else "Nunca"
     )
 
     if not uso_df.empty and anos:
@@ -2123,7 +2212,9 @@ def carregar_dataframe_temas(apenas_anos_visiveis: bool = True):
         if coluna not in temas_df.columns:
             temas_df[coluna] = "—"
         else:
-            temas_df[coluna] = temas_df[coluna].fillna("—").replace("", "—")
+            temas_df[coluna] = (
+                temas_df[coluna].fillna("—").replace("", "—").map(formatar_mes_ano)
+            )
 
     colunas_ano = [str(item["ano"]) for item in anos]
     return temas_df[

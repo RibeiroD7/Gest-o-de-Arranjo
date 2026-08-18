@@ -12,6 +12,7 @@ from util import (
     _parse_data_arranjo,
     _rotulo_weekday,
     _weekday_mais_usado,
+    formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
 )
 
@@ -144,3 +145,21 @@ class TestHaVersaoMaisNova:
     def test_aceita_prefixo_v_e_vazio(self):
         assert ha_versao_mais_nova("v1.0.19", "1.0.18") is True
         assert ha_versao_mais_nova("", "1.0.18") is False
+
+
+class TestFormatarDataHoraSaoPaulo:
+    """O Drive devolve a data em UTC; a tela mostra horário de Brasília."""
+
+    def test_converte_de_utc_para_o_formato_brasileiro(self):
+        assert formatar_data_hora_sao_paulo("2026-08-18T12:28:45.123Z") == "18/08/2026 09:28"
+
+    def test_vira_o_dia_quando_passa_da_meia_noite_em_utc(self):
+        assert formatar_data_hora_sao_paulo("2026-08-18T01:15:00Z") == "17/08/2026 22:15"
+
+    def test_aceita_offset_explicito(self):
+        assert formatar_data_hora_sao_paulo("2026-08-18T12:28:45+00:00") == "18/08/2026 09:28"
+
+    def test_sem_data_ou_texto_estranho_nao_quebra(self):
+        assert formatar_data_hora_sao_paulo(None) == "—"
+        assert formatar_data_hora_sao_paulo("") == "—"
+        assert formatar_data_hora_sao_paulo("qualquer coisa") == "qualquer coisa"
