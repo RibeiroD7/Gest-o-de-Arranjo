@@ -397,6 +397,13 @@ def create_tables(conn):
     colunas_oradores = [linha[1] for linha in cursor.execute("PRAGMA table_info(oradores)")]
     if "ativo" not in colunas_oradores:
         cursor.execute("ALTER TABLE oradores ADD COLUMN ativo INTEGER NOT NULL DEFAULT 1")
+    # Nem todo orador é aprovado para discursar FORA da congregação: alguns
+    # fazem só o discurso local. Quem só faz local não pode ser oferecido ao
+    # montar uma designação enviada. Padrão 1 para não mudar quem já existe.
+    if "aprovado_fora" not in colunas_oradores:
+        cursor.execute(
+            "ALTER TABLE oradores ADD COLUMN aprovado_fora INTEGER NOT NULL DEFAULT 1"
+        )
 
     # Temas prioritários para a minha congregação (escolha assistida de recebidos).
     colunas_temas = [linha[1] for linha in cursor.execute("PRAGMA table_info(temas)")]
@@ -1527,11 +1534,15 @@ def salvar_orador(
     temas_nr: set[int],
     orador_id: int | None = None,
     contato_id: str | None = None,
+    aprovado_fora: bool = True,
 ) -> int:
     """Cria ou atualiza um orador e os temas que ele pode apresentar.
 
     ``contato_id`` amarra o orador a um contato da agenda do celular, para o
     telefone acompanhar sozinho o que mudar lá.
+
+    ``aprovado_fora=False`` marca quem faz só o discurso local: ele deixa de
+    ser oferecido ao montar uma designação enviada.
     """
     conn = get_connection()
     try:
@@ -1541,21 +1552,22 @@ def salvar_orador(
                 """
                 UPDATE oradores
                 SET nome = ?, telefone = ?, categoria = ?, congregacao_id = ?,
-                    observacoes = ?, contato_id = ?
+                    observacoes = ?, contato_id = ?, aprovado_fora = ?
                 WHERE id = ?
                 """,
                 (nome, telefone, categoria, congregacao_id, observacoes,
-                 contato_id or None, orador_id),
+                 contato_id or None, 1 if aprovado_fora else 0, orador_id),
             )
         else:
             cursor.execute(
                 """
                 INSERT INTO oradores (
-                    nome, telefone, categoria, congregacao_id, observacoes, contato_id
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    nome, telefone, categoria, congregacao_id, observacoes,
+                    contato_id, aprovado_fora
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (nome, telefone, categoria, congregacao_id, observacoes,
-                 contato_id or None),
+                 contato_id or None, 1 if aprovado_fora else 0),
             )
             orador_id = int(cursor.lastrowid)
 

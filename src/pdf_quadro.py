@@ -28,6 +28,7 @@ from reportlab.platypus import (
 )
 
 from database import get_connection
+from util import SEPARADOR_SIMPOSIO
 
 EXPORTS_DIR = os.path.join("exports")
 
@@ -119,9 +120,10 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
         for linha in conn.execute(
                 """
                 SELECT ao.data, COALESCE(o.nome, ''), COALESCE(t.titulo, ''), COALESCE(c.nome, ''),
-                       ao.tema_nr
+                       ao.tema_nr, COALESCE(o2.nome, '')
                 FROM arranjo_oradores ao
                 JOIN oradores o ON ao.orador_id = o.id
+                LEFT JOIN oradores o2 ON ao.orador_2_id = o2.id
                 LEFT JOIN temas t ON ao.tema_nr = t.nr
                 LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
                 WHERE ao.tipo = 'recebido'
@@ -130,12 +132,16 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
                 """,
                 (str(ano), mes_str),
         ):
-            data_reg, orador, tema, congregacao, tema_nr = linha
+            data_reg, orador, tema, congregacao, tema_nr, orador_2 = linha
             if tema and tema_nr and not tema.startswith(f"{tema_nr}"):
                 tema = f"{tema_nr} - {tema}"
+            # Simpósio numa linha só (orador_2_id) — e o formato antigo, com
+            # dois registros na mesma data, que ainda existe em arranjos
+            # cadastrados antes de o simpósio virar um campo.
+            if orador_2:
+                orador = f"{orador}{SEPARADOR_SIMPOSIO}{orador_2}"
             if data_reg in recebidos:
-                # Simpósio: dois oradores dividem o discurso na mesma data
-                recebidos[data_reg]["orador"] += f"/{orador}"
+                recebidos[data_reg]["orador"] += f"{SEPARADOR_SIMPOSIO}{orador}"
             else:
                 recebidos[data_reg] = {
                     "orador": orador, "tema": tema, "congregacao": congregacao

@@ -284,6 +284,7 @@ SQL_ORADORES = """
            ), '') AS temas,
            o.observacoes,
            o.congregacao_id,
+           COALESCE(o.aprovado_fora, 1) AS aprovado_fora,
            COALESCE(c.nome, '—') AS congregacao
     FROM oradores o
     LEFT JOIN congregacoes c ON o.congregacao_id = c.id
@@ -768,8 +769,18 @@ def _rotulo_tema_orador_arranjo(registro: dict) -> str:
 
 def carregar_oradores_com_congregacao_opcoes(
     congregacao_id: int | None = None,
+    apenas_aprovados_fora: bool = False,
+    por_fila: bool = False,
 ) -> list[ft.dropdown.Option]:
-    """Lista oradores com congregação para seletores de arranjo."""
+    """Lista oradores com congregação para seletores de arranjo.
+
+    ``apenas_aprovados_fora`` esconde quem faz só o discurso local — ao montar
+    uma designação enviada, oferecer essas pessoas só atrapalha.
+
+    ``por_fila`` ordena de quem está há mais tempo sem ser designado para quem
+    discursou mais recentemente, em vez de alfabético: é a ordem em que a
+    escolha costuma ser feita.
+    """
     query = """
         SELECT o.id, o.nome, COALESCE(c.nome, '') AS congregacao
         FROM oradores o
@@ -780,6 +791,8 @@ def carregar_oradores_com_congregacao_opcoes(
     if congregacao_id is not None:
         query += " AND o.congregacao_id = ?"
         params.append(congregacao_id)
+    if apenas_aprovados_fora:
+        query += " AND COALESCE(o.aprovado_fora, 1) = 1"
     # Agrupado por congregação: procurar "quem é da Vila Nova" fica direto,
     # em vez de uma lista alfabética com todas as congregações misturadas.
     query += " ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome"
@@ -788,10 +801,20 @@ def carregar_oradores_com_congregacao_opcoes(
         df = Tabela.de_consulta(conn, query, params or None)
     finally:
         conn.close()
+
+    linhas = list(df.itertuples())
+    if por_fila:
+        ultima = ultima_data_discurso_por_orador()
+        ordem = oradores_mais_tempo_sem_discurso([li.id for li in linhas], ultima)
+        posicao = {oid: indice for indice, oid in enumerate(ordem)}
+        linhas.sort(key=lambda li: posicao.get(li.id, 0))
+
     opcoes: list[ft.dropdown.Option] = []
     congregacao_atual = None
-    mostrar_grupos = congregacao_id is None  # filtrado por uma só: não agrupa
-    for row in df.itertuples():
+    # Agrupar por congregação só faz sentido na ordem alfabética por
+    # congregação; na fila, a ordem é outra e os cabeçalhos atrapalhariam.
+    mostrar_grupos = congregacao_id is None and not por_fila
+    for row in linhas:
         if mostrar_grupos and row.congregacao != congregacao_atual:
             congregacao_atual = row.congregacao
             titulo = congregacao_atual or "Sem congregação"
@@ -848,7 +871,8 @@ def carregar_orador(orador_id: int) -> dict | None:
         df = Tabela.de_consulta(
             conn,
             "SELECT id, nome, telefone, categoria, congregacao_id, observacoes, "
-            "COALESCE(contato_id, '') AS contato_id FROM oradores WHERE id = ?",
+            "COALESCE(contato_id, '') AS contato_id, "
+            "COALESCE(aprovado_fora, 1) AS aprovado_fora FROM oradores WHERE id = ?",
             (orador_id,),
         )
     finally:
@@ -866,6 +890,7 @@ def carregar_orador(orador_id: int) -> dict | None:
         ),
         "observacoes": row["observacoes"] or "",
         "contato_id": row["contato_id"] or "",
+        "aprovado_fora": bool(row["aprovado_fora"]),
         "temas_nr": carregar_temas_de_orador(int(row["id"])),
     }
 
@@ -1636,6 +1661,16 @@ def abrir_dialog_orador(
         options=carregar_congregacoes_opcoes(),
         expand=True,
     )
+    # Quem faz só o discurso local não é oferecido ao montar uma designação
+    # enviada — a lista de envio ficava cheia de gente que não podia ir.
+    campo_aprovado_fora = ft.Checkbox(
+        label="Aprovado para discursar em outras congregações",
+        value=dados.get("aprovado_fora", True) if dados else True,
+        tooltip=(
+            "Desmarque para quem faz apenas o discurso local: ele deixa de "
+            "aparecer ao criar uma designação enviada."
+        ),
+    )
     obs_inicial = dados["observacoes"] if dados else ""
     faz_qualquer_tema = obs_tem_qualquer_tema(obs_inicial)
     campo_observacoes = ft.TextField(
@@ -1762,6 +1797,7 @@ def abrir_dialog_orador(
             temas_selecionados,
             orador_id=orador_id if editando else None,
             contato_id=vinculo_orador["contato_id"],
+            aprovado_fora=bool(campo_aprovado_fora.value),
         )
 
         fechar()
@@ -1785,6 +1821,7 @@ def abrir_dialog_orador(
                         alignment=ft.MainAxisAlignment.END,
                     ),
                     linha_campos(campo_categoria, campo_congregacao),
+                    campo_aprovado_fora,
                     campo_observacoes,
                     texto_erro,
                     ft.Container(height=4),
@@ -3236,12 +3273,20 @@ def _criar_lista_oradores(
             else:
                 estado_selecao["ids"].discard(rid)
 
-        chip = ft.Container(
-            content=ft.Text(chip_texto, size=fonte(11), weight=ft.FontWeight.W_600, color=chip_cor),
-            bgcolor=ft.Colors.with_opacity(0.13, chip_cor),
-            border_radius=9,
-            padding=ft.Padding.symmetric(horizontal=9, vertical=3),
-        )
+        def selo(texto: str, cor: str) -> ft.Control:
+            return ft.Container(
+                content=ft.Text(texto, size=fonte(11), weight=ft.FontWeight.W_600, color=cor),
+                bgcolor=ft.Colors.with_opacity(0.13, cor),
+                border_radius=9,
+                padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+            )
+
+        selos = [selo(chip_texto, chip_cor)]
+        # Quem faz só o discurso local não aparece ao montar um envio; o selo
+        # explica a ausência sem precisar abrir o cadastro.
+        if not mapa.get("aprovado_fora", 1):
+            selos.append(selo("só local", COR_AVISO))
+        chip = selos[0] if len(selos) == 1 else ft.Row(selos, spacing=6, tight=True)
         avatar = ft.Container(
             content=ft.Text(
                 _iniciais_nome(nome),
@@ -4960,7 +5005,14 @@ def abrir_seletor_oradores(
     campo_orador = ft.Dropdown(
         label="Orador",
         hint_text="Digite para buscar pelo nome",
-        options=carregar_oradores_com_congregacao_opcoes(congregacao_filtro),
+        # Ao ENVIAR: só quem é da minha congregação e está aprovado para
+        # discursar fora, na ordem de quem está há mais tempo sem ser
+        # designado — que é a ordem em que a escolha é feita na prática.
+        options=carregar_oradores_com_congregacao_opcoes(
+            congregacao_filtro,
+            apenas_aprovados_fora=not eh_oradores,
+            por_fila=not eh_oradores,
+        ),
         expand=True,
         editable=True,
         enable_filter=True,

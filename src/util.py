@@ -162,15 +162,19 @@ def formatar_data_hora_sao_paulo(iso_utc: str | None) -> str:
     return momento.astimezone(FUSO_SAO_PAULO).strftime("%d/%m/%Y %H:%M")
 
 
+# Como os dois nomes de um simpósio aparecem juntos, em toda parte.
+SEPARADOR_SIMPOSIO = "/"
+
+
 def nome_oradores(registro) -> str:
     """Nome do orador — ou dos dois, quando o discurso é um simpósio.
 
     O simpósio é um compromisso só, dividido entre dois oradores da
     congregação, então o par aparece junto em toda parte: na lista do mês, no
-    PNG do quadro e no relatório em PDF.
+    quadro de anúncios e no relatório em PDF.
     """
     primeiro = (registro.get("orador_nome") or "").strip()
     segundo = (registro.get("orador_2_nome") or "").strip()
     if primeiro and segundo:
-        return f"{primeiro} e {segundo}"
+        return f"{primeiro}{SEPARADOR_SIMPOSIO}{segundo}"
     return primeiro or segundo
