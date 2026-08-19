@@ -2171,6 +2171,26 @@ def botao_relatorio_tela(on_click: Callable) -> ft.Control:
     )
 
 
+def somente_discurso_local(orador_ids) -> set[int]:
+    """Dos ids informados, quais fazem apenas o discurso local."""
+    ids = [int(i) for i in orador_ids]
+    if not ids:
+        return set()
+    marcadores = ",".join("?" * len(ids))
+    conn = get_connection()
+    try:
+        return {
+            int(linha[0])
+            for linha in conn.execute(
+                f"SELECT id FROM oradores WHERE id IN ({marcadores}) "  # noqa: S608
+                "AND COALESCE(aprovado_fora, 1) = 0",
+                ids,
+            )
+        }
+    finally:
+        conn.close()
+
+
 def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
     """Gera o PDF de envio de oradores selecionados ou exibe aviso."""
     if not orador_ids:
@@ -2178,6 +2198,20 @@ def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
             page,
             "Nenhum orador selecionado",
             "Marque pelo menos um orador na coluna \"Selecionar\" antes de gerar o PDF.",
+        )
+        return
+
+    # Segunda tranca: a lista trava o checkbox de quem faz só o discurso
+    # local, mas a marcação pode ter sido feita ANTES de o cadastro mudar.
+    # Este PDF é o que vai para outra congregação — não pode oferecer quem
+    # não pode ir.
+    orador_ids = set(orador_ids) - somente_discurso_local(orador_ids)
+    if not orador_ids:
+        mostrar_aviso(
+            page,
+            "Nenhum orador disponível",
+            "Os oradores marcados fazem apenas o discurso local e não podem "
+            "ser oferecidos a outra congregação.",
         )
         return
 
@@ -3297,10 +3331,14 @@ def _criar_lista_oradores(
             )
 
         selos = [selo(chip_texto, chip_cor)]
-        # Quem faz só o discurso local não aparece ao montar um envio; o selo
-        # explica a ausência sem precisar abrir o cadastro.
-        if not mapa.get("aprovado_fora", 1):
+        # Quem faz só o discurso local não vai na lista mandada para outra
+        # congregação: o selo explica, e o checkbox fica travado.
+        so_local = not mapa.get("aprovado_fora", 1)
+        if so_local:
             selos.append(selo("só local", COR_AVISO))
+            # Se já estava marcado quando o cadastro mudou, desmarca: senão
+            # ele entraria no PDF sem aparecer marcado na tela.
+            estado_selecao["ids"].discard(orador_id)
         chip = selos[0] if len(selos) == 1 else ft.Row(selos, spacing=6, tight=True)
         avatar = ft.Container(
             content=ft.Text(
@@ -3318,7 +3356,12 @@ def _criar_lista_oradores(
         checkbox = ft.Checkbox(
             value=orador_id in estado_selecao["ids"],
             on_change=alternar_selecao,
-            tooltip="Selecionar para o PDF de envio",
+            disabled=so_local,
+            tooltip=(
+                "Faz apenas o discurso local — não entra no PDF de envio"
+                if so_local
+                else "Selecionar para o PDF de envio"
+            ),
         )
         # Conversar só aparece com telefone: sem número não há para onde ir.
         tem_telefone = bool(formatar_valor(mapa.get("telefone")).strip())

@@ -305,3 +305,54 @@ class TestFilaNaTelaDeOradores:
         assert main._rotulo_ultima_saida(ultima, ids["Nunca Foi"]) == "nunca foi enviado"
         # Sem dados nenhum (outras congregações) a linha não mostra nada.
         assert main._rotulo_ultima_saida({}, ids["Eduardo Nunes"]) == ""
+
+
+class TestSoLocalNaoEntraNoEnvio:
+    """O PDF de envio oferece oradores a outra congregação.
+
+    Quem faz apenas o discurso local não pode ir nessa lista: o checkbox fica
+    travado e, como a marcação pode ter sido feita antes de o cadastro mudar,
+    a geração do PDF também descarta.
+    """
+
+    def _dois(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+        finally:
+            conn.close()
+        vai = database.salvar_orador("Vai Fora", "", "Ancião", cong, "", set())
+        fica = database.salvar_orador(
+            "Só Local", "", "Ancião", cong, "", set(), aprovado_fora=False
+        )
+        return vai, fica
+
+    def test_identifica_quem_e_so_local(self):
+        import main
+
+        vai, fica = self._dois()
+        assert main.somente_discurso_local([vai, fica]) == {fica}
+        assert main.somente_discurso_local([vai]) == set()
+        assert main.somente_discurso_local([]) == set()
+
+    def test_a_lista_trava_o_checkbox_e_desmarca(self):
+        import main
+        from tabela import Tabela
+
+        vai, fica = self._dois()
+        selecao = {"ids": {vai, fica}}
+        colunas = ["id", "nome", "categoria", "telefone", "observacoes", "temas",
+                   "aprovado_fora"]
+        tabela = Tabela(
+            [
+                dict(zip(colunas, (vai, "Vai Fora", "Ancião", "", "", "", 1))),
+                dict(zip(colunas, (fica, "Só Local", "Ancião", "", "", "", 0))),
+            ],
+            colunas,
+        )
+        nada = lambda *a, **k: None  # noqa: E731
+
+        assert main._criar_lista_oradores(tabela, selecao, nada, nada) is not None
+        assert fica not in selecao["ids"], "o só local sai da seleção"
+        assert vai in selecao["ids"], "o aprovado continua marcado"
