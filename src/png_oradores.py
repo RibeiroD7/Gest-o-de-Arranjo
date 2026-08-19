@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from armazenamento import ASSETS_DIR, EXPORTS_DIR
 from log_app import logger
+from util import nome_oradores
 
 ESCALA = 3
 DPI = 300
@@ -251,7 +252,7 @@ def _montar_linhas_tabela(
     for registro in _ordenar_por_data(registros):
         orador_quebrado = _quebrar_texto(
             draw,
-            registro.get("orador_nome") or "—",
+            nome_oradores(registro) or "—",
             fonte_orador,
             largura_conteudo,
         )

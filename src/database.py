@@ -458,6 +458,12 @@ def create_tables(conn):
             "ALTER TABLE arranjo_oradores ADD COLUMN status TEXT NOT NULL DEFAULT 'pendente'"
         )
         cursor.execute("UPDATE arranjo_oradores SET status = 'confirmado'")
+    # Simpósio: o mesmo discurso dividido entre dois oradores da congregação.
+    # É UM compromisso (uma data, um tema, uma confirmação), então mora numa
+    # linha só — antes virava duas, com data e tema repetidos na tela e no
+    # quadro impresso.
+    if "orador_2_id" not in colunas_ao:
+        cursor.execute("ALTER TABLE arranjo_oradores ADD COLUMN orador_2_id INTEGER")
 
     conn.commit()
     print("Tabelas criadas com sucesso!")
@@ -609,10 +615,13 @@ def carregar_oradores_arranjo(arranjo_id: int) -> list[dict]:
                    ao.data,
                    COALESCE(ao.status, 'pendente') AS status,
                    COALESCE(o.nome, '') AS orador_nome,
+                   ao.orador_2_id,
+                   COALESCE(o2.nome, '') AS orador_2_nome,
                    COALESCE(t.titulo, '') AS tema_titulo,
                    COALESCE(c.nome, '') AS congregacao_nome
             FROM arranjo_oradores ao
             JOIN oradores o ON ao.orador_id = o.id
+            LEFT JOIN oradores o2 ON ao.orador_2_id = o2.id
             LEFT JOIN temas t ON ao.tema_nr = t.nr
             LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
             WHERE ao.arranjo_id = ?
@@ -637,8 +646,14 @@ def adicionar_orador_arranjo(
     tema_nr: int | None,
     congregacao_id: int | None = None,
     data: str | None = None,
+    orador_2_id: int | None = None,
 ) -> None:
-    """Adiciona orador recebido ou enviado em um arranjo mensal."""
+    """Adiciona orador recebido ou enviado em um arranjo mensal.
+
+    ``orador_2_id`` marca um SIMPÓSIO: o mesmo discurso dividido entre dois
+    oradores da congregação. É um compromisso só (uma data, um tema, uma
+    confirmação), por isso ocupa uma linha só.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -661,10 +676,12 @@ def adicionar_orador_arranjo(
         cursor.execute(
             """
             INSERT INTO arranjo_oradores (
-                arranjo_id, tipo, orador_id, tema_nr, congregacao_id, data
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                arranjo_id, tipo, orador_id, tema_nr, congregacao_id, data,
+                orador_2_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (arranjo_id, tipo, orador_id, tema_nr, congregacao_id, data),
+            (arranjo_id, tipo, orador_id, tema_nr, congregacao_id, data,
+             orador_2_id),
         )
         conn.commit()
         sincronizar_uso_temas(conn)
@@ -820,17 +837,18 @@ def atualizar_orador_arranjo(
     tema_nr: int | None,
     congregacao_id: int | None = None,
     data: str | None = None,
+    orador_2_id: int | None = None,
 ) -> None:
-    """Atualiza data, tema e congregação de um orador/designação do arranjo."""
+    """Atualiza data, tema, congregação e o 2º orador (simpósio) do registro."""
     conn = get_connection()
     try:
         conn.execute(
             """
             UPDATE arranjo_oradores
-            SET tema_nr = ?, congregacao_id = ?, data = ?
+            SET tema_nr = ?, congregacao_id = ?, data = ?, orador_2_id = ?
             WHERE id = ?
             """,
-            (tema_nr, congregacao_id, data, registro_id),
+            (tema_nr, congregacao_id, data, orador_2_id, registro_id),
         )
         conn.commit()
         sincronizar_uso_temas(conn)
@@ -1132,7 +1150,9 @@ def relatorio_presidencias(ano: int | None = None) -> list[dict]:
 def carregar_designacoes_ano(ano: int) -> list[dict]:
     """Todos os registros (recebido/enviado) do ano com data e orador.
 
-    Usado para detectar conflitos (mesmo orador na mesma data).
+    Usado para detectar conflitos (mesmo orador na mesma data). O segundo
+    orador do simpósio entra como uma linha própria: ele também não pode estar
+    designado em dois lugares no mesmo dia.
     """
     conn = get_connection()
     try:
@@ -1143,8 +1163,14 @@ def carregar_designacoes_ano(ano: int) -> list[dict]:
             JOIN arranjos a ON ao.arranjo_id = a.id
             JOIN oradores o ON ao.orador_id = o.id
             WHERE a.ano = ? AND ao.data IS NOT NULL AND ao.data <> ''
+            UNION ALL
+            SELECT ao.data, ao.orador_2_id, ao.tipo, COALESCE(o2.nome, '')
+            FROM arranjo_oradores ao
+            JOIN arranjos a ON ao.arranjo_id = a.id
+            JOIN oradores o2 ON ao.orador_2_id = o2.id
+            WHERE a.ano = ? AND ao.data IS NOT NULL AND ao.data <> ''
             """,
-            (ano,),
+            (ano, ano),
         )
         colunas = [desc[0] for desc in cursor.description]
         return [dict(zip(colunas, row)) for row in cursor.fetchall()]

@@ -27,6 +27,7 @@ from database import (
     listar_presidentes_cadastro,
     relatorio_presidencias,
 )
+from util import nome_oradores
 
 NOMES_MESES = [
     "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -166,7 +167,7 @@ def secoes_programacao(ano: int) -> list[dict]:
                 [
                     [
                         (r.get("data") or "")[:5],
-                        r.get("orador_nome", ""),
+                        nome_oradores(r),
                         _tema_do_registro(r),
                         r.get("congregacao_nome") or "—",
                     ]
@@ -183,7 +184,7 @@ def secoes_programacao(ano: int) -> list[dict]:
                 [
                     [
                         (r.get("data") or "")[:5],
-                        r.get("orador_nome", ""),
+                        nome_oradores(r),
                         _tema_do_registro(r),
                         r.get("congregacao_nome") or "—",
                         _ROTULO_STATUS.get(r.get("status", ""), r.get("status", "")),

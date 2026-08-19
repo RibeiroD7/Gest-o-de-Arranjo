@@ -198,6 +198,7 @@ from util import (
     _weekday_mais_usado,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
+    nome_oradores,
 )
 
 # ---------------------------------------------------------------------------
@@ -4602,7 +4603,7 @@ def _criar_linha_orador_arranjo(
                     color=TEXTO_PRIMARIO,
                 ),
                 ft.Text(
-                    registro.get("orador_nome", ""),
+                    nome_oradores(registro),
                     size=fonte(13),
                     color=TEXTO_PRIMARIO,
                     width=_tema.LARGURA_COL_ORADOR_MES,
@@ -4830,6 +4831,32 @@ def abrir_dialog_editar_orador_arranjo(
         enable_filter=True,
         enable_search=True,
     )
+    # Simpósio: dá para transformar um discurso comum em simpósio (e voltar)
+    # sem apagar e recadastrar — o segundo orador vem da minha congregação.
+    eh_recebido = tipo == "recebido"
+    id_minha = obter_id_minha_congregacao()
+    campo_orador_2 = ft.Dropdown(
+        label="Segundo orador (simpósio)",
+        options=carregar_oradores_com_congregacao_opcoes(
+            int(id_minha) if id_minha else None
+        ),
+        value=str(registro["orador_2_id"]) if registro.get("orador_2_id") else None,
+        expand=True,
+        visible=eh_recebido and bool(registro.get("orador_2_id")),
+    )
+    campo_simposio = ft.Checkbox(
+        label="Simpósio (dois oradores no mesmo discurso)",
+        value=bool(registro.get("orador_2_id")),
+        visible=eh_recebido,
+    )
+
+    def alternar_simposio(_=None):
+        campo_orador_2.visible = bool(campo_simposio.value)
+        if not campo_simposio.value:
+            campo_orador_2.value = None
+        page.update()
+
+    campo_simposio.on_change = alternar_simposio
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
@@ -4847,7 +4874,22 @@ def abrir_dialog_editar_orador_arranjo(
             congregacao_id = (
                 int(campo_congregacao.value) if campo_congregacao.value else None
             )
-            atualizar_orador_arranjo(registro_id, tema_nr, congregacao_id, data_norm)
+            orador_2_id = None
+            if eh_recebido and campo_simposio.value:
+                if not campo_orador_2.value:
+                    texto_erro.value = "Selecione o segundo orador do simpósio."
+                    texto_erro.visible = True
+                    page.update()
+                    return
+                orador_2_id = int(campo_orador_2.value)
+                if orador_2_id == registro.get("orador_id"):
+                    texto_erro.value = "O simpósio precisa de dois oradores diferentes."
+                    texto_erro.visible = True
+                    page.update()
+                    return
+            atualizar_orador_arranjo(
+                registro_id, tema_nr, congregacao_id, data_norm, orador_2_id
+            )
         except Exception:
             texto_erro.value = "Não foi possível salvar as alterações."
             texto_erro.visible = True
@@ -4859,10 +4901,17 @@ def abrir_dialog_editar_orador_arranjo(
     page.show_dialog(
         ft.AlertDialog(
             modal=True,
-            title=ft.Text(f"Editar — {registro.get('orador_nome', '')}"),
+            title=ft.Text(f"Editar — {nome_oradores(registro)}"),
             content=ft.Container(
                 content=ft.Column(
-                    [campo_data, campo_tema, campo_congregacao, texto_erro],
+                    [
+                        campo_data,
+                        campo_tema,
+                        campo_congregacao,
+                        campo_simposio,
+                        campo_orador_2,
+                        texto_erro,
+                    ],
                     spacing=12,
                     tight=True,
                     width=460,
@@ -4957,7 +5006,33 @@ def abrir_seletor_oradores(
         expand=True,
         visible=False,
     )
-    area_existente = ft.Column([campo_orador], spacing=12, tight=True)
+    # Simpósio: o mesmo discurso dividido entre dois oradores DA MINHA
+    # congregação. Só faz sentido em "Oradores recebidos" (quem discursa aqui).
+    campo_orador_2 = ft.Dropdown(
+        label="Segundo orador (simpósio)",
+        options=carregar_oradores_com_congregacao_opcoes(
+            int(id_minha_congregacao) if id_minha_congregacao else None
+        ),
+        expand=True,
+        visible=False,
+    )
+    campo_simposio = ft.Checkbox(
+        label="Simpósio (dois oradores no mesmo discurso)",
+        value=False,
+        visible=eh_oradores,
+    )
+
+    def alternar_simposio(_=None):
+        campo_orador_2.visible = bool(campo_simposio.value)
+        if not campo_simposio.value:
+            campo_orador_2.value = None
+        page.update()
+
+    campo_simposio.on_change = alternar_simposio
+
+    area_existente = ft.Column(
+        [campo_orador, campo_simposio, campo_orador_2], spacing=12, tight=True
+    )
     area_novo = ft.Column(
         [
             campo_nome_novo,
@@ -5375,6 +5450,20 @@ def abrir_seletor_oradores(
                     return
                 orador_id = int(campo_orador.value)
 
+            orador_2_id = None
+            if eh_oradores and campo_simposio.value:
+                if not campo_orador_2.value:
+                    texto_erro.value = "Selecione o segundo orador do simpósio."
+                    texto_erro.visible = True
+                    page.update()
+                    return
+                orador_2_id = int(campo_orador_2.value)
+                if orador_2_id == orador_id:
+                    texto_erro.value = "O simpósio precisa de dois oradores diferentes."
+                    texto_erro.visible = True
+                    page.update()
+                    return
+
             tema_nr = int(campo_tema.value) if campo_tema.value else None
             for data_norm in datas_selecionadas:
                 adicionar_orador_arranjo(
@@ -5383,6 +5472,7 @@ def abrir_seletor_oradores(
                     orador_id,
                     tema_nr,
                     data=data_norm,
+                    orador_2_id=orador_2_id,
                 )
         except Exception:
             texto_erro.value = "Não foi possível adicionar. Verifique se já existe nesta data."
@@ -5493,7 +5583,7 @@ def abrir_dialog_selecao_exportacao_png(
         data = _formatar_data_exibicao(registro.get("data"))
         if data != "—" and len(data) >= 5:
             data = data[0:5]
-        nome = registro.get("orador_nome") or "—"
+        nome = nome_oradores(registro) or "—"
         tema = _resumir_tema_selecao_exportacao(registro)
         checkbox = ft.Checkbox(value=True)
         estado["checkboxes"].append(checkbox)
@@ -6207,7 +6297,7 @@ def _abrir_whatsapp_designacao_envio(page: ft.Page, registro: dict) -> None:
     cong = cong or {}
     designacao = {
         "data": registro.get("data") or "",
-        "orador": registro.get("orador_nome", ""),
+        "orador": nome_oradores(registro),
         "tema": _rotulo_tema_orador_arranjo(registro),
         "congregacao": cong.get("nome") or registro.get("congregacao_nome", ""),
         "dia_semana": cong.get("dia_semana", ""),
@@ -6248,7 +6338,7 @@ def _abrir_whatsapp_designacao_recebida(
 
     designacao = {
         "data": registro.get("data") or "",
-        "orador": registro.get("orador_nome", ""),
+        "orador": nome_oradores(registro),
         "tema": _rotulo_tema_orador_arranjo(registro),
         "congregacao": reunioes["ita_nome"],
         "dia_semana": reunioes["ita_dia"],
@@ -6641,7 +6731,7 @@ def abrir_dialog_trocar_data(
                 ft.ListTile(
                     dense=True,
                     leading=ft.Icon(ft.Icons.SWAP_HORIZ, size=fonte(18), color=COR_DESTAQUE),
-                    title=ft.Text(f"{outro.get('orador_nome', '')}", size=fonte(13)),
+                    title=ft.Text(nome_oradores(outro), size=fonte(13)),
                     subtitle=ft.Text(
                         _formatar_data_exibicao(outro.get("data")), size=fonte(12)
                     ),
@@ -6678,7 +6768,7 @@ def abrir_dialog_trocar_data(
         ft.AlertDialog(
             modal=True,
             title=ft.Text(
-                f"Data de {registro.get('orador_nome', '')} — "
+                f"Data de {nome_oradores(registro)} — "
                 f"{_formatar_data_exibicao(registro.get('data'))}",
                 size=fonte(16),
                 weight=ft.FontWeight.W_600,

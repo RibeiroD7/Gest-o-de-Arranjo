@@ -201,6 +201,17 @@ class Tabela:
                         reverse=not crescente)
         return Tabela(linhas, self.colunas)
 
+    def groupby(self, coluna: str, sort: bool = True):
+        """Agrupa por uma coluna: devolve ``(valor, Tabela)``, como o pandas.
+
+        Usado na tela de Oradores para listar cada congregação num bloco.
+        """
+        grupos: dict[Any, list[dict]] = {}
+        for linha in self.linhas:
+            grupos.setdefault(linha.get(coluna), []).append(linha)
+        chaves = sorted(grupos, key=_chave_ordem) if sort else list(grupos)
+        return [(chave, Tabela(grupos[chave], self.colunas)) for chave in chaves]
+
     def definir(self, mascara: Mascara, coluna: str, valor: Any) -> None:
         """Grava ``valor`` na ``coluna`` das linhas marcadas (era ``.loc[]``)."""
         for linha, marcada in zip(self.linhas, mascara):

@@ -659,3 +659,59 @@ def test_row_com_wrap_nao_tem_filho_expand():
         "ft.Row com wrap=True e filho direto expand=True — a seção some da "
         "tela: " + ", ".join(problemas)
     )
+
+
+def test_tela_oradores_no_filtro_outras_congregacoes():
+    """O bloco "Outras congregações" agrupa por congregação e quebrou uma vez.
+
+    A saída do pandas deixou um `groupby` sem substituto ali. Como o filtro
+    começa em "Minha congregação", construir a tela não passava por esse
+    caminho — só quem clicasse na outra aba via o erro. Aqui a tela é montada
+    e o renderizador é chamado no modo "outras", que é onde estava o defeito.
+    """
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM arranjo_oradores")
+        conn.execute("DELETE FROM oradores")
+        conn.execute("DELETE FROM congregacoes")
+        conn.execute("INSERT INTO congregacoes (nome) VALUES ('Minha'), ('Vila'), ('Alfa')")
+        ids = {n: i for i, n in conn.execute("SELECT id, nome FROM congregacoes")}
+        conn.execute(
+            "INSERT INTO oradores (nome, categoria, congregacao_id) "
+            "VALUES ('Daqui', 'Ancião', ?), ('De Vila', 'Ancião', ?), ('De Alfa', 'Ancião', ?)",
+            (ids["Minha"], ids["Vila"], ids["Alfa"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    main.salvar_configuracao(
+        {
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        }
+    )
+
+    capturado = {}
+    original = main.criar_tela_padrao
+
+    def espiao(**kwargs):
+        capturado["render"] = kwargs["renderizador_tabela"]
+        return original(**kwargs)
+
+    main.criar_tela_padrao = espiao
+    try:
+        assert main.tela_oradores(_page(), lambda: None) is not None
+    finally:
+        main.criar_tela_padrao = original
+
+    # É este o caminho que quebrava: agrupar as OUTRAS congregações.
+    dados = main.filtrar_dataframe(
+        main.carregar_dados(main.SQL_ORADORES), "", ["nome"]
+    )
+    outras = dados[dados["congregacao"] != "Minha"]
+    assert len(outras) == 2
+    assert capturado["render"](outras) is not None

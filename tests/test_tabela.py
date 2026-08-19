@@ -186,3 +186,39 @@ class TestPlanilha:
 
 def test_mascara_isolada():
     assert Mascara([1, 0, 1]).sum() == 2
+
+
+class TestGroupby:
+    """A tela de Oradores agrupa por congregação; sem isso ela quebrava.
+
+    O `groupby` passou despercebido na saída do pandas e só era alcançado
+    ao trocar o filtro para "Outras congregações" — nenhum teste ia por ali.
+    """
+
+    def test_agrupa_e_ordena_pelas_chaves(self):
+        tabela = Tabela(
+            [
+                {"c": "Vila", "n": 1},
+                {"c": "Alfa", "n": 2},
+                {"c": "Vila", "n": 3},
+            ],
+            ["c", "n"],
+        )
+        grupos = tabela.groupby("c")
+        assert [chave for chave, _ in grupos] == ["Alfa", "Vila"]
+        assert [len(t) for _, t in grupos] == [1, 2]
+        assert [li["n"] for li in grupos[1][1]] == [1, 3]
+
+    def test_sem_ordenar_mantem_a_ordem_de_chegada(self):
+        tabela = Tabela([{"c": "Vila"}, {"c": "Alfa"}], ["c"])
+        assert [chave for chave, _ in tabela.groupby("c", sort=False)] == ["Vila", "Alfa"]
+
+    def test_grupo_e_uma_tabela_de_verdade(self):
+        tabela = Tabela([{"c": "Alfa", "n": 1}], ["c", "n"])
+        (_, grupo), = tabela.groupby("c")
+        assert grupo.colunas == ["c", "n"]
+        assert grupo.to_dict() == [{"c": "Alfa", "n": 1}]
+
+    def test_chave_nula_nao_estoura(self):
+        tabela = Tabela([{"c": None}, {"c": "Alfa"}], ["c"])
+        assert [chave for chave, _ in tabela.groupby("c")] == [None, "Alfa"]
