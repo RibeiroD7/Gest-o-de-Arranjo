@@ -3224,14 +3224,29 @@ def _iniciais_nome(nome: str) -> str:
     return (partes[0][0] + partes[-1][0]).upper()
 
 
+def _rotulo_ultima_saida(ultima_saida: dict[int, str], orador_id: int) -> str:
+    """Quando o orador discursou fora pela última vez — vazio se não há dados."""
+    if not ultima_saida:
+        return ""
+    data = ultima_saida.get(orador_id)
+    return f"último envio: {data}" if data else "nunca foi enviado"
+
+
 def _criar_lista_oradores(
     df: Tabela,
     estado_selecao: dict,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
     on_conversar: Callable[[int], None] | None = None,
+    ultima_saida: dict[int, str] | None = None,
 ) -> ft.Container:
-    """Lista de oradores com iniciais, privilégio, telefone e chip de temas."""
+    """Lista de oradores com iniciais, privilégio, telefone e chip de temas.
+
+    ``ultima_saida`` ({orador_id: data}) mostra em cada linha quando a pessoa
+    discursou fora pela última vez — é o que se olha ao marcar quem vai na
+    próxima lista de envio.
+    """
+    ultima_saida = ultima_saida or {}
     if df.empty:
         return ft.Container(
             content=ft.Column(
@@ -3368,7 +3383,7 @@ def _criar_lista_oradores(
                     ft.Row(
                         [
                             ft.Text(
-                                detalhes,
+                                _rotulo_ultima_saida(ultima_saida, orador_id) or detalhes,
                                 size=fonte(12),
                                 color=TEXTO_SECUNDARIO,
                                 expand=True,
@@ -3409,9 +3424,23 @@ def _criar_lista_oradores(
                     ],
                     spacing=6,
                 ),
-                ft.Text(
-                    telefone, size=fonte(12), color=TEXTO_SECUNDARIO,
-                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
+                ft.Row(
+                    [
+                        ft.Text(
+                            telefone, size=fonte(12), color=TEXTO_SECUNDARIO,
+                            no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            _rotulo_ultima_saida(ultima_saida, orador_id),
+                            size=fonte(11),
+                            color=(
+                                COR_AVISO if orador_id not in ultima_saida
+                                else TEXTO_SECUNDARIO
+                            ),
+                            no_wrap=True,
+                        ),
+                    ],
+                    spacing=8,
                 ),
             ],
             spacing=2,
@@ -3452,18 +3481,38 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     df_completo = carregar_dados(SQL_ORADORES)
     id_minha_congregacao = obter_id_minha_congregacao()
     estado_selecao = {"ids": set()}
-    estado_filtro = {"modo": "minha" if id_minha_congregacao else "outras"}
+    estado_filtro = {
+        "modo": "minha" if id_minha_congregacao else "outras",
+        "ordem": "nome",
+    }
     referencia_atualizar: dict[str, Callable[[str], None]] = {}
+
+    def _ordenar_pela_fila(tabela: Tabela) -> Tabela:
+        """Há mais tempo sem discursar primeiro — a ordem de quem escolher."""
+        ultima = ultima_data_discurso_por_orador()
+        ordem = oradores_mais_tempo_sem_discurso(
+            [int(li["id"]) for li in tabela], ultima
+        )
+        posicao = {oid: indice for indice, oid in enumerate(ordem)}
+        return Tabela(
+            sorted(tabela.linhas, key=lambda li: posicao.get(int(li["id"]), 0)),
+            tabela.colunas,
+        )
 
     def df_filtrado_congregacao() -> Tabela:
         if not id_minha_congregacao:
-            return df_completo
+            return (
+                _ordenar_pela_fila(df_completo)
+                if estado_filtro["ordem"] == "fila"
+                else df_completo
+            )
         # O id vem do banco como inteiro; comparar como texto evitava o
         # NaN do pandas, que não existe mais aqui.
         minha = int(id_minha_congregacao)
         coluna_congregacao = df_completo["congregacao_id"]
         if estado_filtro["modo"] == "minha":
-            return df_completo[coluna_congregacao == minha]
+            meus = df_completo[coluna_congregacao == minha]
+            return _ordenar_pela_fila(meus) if estado_filtro["ordem"] == "fila" else meus
         resultado = df_completo[coluna_congregacao != minha]
         return resultado.sort_values(["congregacao", "categoria", "nome"])
 
@@ -3519,11 +3568,32 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         ],
     )
 
+    def ao_mudar_ordem(e=None):
+        estado_filtro["ordem"] = seletor_ordem.value or "nome"
+        if "fn" in referencia_atualizar:
+            referencia_atualizar["fn"]("")
+
+    seletor_ordem = ft.Dropdown(
+        label="Ordenar por",
+        value="nome",
+        options=[
+            ft.dropdown.Option(key="nome", text="Nome"),
+            ft.dropdown.Option(key="fila", text="Há mais tempo sem discursar"),
+        ],
+        width=None if eh_mobile() else 250,
+    )
+    seletor_ordem.on_select = ao_mudar_ordem
+
     def renderizar_oradores(df_filtrado: Tabela) -> ft.Control:
         if estado_filtro["modo"] != "outras":
+            # "Último envio" só vale para os meus: a data vem dos registros
+            # de designação enviada, que são sempre de oradores daqui.
             return _criar_lista_oradores(
                 df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
                 conversar_com_orador,
+                ultima_saida={
+                    int(k): v for k, v in ultima_data_discurso_por_orador().items()
+                },
             )
 
         if df_filtrado.empty:
@@ -3600,7 +3670,7 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         descricao="Oradores da minha congregação e temas que podem apresentar",
         df=df_filtrado_congregacao,
         colunas_filtro=["nome", "categoria", "telefone", "temas", "observacoes", "congregacao"],
-        controles_filtro=[seletor_congregacao],
+        controles_filtro=[seletor_congregacao, seletor_ordem],
         on_atualizar_disponivel=registrar_atualizar,
         renderizador_tabela=renderizar_oradores,
         barra_acoes=[

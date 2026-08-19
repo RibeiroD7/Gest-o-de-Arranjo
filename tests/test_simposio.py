@@ -251,3 +251,57 @@ class TestAprovacaoParaDiscursoFora:
         finally:
             conn.close()
         assert valor == 1
+
+
+class TestFilaNaTelaDeOradores:
+    """A escolha de quem enviar é feita na tela de Oradores, marcando gente.
+
+    Por isso a ordem "há mais tempo sem discursar" e a data do último envio
+    precisam estar ali — sem elas, escolher exige abrir outra tela.
+    """
+
+    def _com_historico(self):
+        arranjo, ids, cong = _preparar()
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO oradores (nome, categoria, congregacao_id) "
+                "VALUES ('Nunca Foi', 'Ancião', ?)",
+                (cong,),
+            )
+            conn.commit()
+            ids["Nunca Foi"] = conn.execute(
+                "SELECT id FROM oradores WHERE nome = 'Nunca Foi'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        # Eduardo saiu há mais tempo que Danilo.
+        database.adicionar_orador_arranjo(
+            arranjo, "enviado", ids["Eduardo Nunes"], 176, data="05/01/2026"
+        )
+        database.adicionar_orador_arranjo(
+            arranjo, "enviado", ids["Danilo Reis"], 176, data="05/06/2026"
+        )
+        return ids
+
+    def test_quem_nunca_saiu_vem_primeiro(self):
+        from servicos import oradores_mais_tempo_sem_discurso
+
+        ids = self._com_historico()
+        ultima = database.ultima_data_discurso_por_orador()
+        ordem = oradores_mais_tempo_sem_discurso(
+            [ids["Danilo Reis"], ids["Eduardo Nunes"], ids["Nunca Foi"]], ultima
+        )
+        assert ordem == [ids["Nunca Foi"], ids["Eduardo Nunes"], ids["Danilo Reis"]]
+
+    def test_rotulo_do_ultimo_envio(self):
+        import main
+
+        ids = self._com_historico()
+        ultima = database.ultima_data_discurso_por_orador()
+        assert main._rotulo_ultima_saida(ultima, ids["Eduardo Nunes"]) == (
+            "último envio: 05/01/2026"
+        )
+        assert main._rotulo_ultima_saida(ultima, ids["Nunca Foi"]) == "nunca foi enviado"
+        # Sem dados nenhum (outras congregações) a linha não mostra nada.
+        assert main._rotulo_ultima_saida({}, ids["Eduardo Nunes"]) == ""
