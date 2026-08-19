@@ -4112,7 +4112,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     def exportar_relatorio(_=None):
         from relatorios import secoes_temas
 
-        exportar_relatorio_pdf(page, secoes_temas, "Catálogo de temas", "Temas")
+        exportar_relatorio_pdf(page, secoes_temas, "Temas", "Temas")
 
     botao_relatorio = botao_relatorio_tela(exportar_relatorio)
 
@@ -8371,7 +8371,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             )
             secoes.append(faixa("Presidentes da reunião"))
             secoes += secoes_presidentes()
-            secoes.append(faixa("Catálogo de temas (S-99)"))
+            secoes.append(faixa("Temas"))
             secoes += secoes_temas()
             return secoes
 
@@ -10197,29 +10197,35 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             page, secoes_presidentes, "Presidentes e rodízio", "Presidentes"
         )
 
-    cabecalho = ft.Row(
+    texto_resumo = ft.Column(
         [
-            ft.Column(
-                [
-                    ft.Text(resumo, size=fonte(13), weight=ft.FontWeight.W_600,
-                            color=TEXTO_PRIMARIO),
-                    ft.Text(
-                        "A ordem desta lista define o rodízio automático.",
-                        size=fonte(11),
-                        color=TEXTO_SECUNDARIO,
-                    ),
-                ],
-                spacing=2,
-                tight=True,
-                expand=True,
+            ft.Text(resumo, size=fonte(13), weight=ft.FontWeight.W_600,
+                    color=TEXTO_PRIMARIO),
+            ft.Text(
+                "A ordem desta lista define o rodízio automático.",
+                size=fonte(11),
+                color=TEXTO_SECUNDARIO,
             ),
-            botao_relatorio_tela(exportar_relatorio),
-            botao_adicionar,
         ],
-        spacing=8,
-        wrap=True,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=2,
+        tight=True,
+        expand=True,
     )
+    botoes = [botao_relatorio_tela(exportar_relatorio), botao_adicionar]
+    if eh_mobile():
+        # `wrap=True` numa Row com filho `expand=True` não resolve a largura no
+        # Flet e a seção inteira vira um retângulo vazio: no celular, empilha.
+        cabecalho = ft.Column(
+            [texto_resumo, ft.Row(botoes, spacing=8)],
+            spacing=8,
+            tight=True,
+        )
+    else:
+        cabecalho = ft.Row(
+            [texto_resumo, *botoes],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
     if not cadastro:
         corpo: list[ft.Control] = [

@@ -596,3 +596,66 @@ def test_todos_os_run_task_recebem_corrotinas():
             if not re.search(rf"\basync def {re.escape(nome)}\b", codigo):
                 problemas.append(f"{arquivo.name}:{linha} passa {handler!r} (não é async def)")
     assert not problemas, "run_task com handler inválido:\n" + "\n".join(problemas)
+
+
+def test_row_com_wrap_nao_tem_filho_expand():
+    """`wrap=True` numa Row com filho `expand=True` quebra o layout no Flet.
+
+    A aba Presidentes virou um retângulo cinza vazio no celular por causa
+    disso: o Flet não resolve a largura do filho elástico dentro de uma linha
+    que quebra, e a seção inteira some. Como o estrago é visual (não levanta
+    exceção, então construir a tela não pega), a checagem é no código-fonte.
+    """
+    import ast
+    import pathlib
+
+    def e_row(no):
+        return (
+            isinstance(no, ast.Call)
+            and isinstance(no.func, ast.Attribute)
+            and no.func.attr == "Row"
+        )
+
+    def tem_kw_true(no, nome):
+        return any(
+            kw.arg == nome
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value is True
+            for kw in no.keywords
+        )
+
+    problemas = []
+    for arquivo in sorted(pathlib.Path("src").glob("*.py")):
+        arvore = ast.parse(arquivo.read_text(encoding="utf-8"))
+
+        # `x = ft.Column(..., expand=True)` — o filho elástico costuma ser
+        # montado numa variável e só depois entrar na Row, então seguir o nome
+        # é o que faz a checagem valer para o código como ele é escrito.
+        elasticos = {
+            alvo.id
+            for no in ast.walk(arvore)
+            if isinstance(no, ast.Assign) and isinstance(no.value, ast.Call)
+            and tem_kw_true(no.value, "expand")
+            for alvo in no.targets
+            if isinstance(alvo, ast.Name)
+        }
+
+        def elastico(filho, elasticos=elasticos):
+            if isinstance(filho, ast.Starred):
+                filho = filho.value
+            if isinstance(filho, ast.Call):
+                return tem_kw_true(filho, "expand")
+            return isinstance(filho, ast.Name) and filho.id in elasticos
+
+        for no in ast.walk(arvore):
+            if not (e_row(no) and tem_kw_true(no, "wrap")):
+                continue
+            # Só os filhos DIRETOS: expand num neto é problema de outro pai.
+            filhos = no.args[0].elts if no.args and isinstance(no.args[0], ast.List) else []
+            if any(elastico(f) for f in filhos):
+                problemas.append(f"{arquivo.name}:{no.lineno}")
+
+    assert not problemas, (
+        "ft.Row com wrap=True e filho direto expand=True — a seção some da "
+        "tela: " + ", ".join(problemas)
+    )

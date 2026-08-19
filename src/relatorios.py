@@ -141,9 +141,21 @@ def secoes_programacao(ano: int) -> list[dict]:
         recebidos = _ordenar_por_data([r for r in registros if r["tipo"] == "recebido"])
         enviados = _ordenar_por_data([r for r in registros if r["tipo"] == "enviado"])
 
-        apoio = f"Anfitriã: {anfitria}"
+        # Os dados da anfitriã ficam na tarja do mês: é com o irmão dela que o
+        # arranjo é combinado, e sem isso o coordenador tem que ir procurar em
+        # Congregações com o papel na mão.
+        cabecalho_mes = f"Anfitriã: {anfitria}"
         if reuniao:
-            apoio += f" · Reunião {reuniao}"
+            cabecalho_mes += f" · Reunião {reuniao}"
+        responsavel = (arranjo.get("responsavel") or "").strip()
+        telefone = (arranjo.get("telefone") or "").strip()
+        contato_mes = " · ".join(
+            p for p in (
+                f"Coordenador de discursos: {responsavel}" if responsavel else "",
+                telefone,
+            ) if p
+        )
+        apoio = [cabecalho_mes, contato_mes, (arranjo.get("endereco") or "").strip()]
         secoes.append(_secao(nome_mes, apoio, [], [], [], "", faixa=True))
 
         secoes.append(

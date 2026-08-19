@@ -142,11 +142,17 @@ class _CanvasNumerado(canvas.Canvas):
         self.drawRightString(largura - 36, 20, f"Página {self._pageNumber} de {total}")
 
 
-def _faixa_bloco(titulo: str, apoio: str = "") -> Table:
-    """Título de bloco (um mês, uma congregação) numa faixa colorida."""
+def _faixa_bloco(titulo: str, apoio: str | list[str] = "") -> Table:
+    """Título de bloco (um mês, uma congregação) numa faixa colorida.
+
+    ``apoio`` aceita várias linhas: no mês da programação são os dados da
+    congregação anfitriã — reunião, responsável, contato e endereço.
+    """
+    linhas_apoio = [apoio] if isinstance(apoio, str) else list(apoio)
     interno = [[Paragraph(titulo, _ESTILO_BLOCO)]]
-    if apoio:
-        interno.append([Paragraph(apoio, _ESTILO_BLOCO_APOIO)])
+    interno += [[Paragraph(linha, _ESTILO_BLOCO_APOIO)] for linha in linhas_apoio if linha]
+    tem_apoio = len(interno) > 1
+
     faixa = Table(interno, colWidths=[_LARGURA_UTIL])
     faixa.setStyle(
         TableStyle(
@@ -154,9 +160,12 @@ def _faixa_bloco(titulo: str, apoio: str = "") -> Table:
                 ("BACKGROUND", (0, 0), (-1, -1), _COR_MARCA),
                 ("LEFTPADDING", (0, 0), (-1, -1), 10),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                # Só o título respira em cima e a última linha embaixo: as
+                # linhas de apoio ficam coladas, como um bloco de endereço.
                 ("TOPPADDING", (0, 0), (-1, 0), 7),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 2 if apoio else 7),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 2 if tem_apoio else 7),
                 ("TOPPADDING", (0, 1), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 1), (-1, -2), 1),
                 ("BOTTOMPADDING", (0, -1), (-1, -1), 7),
             ]
         )
