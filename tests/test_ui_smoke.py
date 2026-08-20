@@ -36,7 +36,6 @@ def _telas(page, fp):
     return {
         "inicio": lambda: main.tela_inicio(page, lambda: None, lambda i: None),
         "programacao": lambda: main.tela_programacao(page, lambda: None, fp),
-        "oradores": lambda: main.tela_oradores(page, lambda: None),
         "congregacoes": lambda: main.tela_congregacoes(page, lambda: None),
         "temas": lambda: main.tela_temas(page, fp),
         "quadro": lambda: main.tela_quadro_anuncios(page, lambda: None),
@@ -661,13 +660,12 @@ def test_row_com_wrap_nao_tem_filho_expand():
     )
 
 
-def test_tela_oradores_no_filtro_outras_congregacoes():
-    """O bloco "Outras congregações" agrupa por congregação e quebrou uma vez.
+def test_congregacoes_mostram_os_oradores_de_cada_uma():
+    """Os oradores de fora moram no cadastro da congregação de onde vêm.
 
-    A saída do pandas deixou um `groupby` sem substituto ali. Como o filtro
-    começa em "Minha congregação", construir a tela não passava por esse
-    caminho — só quem clicasse na outra aba via o erro. Aqui a tela é montada
-    e o renderizador é chamado no modo "outras", que é onde estava o defeito.
+    A aba "Oradores" saiu do menu: os meus foram para "Minha congregação" e
+    os de fora para cá. Este é também o caminho que usa Tabela.groupby, que
+    já quebrou uma vez por ter passado despercebido na saída do pandas.
     """
     import database
 
@@ -705,17 +703,37 @@ def test_tela_oradores_no_filtro_outras_congregacoes():
 
     main.criar_tela_padrao = espiao
     try:
-        assert main.tela_oradores(_page(), lambda: None) is not None
+        assert main.tela_congregacoes(_page(), lambda: None) is not None
     finally:
         main.criar_tela_padrao = original
 
-    # É este o caminho que quebrava: agrupar as OUTRAS congregações.
-    dados = main.filtrar_dataframe(
-        main.carregar_dados(main.SQL_ORADORES), "", ["nome"]
-    )
-    outras = dados[dados["congregacao"] != "Minha"]
-    assert len(outras) == 2
-    assert capturado["render"](outras) is not None
+    # O renderizador vale nos dois layouts agora (era só no celular).
+    assert capturado["render"] is not None
+    congs = main.carregar_dados(main.SQL_CONGREGACOES)
+    assert capturado["render"](congs) is not None
+
+
+def test_oradores_saiu_do_menu_e_virou_aba():
+    """A aba própria deixou de existir; a seção mora em Minha congregação."""
+    assert not hasattr(main, "tela_oradores")
+    assert [s["nome"] for s in main.SECOES].count("Oradores") == 0
+    # Os índices usados por botões acompanham a lista.
+    assert main.SECOES[main.INDICE_MINHA_CONGREGACAO]["nome"] == "Minha congregação"
+    assert main.SECOES[main.INDICE_RELATORIOS]["nome"] == "Relatórios"
+    assert main.SECOES[main.INDICE_AJUSTES]["nome"] == "Ajustes"
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_aba_oradores_da_minha_congregacao(mobile):
+    """A seção monta e traz só quem é da minha congregação."""
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        assert main._secao_oradores(_page(), lambda: None) is not None
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
 
 
 @pytest.mark.parametrize("mobile", [False, True])

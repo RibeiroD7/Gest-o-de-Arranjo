@@ -245,7 +245,9 @@ def _ctrl_pressionado() -> bool:
 SECOES = [
     {"nome": "Início", "icone": ft.Icons.HOME},
     {"nome": "Programação", "icone": ft.Icons.CALENDAR_MONTH},
-    {"nome": "Oradores", "icone": ft.Icons.PEOPLE},
+    # Oradores não é uma aba: os da minha congregação moram em "Minha
+    # congregação" (é lá que se monta a lista de envio) e os de fora ficam
+    # dentro do cadastro de cada congregação, que é de onde eles vêm.
     {"nome": "Congregações", "icone": ft.Icons.LOCATION_CITY},
     {"nome": "Minha congregação", "icone": ft.Icons.HOME_WORK},
     {"nome": "Temas", "icone": ft.Icons.MENU_BOOK},
@@ -257,9 +259,9 @@ SECOES = [
 
 # Índices de navegação usados em botões/atalhos (mantidos junto de SECOES
 # para não quebrarem quando a ordem das abas mudar).
-INDICE_MINHA_CONGREGACAO = 4
-INDICE_RELATORIOS = 8
-INDICE_AJUSTES = 9
+INDICE_MINHA_CONGREGACAO = 3
+INDICE_RELATORIOS = 7
+INDICE_AJUSTES = 8
 
 # Quantos meses à frente as Pendências do Início cobram. O arranjo se monta com
 # poucos meses de antecedência: cobrar o ano todo enche a lista de meses que
@@ -1216,6 +1218,7 @@ def criar_tela_padrao(
     controles_filtro: list[ft.Control] | None = None,
     on_atualizar_disponivel: Callable[[Callable[[str], None]], None] | None = None,
     renderizador_tabela: Callable[[Tabela], ft.Control] | None = None,
+    mostrar_cabecalho: bool = True,
 ) -> ft.Column:
     """
     Layout padronizado para telas com tabela, busca e barra de ações.
@@ -1289,8 +1292,10 @@ def criar_tela_padrao(
         )
         return ft.Column(
             [
-                criar_cabecalho_tela(titulo, descricao),
-                ft.Container(height=8),
+                *(
+                    [criar_cabecalho_tela(titulo, descricao), ft.Container(height=8)]
+                    if mostrar_cabecalho else []
+                ),
                 *linhas_filtro,
                 barra,
                 ft.Container(height=6),
@@ -1312,10 +1317,15 @@ def criar_tela_padrao(
 
     return ft.Column(
         [
-            criar_cabecalho_tela(titulo, descricao),
-            ft.Container(height=28),
-            criar_secao_titulo("Dados"),
-            ft.Container(height=12),
+            *(
+                [
+                    criar_cabecalho_tela(titulo, descricao),
+                    ft.Container(height=28),
+                    criar_secao_titulo("Dados"),
+                    ft.Container(height=12),
+                ]
+                if mostrar_cabecalho else []
+            ),
             *linhas_filtro,
             barra,
             ft.Container(height=8),
@@ -3344,6 +3354,7 @@ def _criar_lista_oradores(
     on_conversar: Callable[[int], None] | None = None,
     ultima_saida: dict[int, str] | None = None,
     on_temas: Callable[[int, str], None] | None = None,
+    expandir: bool = True,
 ) -> ft.Container:
     """Lista de oradores com iniciais, privilégio, telefone e chip de temas.
 
@@ -3592,24 +3603,32 @@ def _criar_lista_oradores(
         )
 
     return ft.Container(
-        content=ft.Column(linhas, spacing=0, tight=True, scroll=ft.ScrollMode.AUTO),
+        content=ft.Column(
+            linhas,
+            spacing=0,
+            tight=True,
+            scroll=ft.ScrollMode.AUTO if expandir else None,
+        ),
         border=ft.Border.all(1, BORDA_SUAVE),
         border_radius=14,
         bgcolor=FUNDO_CARD,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        expand=True,
+        # Dentro de um ExpansionTile não há altura para esticar: com `expand`
+        # a lista renderiza vazia, como já aconteceu na aba Presidentes.
+        expand=expandir,
     )
 
 
-def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
-    """Lista oradores locais com temas, busca e formulário de adição/edição."""
+def _secao_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
+    """Oradores da MINHA congregação: é aqui que se monta a lista de envio.
+
+    Deixou de ser uma aba própria: os de fora moram no cadastro de cada
+    congregação (em Congregações), que é de onde eles vêm.
+    """
     df_completo = carregar_dados(SQL_ORADORES)
     id_minha_congregacao = obter_id_minha_congregacao()
     estado_selecao = {"ids": set()}
-    estado_filtro = {
-        "modo": "minha" if id_minha_congregacao else "outras",
-        "ordem": "nome",
-    }
+    estado_filtro = {"ordem": "nome"}
     referencia_atualizar: dict[str, Callable[[str], None]] = {}
 
     def _ordenar_pela_fila(tabela: Tabela) -> Tabela:
@@ -3625,21 +3644,12 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
         )
 
     def df_filtrado_congregacao() -> Tabela:
-        if not id_minha_congregacao:
-            return (
-                _ordenar_pela_fila(df_completo)
-                if estado_filtro["ordem"] == "fila"
-                else df_completo
-            )
-        # O id vem do banco como inteiro; comparar como texto evitava o
-        # NaN do pandas, que não existe mais aqui.
-        minha = int(id_minha_congregacao)
-        coluna_congregacao = df_completo["congregacao_id"]
-        if estado_filtro["modo"] == "minha":
-            meus = df_completo[coluna_congregacao == minha]
-            return _ordenar_pela_fila(meus) if estado_filtro["ordem"] == "fila" else meus
-        resultado = df_completo[coluna_congregacao != minha]
-        return resultado.sort_values(["congregacao", "categoria", "nome"])
+        meus = df_completo
+        if id_minha_congregacao:
+            meus = df_completo[
+                df_completo["congregacao_id"] == int(id_minha_congregacao)
+            ]
+        return _ordenar_pela_fila(meus) if estado_filtro["ordem"] == "fila" else meus
 
     def abrir_novo(_=None):
         abrir_dialog_orador(page, recarregar)
@@ -3672,30 +3682,6 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     def registrar_atualizar(fn: Callable[[str], None]) -> None:
         referencia_atualizar["fn"] = fn
 
-    def ao_mudar_filtro(e):
-        estado_filtro["modo"] = e.control.selected[0] if e.control.selected else "minha"
-        if "fn" in referencia_atualizar:
-            referencia_atualizar["fn"]("")
-
-    seletor_congregacao = ft.SegmentedButton(
-        selected=[estado_filtro["modo"]],
-        allow_empty_selection=False,
-        on_change=ao_mudar_filtro,
-        segments=[
-            # Rótulos curtos no celular: os longos quebravam em duas linhas
-            ft.Segment(
-                value="minha",
-                label=ft.Text("Minha" if eh_mobile() else "Minha congregação"),
-                icon=ft.Icon(ft.Icons.HOME_OUTLINED) if eh_mobile() else None,
-            ),
-            ft.Segment(
-                value="outras",
-                label=ft.Text("Outras" if eh_mobile() else "Outras congregações"),
-                icon=ft.Icon(ft.Icons.GROUPS_OUTLINED) if eh_mobile() else None,
-            ),
-        ],
-    )
-
     def ao_mudar_ordem(e=None):
         estado_filtro["ordem"] = seletor_ordem.value or "nome"
         if "fn" in referencia_atualizar:
@@ -3713,93 +3699,34 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     seletor_ordem.on_select = ao_mudar_ordem
 
     def renderizar_oradores(df_filtrado: Tabela) -> ft.Control:
-        if estado_filtro["modo"] != "outras":
-            # "Último envio" só vale para os meus: a data vem dos registros
-            # de designação enviada, que são sempre de oradores daqui.
-            return _criar_lista_oradores(
-                df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
-                conversar_com_orador,
-                ultima_saida={
-                    int(k): v for k, v in ultima_data_discurso_por_orador().items()
-                },
-                on_temas=ver_temas,
-            )
-
-        if df_filtrado.empty:
-            return _criar_lista_oradores(
-                df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
-                conversar_com_orador, on_temas=ver_temas,
-            )
-
-        def bloco_congregacao(nome_congregacao: str, grupo: Tabela) -> ft.Control:
-            cong_ids = grupo["congregacao_id"].dropna().unique()
-            cong_id = int(cong_ids[0]) if len(cong_ids) else None
-
-            def adicionar_aqui(_=None, cong_id=cong_id):
-                abrir_dialog_orador(page, recarregar, congregacao_padrao=cong_id)
-
-            return ft.ExpansionTile(
-                title=ft.Row(
-                    [
-                        ft.Text(
-                            f"{nome_congregacao} ({len(grupo)})",
-                            weight=ft.FontWeight.W_600,
-                            expand=True,
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.PERSON_ADD_ALT,
-                            icon_size=fonte(18),
-                            icon_color=COR_DESTAQUE_SUAVE,
-                            tooltip=f"Adicionar orador em {nome_congregacao}",
-                            on_click=adicionar_aqui,
-                        ),
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                controls=[
-                    _criar_lista_oradores(
-                        grupo, estado_selecao, abrir_editar, abrir_excluir,
-                        conversar_com_orador, on_temas=ver_temas,
-                    )
-                ],
-            )
-
-        blocos = [
-            bloco_congregacao(nome_congregacao, grupo)
-            for nome_congregacao, grupo in df_filtrado.groupby("congregacao", sort=True)
-        ]
-        return ft.Container(
-            content=ft.Column(blocos, spacing=8, scroll=ft.ScrollMode.AUTO, expand=True),
-            expand=True,
-            border=ft.Border.all(1, BORDA_SUAVE),
-            border_radius=14,
-            padding=ft.Padding.symmetric(horizontal=12, vertical=14),
-            bgcolor=FUNDO_CARD,
-            shadow=_sombra_card(0.25),
+        return _criar_lista_oradores(
+            df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
+            conversar_com_orador,
+            ultima_saida={
+                int(k): v for k, v in ultima_data_discurso_por_orador().items()
+            },
+            on_temas=ver_temas,
         )
 
     def exportar_relatorio(_=None):
         from relatorios import secoes_oradores
 
-        # O relatório sai do que está filtrado na tela: se o usuário está
-        # vendo só as outras congregações, é isso que ele quer imprimir.
         registros = df_filtrado_congregacao().to_dict("records")
-        titulo = (
-            "Oradores da minha congregação" if estado_filtro["modo"] == "minha"
-            else "Oradores de outras congregações"
-        )
         exportar_relatorio_pdf(
-            page, lambda: secoes_oradores(registros), titulo, "Oradores"
+            page,
+            lambda: secoes_oradores(registros),
+            "Oradores da minha congregação",
+            "Oradores",
         )
 
     return criar_tela_padrao(
         page=page,
         titulo="Oradores",
         descricao="Oradores da minha congregação e temas que podem apresentar",
+        mostrar_cabecalho=False,
         df=df_filtrado_congregacao,
-        colunas_filtro=["nome", "categoria", "telefone", "temas", "observacoes", "congregacao"],
-        controles_filtro=[seletor_congregacao, seletor_ordem],
+        colunas_filtro=["nome", "categoria", "telefone", "temas", "observacoes"],
+        controles_filtro=[seletor_ordem],
         on_atualizar_disponivel=registrar_atualizar,
         renderizador_tabela=renderizar_oradores,
         barra_acoes=[
@@ -4436,13 +4363,19 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
     )
 
 
-def _criar_lista_congregacoes_mobile(
+def _criar_lista_congregacoes(
     df: Tabela,
     on_editar: Callable[[int], None],
     on_excluir: Callable[[int], None],
     on_conversar: Callable[[int], None] | None = None,
+    oradores_de: Callable[[int], ft.Control] | None = None,
 ) -> ft.Control:
-    """Lista de congregações em cards empilhados (a tabela não cabe no celular)."""
+    """Congregações em cards, cada uma abrindo os oradores dela.
+
+    Era uma tabela no computador e cards no celular. Virou card nos dois:
+    os oradores de fora saíram da aba própria e passaram a morar aqui, no
+    cadastro da congregação de onde eles vêm — e tabela não expande.
+    """
     if df.empty:
         return ft.Container(
             content=ft.Text("Nenhuma congregação encontrada.", size=fonte(13), color=TEXTO_SECUNDARIO),
@@ -4526,9 +4459,7 @@ def _criar_lista_congregacoes_mobile(
                 )
             )
 
-        linhas.append(
-            ft.Container(
-                content=ft.Column(
+        cabecalho_card = ft.Column(
                     [
                         ft.Row(
                             [
@@ -4559,14 +4490,31 @@ def _criar_lista_congregacoes_mobile(
                     ],
                     spacing=4,
                     tight=True,
+        )
+        borda = ft.Border(
+            ft.BorderSide(0, BORDA_SUAVE),
+            ft.BorderSide(0, BORDA_SUAVE),
+            ft.BorderSide(1 if indice < len(registros) - 1 else 0, BORDA_SUAVE),
+            ft.BorderSide(0, BORDA_SUAVE),
+        )
+        if oradores_de is None:
+            linhas.append(
+                ft.Container(
+                    content=cabecalho_card,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    border=borda,
+                )
+            )
+            continue
+        linhas.append(
+            ft.Container(
+                content=ft.ExpansionTile(
+                    title=cabecalho_card,
+                    tile_padding=ft.Padding.symmetric(horizontal=12, vertical=2),
+                    controls_padding=ft.Padding.only(left=8, right=8, bottom=10),
+                    controls=[oradores_de(cong_id)],
                 ),
-                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                border=ft.Border(
-                    ft.BorderSide(0, BORDA_SUAVE),
-                    ft.BorderSide(0, BORDA_SUAVE),
-                    ft.BorderSide(1 if indice < len(registros) - 1 else 0, BORDA_SUAVE),
-                    ft.BorderSide(0, BORDA_SUAVE),
-                ),
+                border=borda,
             )
         )
 
@@ -4613,12 +4561,81 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
         )
         abrir_url(page, gerar_link_whatsapp(telefone, mensagem))
 
-    renderizador = None
-    if eh_mobile():
-        def renderizador(df_filtrado: Tabela) -> ft.Control:
-            return _criar_lista_congregacoes_mobile(
-                df_filtrado, abrir_editar, abrir_excluir, conversar_com_responsavel
+    oradores_por_congregacao = carregar_dados(SQL_ORADORES)
+    estado_selecao_cong = {"ids": set()}
+
+    def abrir_editar_orador(orador_id: int):
+        abrir_dialog_orador(page, recarregar, orador_id=orador_id)
+
+    def abrir_excluir_orador(orador_id: int):
+        confirmar_exclusao_orador(page, recarregar, orador_id)
+
+    def conversar_com_orador(orador_id: int):
+        orador = carregar_orador(orador_id) or {}
+        telefone = (orador.get("telefone") or "").strip()
+        if not telefone:
+            mostrar_aviso(
+                page,
+                "Sem telefone",
+                f"{orador.get('nome') or 'Este orador'} não tem telefone cadastrado.",
             )
+            return
+        abrir_url(page, gerar_link_whatsapp(telefone, ""))
+
+    def ver_temas_orador(orador_id: int, nome: str):
+        abrir_dialog_temas_do_orador(page, orador_id, nome)
+
+    def oradores_da_congregacao(cong_id: int) -> ft.Control:
+        """Os oradores daquela congregação, dentro do cartão dela."""
+        do_grupo = oradores_por_congregacao[
+            oradores_por_congregacao["congregacao_id"] == cong_id
+        ]
+
+        def adicionar_aqui(_=None, cid=cong_id):
+            abrir_dialog_orador(page, recarregar, congregacao_padrao=cid)
+
+        return ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text(
+                            f"{len(do_grupo)} orador(es)",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                            expand=True,
+                        ),
+                        ft.OutlinedButton(
+                            content="Adicionar orador",
+                            icon=ft.Icons.PERSON_ADD_ALT,
+                            on_click=adicionar_aqui,
+                        ),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Container(height=6),
+                _criar_lista_oradores(
+                    do_grupo,
+                    estado_selecao_cong,
+                    abrir_editar_orador,
+                    abrir_excluir_orador,
+                    conversar_com_orador,
+                    on_temas=ver_temas_orador,
+                    expandir=False,
+                ),
+            ],
+            spacing=0,
+            tight=True,
+        )
+
+    def renderizador(df_filtrado: Tabela) -> ft.Control:
+        return _criar_lista_congregacoes(
+            df_filtrado,
+            abrir_editar,
+            abrir_excluir,
+            conversar_com_responsavel,
+            oradores_de=oradores_da_congregacao,
+        )
 
     def exportar_relatorio(_=None):
         from relatorios import secoes_congregacoes
@@ -4635,7 +4652,7 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
     return criar_tela_padrao(
         page=page,
         titulo="Congregações",
-        descricao="Congregações do circuito e informações de reunião",
+        descricao="Congregações do circuito, com os oradores de cada uma",
         df=carregar_dados(SQL_CONGREGACOES),
         colunas_filtro=["nome", "responsavel", "endereco", "dia_semana", "telefone"],
         barra_acoes=[
@@ -10635,6 +10652,8 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
     def montar():
         if estado_aba["atual"] == "dados":
             area.controls = [_secao_dados_congregacao(page)]
+        elif estado_aba["atual"] == "oradores":
+            area.controls = [_secao_oradores(page, recarregar)]
         else:
             area.controls = [_secao_presidentes(page, atualizar)]
 
@@ -10688,6 +10707,7 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
     alternador = ft.Row(
         [
             _chip("dados", "Dados", ft.Icons.HOME_WORK_OUTLINED),
+            _chip("oradores", "Oradores", ft.Icons.PEOPLE_OUTLINE),
             _chip("presidentes", "Presidentes", ft.Icons.MANAGE_ACCOUNTS),
         ],
         spacing=8,
@@ -10699,12 +10719,19 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
         [
             criar_cabecalho_tela(
                 "Minha congregação",
-                "Os dados da sua congregação e quem preside a reunião.",
+                "Os dados da congregação, os oradores e quem preside a reunião.",
             ),
             ft.Container(height=12),
             alternador,
             ft.Container(height=16),
-            ft.Container(content=area, width=_largura_dialog(page, 640)),
+            ft.Container(
+                content=area,
+                # A lista de oradores precisa da largura toda (checkbox, selos
+                # e ações); Dados e Presidentes ficam melhor numa coluna.
+                width=None if estado_aba["atual"] == "oradores"
+                else _largura_dialog(page, 640),
+                expand=estado_aba["atual"] == "oradores",
+            ),
             ft.Container(height=16),
         ],
         spacing=0,
@@ -11475,9 +11502,6 @@ def main(page: ft.Page):
     def mostrar_programacao():
         area_conteudo.content = tela_programacao(page, recarregar, file_picker)
 
-    def mostrar_oradores():
-        area_conteudo.content = tela_oradores(page, recarregar)
-
     def mostrar_congregacoes():
         area_conteudo.content = tela_congregacoes(page, recarregar)
 
@@ -11502,7 +11526,6 @@ def main(page: ft.Page):
     telas = [
         mostrar_inicio,
         mostrar_programacao,
-        mostrar_oradores,
         mostrar_congregacoes,
         mostrar_minha_congregacao,
         mostrar_temas,
