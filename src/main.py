@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import calendar
 import re
+import sqlite3
 import sys
 import time
 import webbrowser
@@ -1788,17 +1789,33 @@ def abrir_dialog_orador(
         observacoes_final = obs_definir_qualquer_tema(
             campo_observacoes.value.strip(), campo_qualquer_tema.value
         )
-        salvar_orador(
-            nome,
-            campo_telefone.value.strip(),
-            campo_categoria.value,
-            congregacao_id,
-            observacoes_final,
-            temas_selecionados,
-            orador_id=orador_id if editando else None,
-            contato_id=vinculo_orador["contato_id"],
-            aprovado_fora=bool(campo_aprovado_fora.value),
-        )
+        try:
+            salvar_orador(
+                nome,
+                campo_telefone.value.strip(),
+                campo_categoria.value,
+                congregacao_id,
+                observacoes_final,
+                temas_selecionados,
+                orador_id=orador_id if editando else None,
+                contato_id=vinculo_orador["contato_id"],
+                aprovado_fora=bool(campo_aprovado_fora.value),
+            )
+        except sqlite3.IntegrityError:
+            # O banco não aceita dois oradores com o mesmo nome na mesma
+            # congregação; sem este aviso o erro subia e derrubava o app.
+            texto_erro.value = (
+                f'Já existe um orador chamado "{nome}" nessa congregação.'
+            )
+            texto_erro.visible = True
+            page.update()
+            return
+        except Exception:  # noqa: BLE001 — o formulário não pode derrubar o app
+            logger.exception("Falha ao salvar orador")
+            texto_erro.value = "Não foi possível salvar este orador."
+            texto_erro.visible = True
+            page.update()
+            return
 
         fechar()
         recarregar()

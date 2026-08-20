@@ -356,3 +356,112 @@ class TestSoLocalNaoEntraNoEnvio:
         assert main._criar_lista_oradores(tabela, selecao, nada, nada) is not None
         assert fica not in selecao["ids"], "o só local sai da seleção"
         assert vai in selecao["ids"], "o aprovado continua marcado"
+
+
+class TestNomeRepetidoNaoDerrubaOApp:
+    """Nome repetido na mesma congregação tem índice único no banco.
+
+    O diálogo de orador chamava salvar_orador sem tratar o erro, então o
+    IntegrityError subia até o Flet e o app inteiro caía com uma tela
+    vermelha. O formulário precisa avisar e continuar aberto.
+    """
+
+    def _cong(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            return conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_o_banco_recusa_o_nome_repetido(self):
+        import sqlite3
+
+        cong = self._cong()
+        database.salvar_orador("Repetido", "", "Ancião", cong, "", set())
+        with pytest.raises(sqlite3.IntegrityError):
+            database.salvar_orador("Repetido", "", "Ancião", cong, "", set())
+
+    def test_mesmo_nome_em_outra_congregacao_pode(self):
+        cong = self._cong()
+        conn = get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Outra')")
+            conn.commit()
+            outra = conn.execute(
+                "SELECT id FROM congregacoes WHERE nome = 'Outra'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        database.salvar_orador("Xará", "", "Ancião", cong, "", set())
+        database.salvar_orador("Xará", "", "Ancião", outra, "", set())  # não levanta
+
+    def test_o_dialogo_avisa_em_vez_de_estourar(self, monkeypatch):
+        import main
+
+        cong = self._cong()
+        database.salvar_orador("Repetido", "", "Ancião", cong, "", set())
+
+        dialogos = []
+        page = _page_falsa(dialogos)
+        main.abrir_dialog_orador(page, lambda: None)
+        dialog = dialogos[-1]
+
+        campos = _campos_do_dialog(dialog)
+        campos["nome"].value = "Repetido"
+        campos["congregacao"].value = str(cong)
+        # O salvar do formulário é o on_submit do campo de nome.
+        campos["nome"].on_submit(None)
+
+        erros = [
+            c for c in _todos_os_controles(dialog)
+            if isinstance(c, __import__("flet").Text)
+            and c.visible and "Já existe um orador" in (c.value or "")
+        ]
+        assert erros, "o formulário deveria mostrar o aviso de nome repetido"
+
+
+def _page_falsa(dialogos):
+    import types
+
+    import flet
+
+    return types.SimpleNamespace(
+        update=lambda *a, **k: None,
+        width=1200,
+        window=types.SimpleNamespace(width=1200, height=800),
+        show_dialog=lambda d: dialogos.append(d),
+        pop_dialog=lambda *a, **k: None,
+        run_task=lambda *a, **k: None,
+        platform=flet.PagePlatform.WINDOWS,
+        on_keyboard_event=None,
+        title="",
+    )
+
+
+def _todos_os_controles(no, vistos=None):
+    vistos = vistos if vistos is not None else []
+    if no in vistos:
+        return vistos
+    vistos.append(no)
+    for atributo in ("content", "controls", "actions", "title"):
+        filho = getattr(no, atributo, None)
+        if isinstance(filho, list):
+            for item in filho:
+                _todos_os_controles(item, vistos)
+        elif filho is not None and hasattr(filho, "__dict__"):
+            _todos_os_controles(filho, vistos)
+    return vistos
+
+
+def _campos_do_dialog(dialog):
+    import flet
+
+    campos = {}
+    for controle in _todos_os_controles(dialog):
+        rotulo = (getattr(controle, "label", "") or "").lower()
+        if isinstance(controle, flet.TextField) and rotulo == "nome":
+            campos["nome"] = controle
+        elif isinstance(controle, flet.Dropdown) and rotulo == "congregação":
+            campos["congregacao"] = controle
+    return campos
