@@ -30,7 +30,7 @@ from armazenamento import (
     eh_mobile,
     garantir_pastas,
 )
-from canticos import rotulo_cantico, titulo_cantico
+from canticos import TOTAL_CANTICOS, rotulo_cantico, titulo_cantico
 from contatos import (
     Contato,
     caminho_foto_contato,
@@ -295,6 +295,10 @@ SQL_ORADORES = """
     WHERE COALESCE(o.ativo, 1) = 1
     ORDER BY o.categoria, o.nome
 """
+
+# As mesmas colunas que a busca da tela de Oradores varre — a de Congregações
+# reaproveita para achar a pessoa dentro do cartão da congregação dela.
+COLUNAS_BUSCA_ORADORES = ["nome", "categoria", "telefone", "temas", "observacoes"]
 
 SQL_CONGREGACOES = """
     SELECT id, nome, responsavel, telefone, endereco, dia_semana, horario, observacoes
@@ -773,13 +777,13 @@ def _rotulo_tema_orador_arranjo(registro: dict) -> str:
 
 def carregar_oradores_com_congregacao_opcoes(
     congregacao_id: int | None = None,
-    apenas_aprovados_fora: bool = False,
     por_fila: bool = False,
 ) -> list[ft.dropdown.Option]:
     """Lista oradores com congregação para seletores de arranjo.
 
-    ``apenas_aprovados_fora`` esconde quem faz só o discurso local — ao montar
-    uma designação enviada, oferecer essas pessoas só atrapalha.
+    Quem faz só o discurso local aparece aqui como qualquer outro: a restrição
+    de "aprovado para discursar fora" vale para a lista de oradores que é
+    oferecida a outra congregação, não para montar o arranjo do mês.
 
     ``por_fila`` ordena de quem está há mais tempo sem ser designado para quem
     discursou mais recentemente, em vez de alfabético: é a ordem em que a
@@ -795,8 +799,6 @@ def carregar_oradores_com_congregacao_opcoes(
     if congregacao_id is not None:
         query += " AND o.congregacao_id = ?"
         params.append(congregacao_id)
-    if apenas_aprovados_fora:
-        query += " AND COALESCE(o.aprovado_fora, 1) = 1"
     # Agrupado por congregação: procurar "quem é da Vila Nova" fica direto,
     # em vez de uma lista alfabética com todas as congregações misturadas.
     query += " ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome"
@@ -1217,7 +1219,7 @@ def criar_tela_padrao(
     config_tabela: dict | None = None,
     controles_filtro: list[ft.Control] | None = None,
     on_atualizar_disponivel: Callable[[Callable[[str], None]], None] | None = None,
-    renderizador_tabela: Callable[[Tabela], ft.Control] | None = None,
+    renderizador_tabela: Callable[[Tabela, str], ft.Control] | None = None,
     mostrar_cabecalho: bool = True,
 ) -> ft.Column:
     """
@@ -1233,7 +1235,8 @@ def criar_tela_padrao(
 
     `renderizador_tabela`, se informado, substitui a tabela padrão por uma
     visão customizada (ex.: cartões agrupados) construída a partir do
-    DataFrame já filtrado pela busca.
+    DataFrame já filtrado pela busca. Recebe também o termo digitado, para
+    quem precisa destacar dentro do cartão o que casou com a busca.
     """
     area_tabela = ft.Container(expand=True)
     texto_contagem = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
@@ -1242,7 +1245,7 @@ def criar_tela_padrao(
         df_atual = df() if callable(df) else df
         df_filtrado = filtrar_dataframe(df_atual, termo_busca, colunas_filtro)
         if renderizador_tabela:
-            area_tabela.content = renderizador_tabela(df_filtrado)
+            area_tabela.content = renderizador_tabela(df_filtrado, termo_busca)
         else:
             area_tabela.content = criar_area_tabela(
                 df_filtrado,
@@ -1673,14 +1676,15 @@ def abrir_dialog_orador(
         options=carregar_congregacoes_opcoes(),
         expand=True,
     )
-    # Quem faz só o discurso local não é oferecido ao montar uma designação
-    # enviada — a lista de envio ficava cheia de gente que não podia ir.
+    # Quem faz só o discurso local fica de fora da lista de oradores que é
+    # oferecida a outra congregação — mandar quem não pode ir só dá trabalho.
     campo_aprovado_fora = ft.Checkbox(
         label="Aprovado para discursar em outras congregações",
         value=dados.get("aprovado_fora", True) if dados else True,
         tooltip=(
-            "Desmarque para quem faz apenas o discurso local: ele deixa de "
-            "aparecer ao criar uma designação enviada."
+            "Desmarque para quem faz apenas o discurso local: ele fica de "
+            "fora da lista de oradores enviada a outras congregações. No "
+            "arranjo do mês ele continua disponível normalmente."
         ),
     )
     obs_inicial = dados["observacoes"] if dados else ""
@@ -3698,7 +3702,7 @@ def _secao_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     )
     seletor_ordem.on_select = ao_mudar_ordem
 
-    def renderizar_oradores(df_filtrado: Tabela) -> ft.Control:
+    def renderizar_oradores(df_filtrado: Tabela, termo: str = "") -> ft.Control:
         return _criar_lista_oradores(
             df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
             conversar_com_orador,
@@ -3725,7 +3729,7 @@ def _secao_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         descricao="Oradores da minha congregação e temas que podem apresentar",
         mostrar_cabecalho=False,
         df=df_filtrado_congregacao,
-        colunas_filtro=["nome", "categoria", "telefone", "temas", "observacoes"],
+        colunas_filtro=COLUNAS_BUSCA_ORADORES,
         controles_filtro=[seletor_ordem],
         on_atualizar_disponivel=registrar_atualizar,
         renderizador_tabela=renderizar_oradores,
@@ -4369,13 +4373,19 @@ def _criar_lista_congregacoes(
     on_excluir: Callable[[int], None],
     on_conversar: Callable[[int], None] | None = None,
     oradores_de: Callable[[int], ft.Control] | None = None,
+    abertas: set[int] | None = None,
 ) -> ft.Control:
     """Congregações em cards, cada uma abrindo os oradores dela.
 
     Era uma tabela no computador e cards no celular. Virou card nos dois:
     os oradores de fora saíram da aba própria e passaram a morar aqui, no
     cadastro da congregação de onde eles vêm — e tabela não expande.
+
+    ``abertas`` são as congregações que já nascem expandidas: quando a busca
+    casou com o nome de um orador, o cartão precisa abrir sozinho — senão a
+    pessoa procurada fica escondida atrás do clique.
     """
+    abertas = abertas or set()
     if df.empty:
         return ft.Container(
             content=ft.Text("Nenhuma congregação encontrada.", size=fonte(13), color=TEXTO_SECUNDARIO),
@@ -4513,6 +4523,7 @@ def _criar_lista_congregacoes(
                     tile_padding=ft.Padding.symmetric(horizontal=12, vertical=2),
                     controls_padding=ft.Padding.only(left=8, right=8, bottom=10),
                     controls=[oradores_de(cong_id)],
+                    expanded=cong_id in abertas,
                 ),
                 border=borda,
             )
@@ -4526,6 +4537,46 @@ def _criar_lista_congregacoes(
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         expand=True,
     )
+
+
+def _oradores_por_congregacao(oradores: Tabela) -> dict[int, list[dict]]:
+    """Agrupa os oradores pelo id da congregação (sem congregação fica de fora)."""
+    grupos: dict[int, list[dict]] = {}
+    for linha in oradores.linhas:
+        cong_id = linha.get("congregacao_id")
+        if cong_id is not None:
+            grupos.setdefault(int(cong_id), []).append(linha)
+    return grupos
+
+
+def _congregacoes_com_oradores(congregacoes: Tabela, oradores: Tabela) -> Tabela:
+    """Anexa a cada congregação os oradores dela, em texto, só para a busca.
+
+    Quem procura "Henrique Dias" na tela de Congregações quer a congregação
+    dele, não decorar em qual das 70 ele está. A coluna não é exibida: os
+    cartões continuam mostrando nome, responsável e reunião.
+    """
+    por_congregacao = _oradores_por_congregacao(oradores)
+    linhas = []
+    for linha in congregacoes.linhas:
+        nova = dict(linha)
+        nova["oradores"] = " · ".join(
+            str(o.get("nome") or "") for o in por_congregacao.get(int(linha["id"]), [])
+        )
+        linhas.append(nova)
+    return Tabela(linhas, [*congregacoes.colunas, "oradores"])
+
+
+def _congregacoes_com_orador_buscado(oradores: Tabela, termo: str) -> set[int]:
+    """Congregações em que a busca casou com algum orador (o cartão abre nelas)."""
+    if not termo.strip():
+        return set()
+    casaram = filtrar_dataframe(oradores, termo, COLUNAS_BUSCA_ORADORES)
+    return {
+        int(linha["congregacao_id"])
+        for linha in casaram.linhas
+        if linha.get("congregacao_id") is not None
+    }
 
 
 def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
@@ -4585,11 +4636,19 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
     def ver_temas_orador(orador_id: int, nome: str):
         abrir_dialog_temas_do_orador(page, orador_id, nome)
 
-    def oradores_da_congregacao(cong_id: int) -> ft.Control:
-        """Os oradores daquela congregação, dentro do cartão dela."""
+    def oradores_da_congregacao(cong_id: int, termo: str = "") -> ft.Control:
+        """Os oradores daquela congregação, dentro do cartão dela.
+
+        Buscar pelo nome de um orador reduz o cartão aos oradores que casaram
+        — abrir a congregação certa e ainda ter de achar a pessoa no meio da
+        lista seria metade do trabalho.
+        """
         do_grupo = oradores_por_congregacao[
             oradores_por_congregacao["congregacao_id"] == cong_id
         ]
+        casaram = filtrar_dataframe(do_grupo, termo, COLUNAS_BUSCA_ORADORES)
+        if termo.strip() and not casaram.empty:
+            do_grupo = casaram
 
         def adicionar_aqui(_=None, cid=cong_id):
             abrir_dialog_orador(page, recarregar, congregacao_padrao=cid)
@@ -4628,13 +4687,14 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
             tight=True,
         )
 
-    def renderizador(df_filtrado: Tabela) -> ft.Control:
+    def renderizador(df_filtrado: Tabela, termo: str = "") -> ft.Control:
         return _criar_lista_congregacoes(
             df_filtrado,
             abrir_editar,
             abrir_excluir,
             conversar_com_responsavel,
-            oradores_de=oradores_da_congregacao,
+            oradores_de=lambda cid: oradores_da_congregacao(cid, termo),
+            abertas=_congregacoes_com_orador_buscado(oradores_por_congregacao, termo),
         )
 
     def exportar_relatorio(_=None):
@@ -4653,8 +4713,12 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
         page=page,
         titulo="Congregações",
         descricao="Congregações do circuito, com os oradores de cada uma",
-        df=carregar_dados(SQL_CONGREGACOES),
-        colunas_filtro=["nome", "responsavel", "endereco", "dia_semana", "telefone"],
+        df=_congregacoes_com_oradores(
+            carregar_dados(SQL_CONGREGACOES), oradores_por_congregacao
+        ),
+        colunas_filtro=[
+            "nome", "responsavel", "endereco", "dia_semana", "telefone", "oradores",
+        ],
         barra_acoes=[
             ft.FilledButton(
                 "Nova congregação",
@@ -5221,12 +5285,13 @@ def abrir_seletor_oradores(
     campo_orador = ft.Dropdown(
         label="Orador",
         hint_text="Digite para buscar pelo nome",
-        # Ao ENVIAR: só quem é da minha congregação e está aprovado para
-        # discursar fora, na ordem de quem está há mais tempo sem ser
-        # designado — que é a ordem em que a escolha é feita na prática.
+        # Ao ENVIAR: só quem é da minha congregação, na ordem de quem está há
+        # mais tempo sem ser designado — que é a ordem em que a escolha é
+        # feita na prática. Quem faz só o discurso local continua na lista:
+        # ele também entra no arranjo do mês (é a lista de envio a outra
+        # congregação que o exclui).
         options=carregar_oradores_com_congregacao_opcoes(
             congregacao_filtro,
-            apenas_aprovados_fora=not eh_oradores,
             por_fila=not eh_oradores,
         ),
         expand=True,
@@ -6635,7 +6700,7 @@ def abrir_dialog_mensagem_presidencia(
     """
     campo_cantico = ft.TextField(
         label="Número do cântico",
-        hint_text="1 a 151",
+        hint_text=f"1 a {TOTAL_CANTICOS}",
         keyboard_type=ft.KeyboardType.NUMBER,
         autofocus=True,
         width=None if eh_mobile() else 200,
@@ -6658,7 +6723,9 @@ def abrir_dialog_mensagem_presidencia(
             texto_cantico.value = titulo
             texto_cantico.color = COR_SUCESSO
         else:
-            texto_cantico.value = "Não existe cântico com esse número (1 a 151)."
+            texto_cantico.value = (
+                f"Não existe cântico com esse número (1 a {TOTAL_CANTICOS})."
+            )
             texto_cantico.color = COR_ERRO
         previa.value = mensagem_atual()
         page.update()

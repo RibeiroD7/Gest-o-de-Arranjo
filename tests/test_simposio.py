@@ -222,8 +222,8 @@ class TestAprovacaoParaDiscursoFora:
         oid, _ = self._cadastrar(False)
         assert main.carregar_orador(oid)["aprovado_fora"] is False
 
-    def test_nao_aparece_no_seletor_de_envio(self):
-        """É o efeito prático: ao designar um envio ele some da lista."""
+    def test_continua_no_seletor_do_arranjo(self):
+        """No arranjo do mês ele entra igual aos outros — a trava é o PDF."""
         import main
 
         oid, cong = self._cadastrar(False)
@@ -236,9 +236,18 @@ class TestAprovacaoParaDiscursoFora:
             ]
 
         assert "Só Local" in nomes()
-        assert "Só Local" not in nomes(apenas_aprovados_fora=True)
-        assert "Vai Fora" in nomes(apenas_aprovados_fora=True)
+        assert "Vai Fora" in nomes()
+        assert "Só Local" in nomes(por_fila=True)
         assert oid
+
+    def test_fica_de_fora_da_lista_de_envio(self):
+        """A trava vive na lista de oradores oferecida a outra congregação."""
+        import main
+
+        oid, cong = self._cadastrar(False)
+        outro = database.salvar_orador("Vai Fora", "", "Ancião", cong, "", set())
+
+        assert main.somente_discurso_local([oid, outro]) == {oid}
 
     def test_editar_volta_a_aprovar(self):
         oid, cong = self._cadastrar(False)

@@ -49,7 +49,9 @@ uma planilha (veja abaixo).
 - **Congregações** — cadastro das congregações do circuito (responsável,
   telefone, endereço, dia e horário da reunião). Cada uma com telefone tem
   o botão de **WhatsApp** ao lado do responsável, para falar com ele sem
-  abrir o cadastro.
+  abrir o cadastro. A busca também procura pelo **nome do orador**: digitar
+  o nome dele traz a congregação de onde ele vem, com o cartão já aberto
+  naquela pessoa.
 - **Contatos do celular** — no cadastro de oradores e de presidentes, o botão
   **Buscar nos contatos** preenche o telefone a partir da agenda do aparelho.
   No **Android** abre o seletor do próprio sistema; no **computador**, e se o
@@ -320,7 +322,7 @@ As diferenças de plataforma são resolvidas em tempo de execução por
 | `src/pdf_relatorios.py` | Exportação em PDF da tela de Relatórios |
 | `src/contatos.py` | Leitura da agenda do celular exportada em vCard (.vcf) |
 | `extensoes/flet_contatos/` | Extensão Flet (Python + Flutter) com o seletor nativo de contatos do Android |
-| `src/canticos.py` | Catálogo dos 151 cânticos (número, título e texto bíblico) |
+| `src/canticos.py` | Catálogo dos 159 cânticos (número, título e texto bíblico) |
 | `src/png_oradores.py` | Imagens PNG: listas mensais, designação individual e prévia do quadro |
 | `src/planilha_dados.py` | Exportação/importação dos dados em planilha Excel |
 | `src/assets/` | Ícones, fontes e a carga inicial de temas (`temas_seed.json`) |

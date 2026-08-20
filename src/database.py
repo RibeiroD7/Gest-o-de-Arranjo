@@ -1605,8 +1605,9 @@ def salvar_orador(
     ``contato_id`` amarra o orador a um contato da agenda do celular, para o
     telefone acompanhar sozinho o que mudar lá.
 
-    ``aprovado_fora=False`` marca quem faz só o discurso local: ele deixa de
-    ser oferecido ao montar uma designação enviada.
+    ``aprovado_fora=False`` marca quem faz só o discurso local: ele fica de
+    fora da lista de oradores oferecida a outras congregações (no arranjo do
+    mês continua disponível).
     """
     conn = get_connection()
     try:

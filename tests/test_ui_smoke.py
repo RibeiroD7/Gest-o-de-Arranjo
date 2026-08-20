@@ -711,6 +711,55 @@ def test_congregacoes_mostram_os_oradores_de_cada_uma():
     assert capturado["render"] is not None
     congs = main.carregar_dados(main.SQL_CONGREGACOES)
     assert capturado["render"](congs) is not None
+    assert capturado["render"](congs, "De Vila") is not None
+
+
+def test_busca_de_congregacoes_acha_pelo_nome_do_orador():
+    """Procurar o orador na tela de Congregações traz a congregação dele.
+
+    Ninguém decora em qual das 70 congregações cada orador está; digitar o
+    nome dele precisa chegar no cartão certo — e já aberto.
+    """
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM arranjo_oradores")
+        conn.execute("DELETE FROM orador_temas")
+        conn.execute("DELETE FROM oradores")
+        conn.execute("DELETE FROM congregacoes")
+        conn.execute("INSERT INTO congregacoes (nome) VALUES ('Minha'), ('Vila'), ('Alfa')")
+        ids = {n: i for i, n in conn.execute("SELECT id, nome FROM congregacoes")}
+        conn.execute(
+            "INSERT INTO oradores (nome, categoria, congregacao_id) "
+            "VALUES ('Daqui', 'Ancião', ?), ('Josias Pinto', 'Ancião', ?)",
+            (ids["Minha"], ids["Vila"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    oradores = main.carregar_dados(main.SQL_ORADORES)
+    tabela = main._congregacoes_com_oradores(
+        main.carregar_dados(main.SQL_CONGREGACOES), oradores
+    )
+    colunas = ["nome", "responsavel", "endereco", "dia_semana", "telefone", "oradores"]
+
+    achadas = [li["nome"] for li in main.filtrar_dataframe(tabela, "Josias", colunas)]
+    assert achadas == ["Vila"], "o nome do orador tem de levar à congregação dele"
+
+    # A coluna existe só para a busca; o cartão continua mostrando o de sempre.
+    assert "oradores" in tabela.colunas
+    por_nome = {li["nome"]: li["oradores"] for li in tabela.linhas}
+    assert por_nome["Vila"] == "Josias Pinto"
+    assert por_nome["Alfa"] == ""
+
+    # Buscar pela congregação continua funcionando e não abre nada sozinho.
+    assert [li["nome"] for li in main.filtrar_dataframe(tabela, "Alfa", colunas)] == ["Alfa"]
+    assert main._congregacoes_com_orador_buscado(oradores, "Alfa") == set()
+    assert main._congregacoes_com_orador_buscado(oradores, "Josias") == {ids["Vila"]}
+    assert main._congregacoes_com_orador_buscado(oradores, "") == set()
 
 
 def test_oradores_saiu_do_menu_e_virou_aba():
