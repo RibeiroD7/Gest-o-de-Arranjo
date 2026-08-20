@@ -38,20 +38,37 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
     exit 1
 fi
 
-# 4) Se a versão mudou em algum arquivo, commita ---------------------------
+# 4) Sobe o versionCode do Android (build_number) --------------------------
+# O Android se recusa a instalar por cima um APK cujo versionCode não cresceu:
+# a atualização falha com "app não instalado" e o irmão tem de desinstalar (e
+# perder os dados) para conseguir a versão nova. O --build-version do CI cuida
+# só do nome da versão; este número é outro e ninguém lembrava de subir.
+#
+# Fica DEPOIS da checagem da tag de propósito: uma tentativa abortada não pode
+# deixar o número torto no pyproject.toml.
+BUILD_ATUAL="$(grep -E '^build_number = ' "$PYPROJECT" | head -1 | grep -oE '[0-9]+' || true)"
+if ! [[ "$BUILD_ATUAL" =~ ^[0-9]+$ ]]; then
+    echo "ERRO: não achei um build_number numérico em $PYPROJECT." >&2
+    exit 1
+fi
+BUILD_NOVO=$((BUILD_ATUAL + 1))
+sed -i -E "s/^build_number = .*/build_number = $BUILD_NOVO/" "$PYPROJECT"
+echo ">> versionCode do Android: $BUILD_ATUAL -> $BUILD_NOVO"
+
+# 5) Se a versão mudou em algum arquivo, commita ---------------------------
 if ! git diff --quiet -- "$PYPROJECT" src/main.py; then
     git add "$PYPROJECT" src/main.py
     git commit -m "Versão $VERSAO"
 fi
 
-# 5) Exige a árvore limpa: nada pendente vai para a release ----------------
+# 6) Exige a árvore limpa: nada pendente vai para a release ----------------
 if ! git diff-index --quiet HEAD --; then
     echo "ERRO: há alterações não commitadas. Commite tudo antes de publicar." >&2
     git status --short
     exit 1
 fi
 
-# 6) Envia o commit e a tag ------------------------------------------------
+# 7) Envia o commit e a tag ------------------------------------------------
 echo ">> Enviando commits..."
 git push origin HEAD
 

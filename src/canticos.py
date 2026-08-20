@@ -1,10 +1,12 @@
 """Catálogo dos cânticos de *Cante de Coração para Jeová* (sjjsm-T).
 
-Número, título e texto bíblico dos 159 cânticos. Serve para montar a mensagem
+Número, título e texto bíblico dos 163 cânticos. Serve para montar a mensagem
 da presidência: o coordenador digita só o número e o app completa o resto.
 
-Extraído do PDF oficial com partituras ``sjjsm_T.pdf`` (pt-BR): é ele que traz
-os cânticos 152 a 159, lançados depois da edição de 2020 usada antes.
+Os cânticos 1 a 160 saíram do PDF oficial com partituras ``sjjsm_T.pdf``
+(pt-BR). Do 161 ao 163 o PDF ainda não tinha sido reeditado, então vieram da
+página do cântico no jw.org — o texto bíblico deles está desenhado dentro da
+partitura, não no texto da página.
 """
 
 from __future__ import annotations
@@ -170,6 +172,10 @@ CANTICOS: dict[int, tuple[str, str]] = {
     157: ('Paz, enfim!', 'Salmo 29:11'),
     158: ('‘Não vai se atrasar!’', 'Habacuque 2:3'),
     159: ('Toda a glória vou te dar', 'Salmo 96:8'),
+    160: ('As boas novas sobre Jesus', 'Lucas 2:10'),
+    161: ('Fazer tua vontade é o meu prazer', 'Salmo 40:8'),
+    162: ('Preciso de ti', 'Mateus 5:3'),
+    163: ('Felizes são esses olhos', 'Mateus 13:16'),
 }
 
 TOTAL_CANTICOS = len(CANTICOS)
