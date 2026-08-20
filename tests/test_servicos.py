@@ -3,6 +3,7 @@
 from servicos import (
     _chave_data_br,
     detectar_conflitos_oradores,
+    escolher_rodizio_datas_especiais,
     escolher_rodizio_presidentes,
     meses_de_atencao,
     oradores_mais_tempo_sem_discurso,
@@ -65,6 +66,55 @@ class TestEscolherRodizioPresidentes:
         original = dict(historico)
         escolher_rodizio_presidentes([10, 20, 30], ["11/01/2026"], set(), historico)
         assert historico == original
+
+
+class TestEscolherRodizioDatasEspeciais:
+    """Rodízio à parte, só entre anciãos, medido pelas datas especiais."""
+
+    def test_sem_anciaos_ou_sem_datas(self):
+        assert escolher_rodizio_datas_especiais([], ["13/02/2027"], {}) == []
+        assert escolher_rodizio_datas_especiais([10, 20], [], {}) == []
+
+    def test_quem_nunca_presidiu_uma_especial_vem_primeiro(self):
+        datas = ["13/02/2027", "08/05/2027", "14/08/2027"]
+        # 10 fez uma há pouco; 20 e 30 nunca fizeram.
+        historico = {"27/09/2026": 10}
+        escolhas = escolher_rodizio_datas_especiais([10, 20, 30], datas, historico)
+        assert [pid for _, pid in escolhas] == [20, 30, 10]
+
+    def test_empate_segue_a_ordem_do_cadastro(self):
+        datas = ["13/02/2027", "08/05/2027"]
+        escolhas = escolher_rodizio_datas_especiais([30, 10, 20], datas, {})
+        assert [pid for _, pid in escolhas] == [30, 10]
+
+    def test_semana_comum_nao_conta_nessa_fila(self):
+        """É o ponto do rodízio separado: só data especial gasta a vez.
+
+        Quem presidiu sábado passado continua na frente para o próximo
+        discurso especial, se nunca fez um — por isso o histórico recebido
+        aqui traz apenas datas especiais.
+        """
+        # 10 nunca fez uma especial: mesmo com o histórico semanal cheio (que
+        # esta função nem recebe), ele é o primeiro.
+        escolhas = escolher_rodizio_datas_especiais([10, 20], ["13/02/2027"], {})
+        assert escolhas == [("13/02/2027", 10)]
+
+    def test_pula_data_que_ja_tem_presidente(self):
+        datas = ["13/02/2027", "08/05/2027"]
+        historico = {"13/02/2027": 20}
+        escolhas = escolher_rodizio_datas_especiais([10, 20], datas, historico)
+        assert escolhas == [("08/05/2027", 10)]
+
+    def test_olha_para_os_dois_lados(self):
+        """Quem já está marcado para uma especial futura não leva a de agora."""
+        # 20 preside a especial de dezembro; para a de fevereiro sobra o 10.
+        historico = {"11/12/2027": 20}
+        escolhas = escolher_rodizio_datas_especiais([20, 10], ["13/02/2027"], historico)
+        assert escolhas == [("13/02/2027", 10)]
+
+    def test_data_invalida_e_ignorada(self):
+        escolhas = escolher_rodizio_datas_especiais([10], ["30/02/2027"], {})
+        assert escolhas == []
 
 
 class TestOradoresMaisTempoSemDiscurso:

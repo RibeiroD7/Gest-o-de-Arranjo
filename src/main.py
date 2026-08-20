@@ -67,7 +67,9 @@ from database import (
     contar_designacoes_por_mes,
     contar_designacoes_por_status,
     create_tables,
+    definir_presidente_data_especial,
     definir_tema_prioritario,
+    definir_tipo_evento_tem_presidente,
     definir_visibilidade_ano_coluna,
     excluir_ano_coluna,
     excluir_arranjo,
@@ -80,6 +82,7 @@ from database import (
     exportar_backup,
     garantir_configuracao_inicial,
     get_connection,
+    historico_presidentes_datas_especiais,
     importar_temas_pdf,
     listar_anos_arranjos,
     listar_anos_colunas,
@@ -104,6 +107,7 @@ from database import (
     salvar_presidente_cadastro,
     salvar_tema,
     sincronizar_uso_temas,
+    tipos_evento_com_presidente,
     trocar_datas_designacoes,
     ultima_data_discurso_por_orador,
 )
@@ -133,6 +137,7 @@ from png_oradores import (
 )
 from servicos import (
     detectar_conflitos_oradores,
+    escolher_rodizio_datas_especiais,
     escolher_rodizio_presidentes,
     meses_de_atencao,
     montar_mensagem_presidencia,
@@ -6170,12 +6175,51 @@ def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
     return len(escolhas)
 
 
+def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
+    """Preenche por rodízio os presidentes das datas especiais do mês.
+
+    Só entram anciãos, e só as datas cujo tipo pede presidente local (a
+    Assembleia não tem reunião no salão para presidir). A fila é medida contra
+    as datas especiais de TODOS os anos, não só as do mês: são poucas por ano,
+    e olhar um mês de cada vez daria sempre o primeiro do cadastro.
+
+    Retorna quantas datas foram preenchidas.
+    """
+    anciaos = [
+        item["id"] for item in listar_presidentes_cadastro()
+        if item["categoria"] == "Ancião"
+    ]
+    if not anciaos:
+        return 0
+
+    com_presidente = tipos_evento_com_presidente()
+    especiais = listar_datas_especiais_por_ano(ano)
+    historico = historico_presidentes_datas_especiais()
+    datas_alvo = sorted(
+        (
+            registro["data"]
+            for registro in especiais.values()
+            if len(registro["data"]) == 10
+            and int(registro["data"][3:5]) == mes
+            and not registro.get("presidente_id")
+            and registro["tipo"] in com_presidente
+        ),
+        # Todas do mesmo mês e ano: DD/MM/AAAA já ordena por dia como texto
+        # (é o mesmo critério que a lista da tela usa).
+    )
+
+    escolhas = escolher_rodizio_datas_especiais(anciaos, datas_alvo, historico)
+    for data_str, presidente_id in escolhas:
+        definir_presidente_data_especial(especiais[data_str]["id"], presidente_id)
+    return len(escolhas)
+
+
 def abrir_dialog_gerenciar_tipos_evento(
     page: ft.Page,
     ao_fechar: Callable[[], None],
 ) -> None:
-    """Adicionar e remover tipos de evento especial."""
-    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=220)
+    """Adicionar, remover e marcar quais tipos pedem presidente local."""
+    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=260)
     campo_nome = ft.TextField(label="Novo tipo", hint_text="Ex: Escola de Pioneiros", expand=True)
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
@@ -6193,9 +6237,23 @@ def abrir_dialog_gerenciar_tipos_evento(
                 preencher()
                 page.update()
 
+            def alternar_presidente(e, item=item):
+                definir_tipo_evento_tem_presidente(item["id"], bool(e.control.value))
+
             return ft.Row(
                 [
                     ft.Text(item["nome"], size=fonte(14), expand=True),
+                    # Numa Assembleia a congregação está fora do salão: não há
+                    # o que presidir, e o rodízio não pode gastar a vez de um
+                    # ancião ali. Quem sabe disso é quem monta o arranjo.
+                    ft.Checkbox(
+                        label="Presidente",
+                        value=item.get("tem_presidente", True),
+                        tooltip="Marque se esse evento tem reunião no salão, com "
+                                "presidente. Só os marcados entram no rodízio "
+                                "das datas especiais.",
+                        on_change=alternar_presidente,
+                    ),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
                         icon_size=fonte(18),
@@ -7688,11 +7746,36 @@ def abrir_dialog_oradores_mes(
     def abrir_adicionar_especial(_=None):
         abrir_dialog_data_especial(page, ano, mes, atualizar_listas)
 
+    def preencher_rodizio_especiais(_=None):
+        preenchidas = preencher_presidentes_especiais_rodizio(ano, mes)
+        if preenchidas:
+            mostrar_sucesso(
+                page, f"{preenchidas} data(s) especial(is) preenchida(s) pelo rodízio."
+            )
+            atualizar_listas()
+        else:
+            mostrar_aviso(
+                page,
+                "Nada para preencher",
+                "Nenhuma data especial deste mês está esperando presidente. "
+                "Assembleia e congresso não pedem presidente — isso é marcado "
+                "por tipo de evento, na engrenagem ao lado do campo Tipo."
+                "\n\n"
+                "O rodízio das datas especiais usa apenas anciãos.",
+            )
+
     secao_especiais = ft.Column(
         [
             _cabecalho_secao_desc(
                 "Assembleias, congressos, visitas e outros eventos que "
                 "substituem a reunião normal",
+                ft.OutlinedButton(
+                    content="Preencher em rodízio",
+                    icon=ft.Icons.AUTORENEW,
+                    tooltip="Sorteia entre os anciãos quem preside as datas "
+                            "especiais deste mês que ainda estão sem presidente",
+                    on_click=preencher_rodizio_especiais,
+                ),
                 ft.FilledButton(
                     content="Adicionar",
                     icon=ft.Icons.ADD,

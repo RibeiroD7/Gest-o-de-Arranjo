@@ -108,6 +108,24 @@ TIPOS_EVENTO_PADRAO = [
     "Arranjo Local",
 ]
 
+# Nesses eventos a congregação não se reúne no salão: ninguém preside, e o
+# rodízio de datas especiais não deve gastar a vez de um ancião com eles.
+# É só o palpite inicial — o usuário liga e desliga por tipo na tela.
+TIPOS_SEM_PRESIDENTE_LOCAL = {
+    "Assembleia de Circuito",
+    "Congresso Regional",
+    "Reunião Especial",
+}
+
+
+def _aplicar_padrao_presidente_por_tipo(cursor) -> None:
+    """Desliga o presidente local nos tipos em que não há reunião no salão."""
+    marcadores = ",".join("?" * len(TIPOS_SEM_PRESIDENTE_LOCAL))
+    cursor.execute(
+        f"UPDATE tipos_evento_especial SET tem_presidente = 0 WHERE nome IN ({marcadores})",  # noqa: S608
+        sorted(TIPOS_SEM_PRESIDENTE_LOCAL),
+    )
+
 
 def _semear_tipos_evento(conn) -> None:
     """Garante os tipos padrão e os já usados em datas especiais."""
@@ -116,7 +134,9 @@ def _semear_tipos_evento(conn) -> None:
     for nome in [*TIPOS_EVENTO_PADRAO, *usados]:
         if nome:
             cursor.execute(
-                "INSERT OR IGNORE INTO tipos_evento_especial (nome) VALUES (?)", (nome,)
+                "INSERT OR IGNORE INTO tipos_evento_especial (nome, tem_presidente) "
+                "VALUES (?, ?)",
+                (nome, 0 if nome in TIPOS_SEM_PRESIDENTE_LOCAL else 1),
             )
     conn.commit()
 
@@ -388,9 +408,20 @@ def create_tables(conn):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tipos_evento_especial (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL UNIQUE
+            nome TEXT NOT NULL UNIQUE,
+            tem_presidente INTEGER NOT NULL DEFAULT 1
         )
     """)
+    colunas_tipos = [linha[1] for linha in cursor.execute("PRAGMA table_info(tipos_evento_especial)")]
+    if "tem_presidente" not in colunas_tipos:
+        cursor.execute(
+            "ALTER TABLE tipos_evento_especial "
+            "ADD COLUMN tem_presidente INTEGER NOT NULL DEFAULT 1"
+        )
+        # Só nesta migração: quem já tinha o banco começa com Assembleia,
+        # Congresso e Reunião Especial desligados. Depois disso a escolha é do
+        # usuário, e rodar de novo não desfaz o que ele mudou.
+        _aplicar_padrao_presidente_por_tipo(cursor)
     _semear_tipos_evento(conn)
     _migrar_oradores_fantasma(conn)
 
@@ -1850,6 +1881,27 @@ def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
         conn.close()
 
 
+def historico_presidentes_datas_especiais() -> dict[str, int]:
+    """Quem presidiu cada data especial, de todos os anos: {data: presidente_id}.
+
+    É a memória do rodízio das datas especiais. Separado de
+    ``carregar_todas_designacoes_presidente`` de propósito: lá a pergunta é
+    "quem presidiu alguma coisa"; aqui é "de quem é a vez do próximo evento",
+    e as semanas comuns não entram nessa conta.
+    """
+    conn = get_connection()
+    try:
+        return {
+            linha[0]: linha[1]
+            for linha in conn.execute(
+                "SELECT data, presidente_id FROM datas_especiais "
+                "WHERE presidente_id IS NOT NULL"
+            )
+        }
+    finally:
+        conn.close()
+
+
 def ultimo_presidente_antes(data_br: str) -> int | None:
     """ID do presidente da última data atribuída antes de `data_br` (DD/MM/AAAA)."""
     chave = data_br[6:10] + data_br[3:5] + data_br[0:2]
@@ -1976,6 +2028,24 @@ def listar_datas_especiais_por_ano(ano: int) -> dict[str, dict]:
         conn.close()
 
 
+def definir_presidente_data_especial(registro_id: int, presidente_id: int | None) -> None:
+    """Grava só o presidente de uma data especial, sem tocar no resto.
+
+    O rodízio preenche a presidência de datas que já existem (com tipo, orador
+    e tema preenchidos); reescrever tudo por causa de um campo só é caminho
+    para apagar o que estava lá.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE datas_especiais SET presidente_id = ? WHERE id = ?",
+            (presidente_id, registro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def salvar_data_especial(
     data: str,
     tipo: str,
@@ -2030,25 +2100,64 @@ def excluir_data_especial(registro_id: int) -> None:
 
 
 def listar_tipos_evento() -> list[dict]:
-    """Tipos de evento especial disponíveis (ordenados por nome)."""
+    """Tipos de evento especial disponíveis (ordenados por nome).
+
+    ``tem_presidente`` diz se aquele evento tem reunião no salão, com alguém
+    presidindo — numa Assembleia a congregação está fora, e o rodízio das
+    datas especiais não deve gastar a vez de um ancião ali.
+    """
     conn = get_connection()
     try:
         return [
-            {"id": linha[0], "nome": linha[1]}
+            {"id": linha[0], "nome": linha[1], "tem_presidente": bool(linha[2])}
             for linha in conn.execute(
-                "SELECT id, nome FROM tipos_evento_especial ORDER BY nome"
+                "SELECT id, nome, COALESCE(tem_presidente, 1) "
+                "FROM tipos_evento_especial ORDER BY nome"
             )
         ]
     finally:
         conn.close()
 
 
-def adicionar_tipo_evento(nome: str) -> None:
-    """Adiciona um tipo de evento especial (idempotente)."""
+def tipos_evento_com_presidente() -> set[str]:
+    """Nomes dos tipos que pedem presidente local (para o rodízio)."""
+    conn = get_connection()
+    try:
+        return {
+            linha[0]
+            for linha in conn.execute(
+                "SELECT nome FROM tipos_evento_especial "
+                "WHERE COALESCE(tem_presidente, 1) = 1"
+            )
+        }
+    finally:
+        conn.close()
+
+
+def definir_tipo_evento_tem_presidente(tipo_id: int, tem_presidente: bool) -> None:
+    """Liga/desliga o presidente local de um tipo de evento."""
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO tipos_evento_especial (nome) VALUES (?)",
+            "UPDATE tipos_evento_especial SET tem_presidente = ? WHERE id = ?",
+            (1 if tem_presidente else 0, tipo_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def adicionar_tipo_evento(nome: str) -> None:
+    """Adiciona um tipo de evento especial (idempotente).
+
+    Nasce com presidente local: a maioria dos eventos tem reunião no salão, e
+    desligar o que não tem é um clique na própria tela.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO tipos_evento_especial (nome, tem_presidente) "
+            "VALUES (?, 1)",
             (nome.strip(),),
         )
         conn.commit()
@@ -2753,6 +2862,13 @@ def restaurar_backup(caminho: str | Path) -> tuple[bool, str]:
                     f"INSERT INTO {tabela} ({nomes}) VALUES ({marcadores})",  # noqa: S608
                     tuple(dados.values()),
                 )
+        # Backup gerado antes do "tem_presidente" traz o tipo sem essa coluna,
+        # que então cai no DEFAULT 1 — e a Assembleia voltaria a pedir
+        # presidente no rodízio. Só nesse caso o padrão por nome é reaplicado;
+        # um backup que já traz a coluna manda no que o usuário escolheu.
+        linhas_tipos = tabelas.get("tipos_evento_especial") or []
+        if linhas_tipos and not any("tem_presidente" in linha for linha in linhas_tipos):
+            _aplicar_padrao_presidente_por_tipo(cursor)
         conn.commit()
     except Exception as exc:
         conn.rollback()

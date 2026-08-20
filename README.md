@@ -90,6 +90,14 @@ uma planilha (veja abaixo).
   exemplo), isso conta no rodízio — inclusive para as semanas **antes** dela.
   O rodízio também evita dois anciãos ou dois servos ministeriais seguidos,
   cedendo quando ninguém do outro privilégio está de folga.
+- **Rodízio das datas especiais** — na aba **Especiais**, o botão *Preencher
+  em rodízio* escolhe quem preside o discurso especial, a visita do
+  superintendente e afins. É uma fila à parte da semanal e **só entre
+  anciãos**: a vez anda pelas datas especiais, então quem presidiu sábado
+  passado continua na frente se nunca fez uma. Cada tipo de evento tem uma
+  marca **Presidente** (na engrenagem ao lado do campo Tipo) dizendo se ali há
+  reunião no salão — assembleia e congresso vêm desmarcados, e o rodízio não
+  gasta a vez de ninguém com eles.
 - **Mensagem da presidência** — na **tela inicial**, tanto no card da próxima
   reunião quanto nas semanas seguintes, o botão de WhatsApp monta a mensagem
   para o presidente daquele dia: você digita só o número do cântico e o app

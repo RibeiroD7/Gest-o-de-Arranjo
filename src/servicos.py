@@ -133,6 +133,71 @@ def escolher_rodizio_presidentes(
     return escolhas
 
 
+def escolher_rodizio_datas_especiais(
+    ordem_ids: list[int],
+    datas_alvo: list[str],
+    historico_especiais: dict[str, int],
+) -> list[tuple[str, int]]:
+    """Decide quem preside cada data especial ainda vazia.
+
+    É um rodízio à parte do semanal, e por dois motivos. O primeiro é quem
+    entra: presidir o Discurso Especial ou a visita do superintendente é dos
+    anciãos, então ``ordem_ids`` traz só eles. O segundo é o que conta como
+    "vez": aqui a fila anda pelas **datas especiais**, não pelas semanas
+    comuns — quem presidiu sábado passado continua na frente para o próximo
+    discurso especial se nunca fez um.
+
+    Como no rodízio semanal, a distância conta para os dois lados: quem já
+    está marcado para uma data especial daqui a um mês não é escolhido para a
+    de amanhã só porque a de um mês ainda não aconteceu.
+
+    Empates vão para a ordem do cadastro. Datas que já têm presidente são
+    puladas.
+
+    Args:
+        ordem_ids: ids dos anciãos, na ordem do cadastro de presidentes.
+        datas_alvo: datas DD/MM/AAAA das especiais a preencher, cronológicas.
+        historico_especiais: {data DD/MM/AAAA: presidente_id} de todas as datas
+            especiais já designadas, de qualquer ano.
+
+    Returns:
+        Lista ``[(data_str, presidente_id)]`` só das datas preenchidas.
+    """
+    if not ordem_ids or not datas_alvo:
+        return []
+
+    ordem_pos = {pid: indice for indice, pid in enumerate(ordem_ids)}
+    agenda: dict[int, list[date]] = defaultdict(list)
+    ocupadas: set[tuple[str, str, str]] = set()
+    for data_str, pid in historico_especiais.items():
+        ocupadas.add(_chave_data_br(data_str))
+        dia = _para_data(data_str)
+        if dia is not None and pid in ordem_pos:
+            agenda[pid].append(dia)
+
+    def distancia(pid: int, dia: date) -> int:
+        datas = agenda.get(pid)
+        if not datas:
+            return 10**6  # nunca presidiu uma data especial: primeiro da fila
+        return min(abs((dia - outra).days) for outra in datas)
+
+    escolhas: list[tuple[str, int]] = []
+    for data_str in datas_alvo:
+        chave = _chave_data_br(data_str)
+        if chave in ocupadas:
+            continue
+        dia = _para_data(data_str)
+        if dia is None:
+            continue
+        escolhido = min(
+            ordem_ids, key=lambda pid, dia=dia: (-distancia(pid, dia), ordem_pos[pid])
+        )
+        escolhas.append((data_str, escolhido))
+        agenda[escolhido].append(dia)
+        ocupadas.add(chave)
+    return escolhas
+
+
 def oradores_mais_tempo_sem_discurso(
     orador_ids: list[int],
     ultima_data_por_orador: dict[int, str],

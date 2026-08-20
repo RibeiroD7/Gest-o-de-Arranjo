@@ -513,3 +513,69 @@ class TestUsoVaiParaAColunaDoProprioAno:
         self._preparar([(2025, "04/2025"), (2026, "08/2026")])
         assert database.realocar_uso_para_ano_da_data() == 0
         assert self._usos() == [(2025, "04/2025"), (2026, "08/2026")]
+
+
+class TestTipoEventoTemPresidente:
+    """Quais eventos pedem presidente local — é o que o rodízio das especiais lê."""
+
+    def _tipos(self) -> dict:
+        return {item["nome"]: item["tem_presidente"] for item in database.listar_tipos_evento()}
+
+    def test_padrao_desliga_quem_nao_tem_reuniao_no_salao(self):
+        conn = get_connection()
+        try:
+            database.create_tables(conn)
+        finally:
+            conn.close()
+        tipos = self._tipos()
+        assert tipos["Assembleia de Circuito"] is False
+        assert tipos["Congresso Regional"] is False
+        assert tipos["Reunião Especial"] is False
+        assert tipos["Discurso Especial"] is True
+        assert tipos["Visita do Superintendente"] is True
+
+    def test_tipo_novo_nasce_pedindo_presidente(self):
+        database.adicionar_tipo_evento("Escola de Pioneiros")
+        assert self._tipos()["Escola de Pioneiros"] is True
+
+    def test_a_escolha_do_usuario_e_gravada(self):
+        alvo = next(
+            item for item in database.listar_tipos_evento()
+            if item["nome"] == "Assembleia de Circuito"
+        )
+        database.definir_tipo_evento_tem_presidente(alvo["id"], True)
+        assert self._tipos()["Assembleia de Circuito"] is True
+        assert "Assembleia de Circuito" in database.tipos_evento_com_presidente()
+        database.definir_tipo_evento_tem_presidente(alvo["id"], False)
+        assert "Assembleia de Circuito" not in database.tipos_evento_com_presidente()
+
+    def test_backup_antigo_nao_religa_a_assembleia(self):
+        """Backup anterior à coluna cairia no DEFAULT 1 e estragaria o rodízio."""
+        import json
+        from pathlib import Path
+
+        caminho, _ = exportar_backup()
+        dados = json.loads(Path(caminho).read_text(encoding="utf-8"))
+        for linha in dados["tabelas"]["tipos_evento_especial"]:
+            linha.pop("tem_presidente", None)
+        Path(caminho).write_text(
+            json.dumps(dados, ensure_ascii=False), encoding="utf-8"
+        )
+
+        ok, _ = restaurar_backup(caminho)
+        assert ok is True
+        assert self._tipos()["Assembleia de Circuito"] is False
+        assert self._tipos()["Discurso Especial"] is True
+
+    def test_backup_novo_manda_no_que_o_usuario_escolheu(self):
+        alvo = next(
+            item for item in database.listar_tipos_evento()
+            if item["nome"] == "Congresso Regional"
+        )
+        database.definir_tipo_evento_tem_presidente(alvo["id"], True)
+        caminho, _ = exportar_backup()
+        database.definir_tipo_evento_tem_presidente(alvo["id"], False)
+
+        ok, _ = restaurar_backup(caminho)
+        assert ok is True
+        assert self._tipos()["Congresso Regional"] is True
