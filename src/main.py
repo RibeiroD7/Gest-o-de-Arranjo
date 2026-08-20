@@ -10215,15 +10215,21 @@ def abrir_dialog_presidente(
     page.update()
 
 
-def _cartao_presidente(
+def _linha_presidente(
     indice: int,
     item: dict,
     total: int,
     on_mover: Callable[[int, int], None],
     on_editar: Callable[[dict], None],
     on_excluir: Callable[[dict], None],
+    on_conversar: Callable[[dict], None] | None = None,
 ) -> ft.Control:
-    """Um presidente na lista: posição do rodízio, avatar, contato e ações."""
+    """Um presidente na lista, no mesmo formato da tela de Oradores.
+
+    Antes cada um era um cartão grande e solto; cabiam sete numa tela e
+    reordenar o rodízio virava um rolar sem fim. Aqui é uma linha só —
+    posição, avatar, nome, contato e ações — dentro de um quadro único.
+    """
     telefone = mascara_telefone(item.get("telefone", ""))
     eh_anciao = item["categoria"] == "Ancião"
     cor_privilegio = COR_DESTAQUE_SUAVE if eh_anciao else COR_AVISO
@@ -10231,91 +10237,76 @@ def _cartao_presidente(
     posicao = ft.Container(
         content=ft.Text(
             f"{indice + 1}",
-            size=fonte(13),
+            size=fonte(12),
             weight=ft.FontWeight.W_700,
             color=TEXTO_SECUNDARIO,
         ),
-        width=24,
+        width=20,
         alignment=ft.Alignment.CENTER,
     )
     chip = ft.Container(
         content=ft.Text(
             "Ancião" if eh_anciao else "Servo",
-            size=fonte(10),
+            size=fonte(11),
             weight=ft.FontWeight.W_600,
             color=cor_privilegio,
             no_wrap=True,
         ),
         bgcolor=ft.Colors.with_opacity(0.13, cor_privilegio),
-        border_radius=6,
-        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+        border_radius=9,
+        padding=ft.Padding.symmetric(horizontal=9, vertical=3),
     )
-    identificacao = ft.Column(
-        [
-            ft.Text(
-                item["nome"],
-                size=fonte(14),
-                weight=ft.FontWeight.W_600,
-                color=TEXTO_PRIMARIO,
-                max_lines=1,
-                overflow=ft.TextOverflow.ELLIPSIS,
-            ),
-            ft.Row(
-                [
-                    chip,
-                    ft.Text(
-                        telefone or "sem telefone",
-                        size=fonte(11),
-                        color=TEXTO_SECUNDARIO,
-                        italic=not telefone,
-                        expand=True,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                ],
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-        ],
-        spacing=4,
-        tight=True,
-        expand=True,
+
+    def _seta(icone: str, dica: str, delta: int, desabilitada: bool) -> ft.Control:
+        return ft.IconButton(
+            icon=icone,
+            icon_size=fonte(17),
+            tooltip=dica,
+            icon_color=TEXTO_SECUNDARIO,
+            disabled=desabilitada,
+            style=ft.ButtonStyle(padding=2),
+            on_click=lambda e, i=indice: on_mover(i, delta),
+        )
+
+    subir = _seta(ft.Icons.KEYBOARD_ARROW_UP, "Subir no rodízio", -1, indice == 0)
+    descer = _seta(
+        ft.Icons.KEYBOARD_ARROW_DOWN, "Descer no rodízio", 1, indice == total - 1
     )
-    setas = ft.Column(
-        [
-            ft.IconButton(
-                icon=ft.Icons.KEYBOARD_ARROW_UP,
-                icon_size=fonte(18),
-                tooltip="Subir no rodízio",
-                disabled=indice == 0,
-                style=ft.ButtonStyle(padding=0),
-                on_click=lambda e, i=indice: on_mover(i, -1),
-            ),
-            ft.IconButton(
-                icon=ft.Icons.KEYBOARD_ARROW_DOWN,
-                icon_size=fonte(18),
-                tooltip="Descer no rodízio",
-                disabled=indice == total - 1,
-                style=ft.ButtonStyle(padding=0),
-                on_click=lambda e, i=indice: on_mover(i, 1),
-            ),
-        ],
-        spacing=0,
-        tight=True,
+    botao_conversar = (
+        ft.IconButton(
+            icon=ft.Icons.CHAT_OUTLINED,
+            icon_size=fonte(17),
+            tooltip="Conversar no WhatsApp",
+            icon_color="#34D399",
+            on_click=lambda e, i=dict(item): on_conversar(i),
+        )
+        if on_conversar and telefone
+        else None
     )
-    excluir = ft.IconButton(
+    botao_editar = ft.IconButton(
+        icon=ft.Icons.EDIT_OUTLINED,
+        icon_size=fonte(17),
+        tooltip="Editar",
+        icon_color=TEXTO_SECUNDARIO,
+        on_click=lambda e, i=dict(item): on_editar(i),
+    )
+    botao_excluir = ft.IconButton(
         icon=ft.Icons.DELETE_OUTLINE,
-        icon_size=fonte(18),
+        icon_size=fonte(17),
         icon_color=COR_ERRO,
         tooltip="Excluir (remove também as semanas atribuídas)",
         on_click=lambda e, i=dict(item): on_excluir(i),
     )
+    borda_linha = ft.Border(
+        ft.BorderSide(0, BORDA_SUAVE),
+        ft.BorderSide(0, BORDA_SUAVE),
+        ft.BorderSide(1 if indice < total - 1 else 0, BORDA_SUAVE),
+        ft.BorderSide(0, BORDA_SUAVE),
+    )
 
-    # O cartão inteiro abre a edição: é o gesto que as pessoas tentam primeiro.
     if eh_mobile():
-        # Nome ocupa a linha inteira e o telefone a de baixo. Lado a lado com
-        # avatar, lixeira e setas sobravam ~90px e os dois saíam cortados
-        # ("Fábio Morei…", "(11)…") — justamente o que se precisa ler.
+        # Nome na linha inteira: lado a lado com avatar, setas e lixeira
+        # sobravam ~90px e ele saía cortado ("Fábio Morei…").
         conteudo = ft.Column(
             [
                 ft.Row(
@@ -10331,13 +10322,14 @@ def _cartao_presidente(
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
+                        botao_editar,
+                        botao_excluir,
                     ],
-                    spacing=10,
+                    spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Row(
                     [
-                        chip,
                         ft.Text(
                             telefone or "sem telefone",
                             size=fonte(12),
@@ -10347,23 +10339,10 @@ def _cartao_presidente(
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
-                        ft.IconButton(
-                            icon=ft.Icons.KEYBOARD_ARROW_UP,
-                            icon_size=fonte(18),
-                            tooltip="Subir no rodízio",
-                            disabled=indice == 0,
-                            style=ft.ButtonStyle(padding=2),
-                            on_click=lambda e, i=indice: on_mover(i, -1),
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.KEYBOARD_ARROW_DOWN,
-                            icon_size=fonte(18),
-                            tooltip="Descer no rodízio",
-                            disabled=indice == total - 1,
-                            style=ft.ButtonStyle(padding=2),
-                            on_click=lambda e, i=indice: on_mover(i, 1),
-                        ),
-                        excluir,
+                        chip,
+                        *([botao_conversar] if botao_conversar else []),
+                        subir,
+                        descer,
                     ],
                     spacing=4,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -10377,23 +10356,66 @@ def _cartao_presidente(
             [
                 posicao,
                 _avatar_contato(item["nome"], item.get("contato_id", "")),
-                identificacao,
-                excluir,
-                setas,
+                ft.Column(
+                    [
+                        ft.Text(
+                            item["nome"],
+                            size=fonte(14),
+                            weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO,
+                            no_wrap=True,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            telefone or "sem telefone",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                            italic=not telefone,
+                            no_wrap=True,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                    ],
+                    spacing=2,
+                    expand=True,
+                ),
+                chip,
+                *([botao_conversar] if botao_conversar else []),
+                botao_editar,
+                botao_excluir,
+                subir,
+                descer,
             ],
-            spacing=8,
+            spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     return ft.Container(
         content=conteudo,
-        padding=ft.Padding.symmetric(horizontal=10, vertical=10),
-        bgcolor=FUNDO_CARD,
+        padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+        border=borda_linha,
+    )
+
+
+def _lista_presidentes(
+    cadastro: list[dict],
+    on_mover: Callable[[int, int], None],
+    on_editar: Callable[[dict], None],
+    on_excluir: Callable[[dict], None],
+    on_conversar: Callable[[dict], None] | None = None,
+) -> ft.Control:
+    """Todos os presidentes num quadro só, como a lista de Oradores."""
+    linhas = [
+        _linha_presidente(
+            indice, item, len(cadastro), on_mover, on_editar, on_excluir, on_conversar
+        )
+        for indice, item in enumerate(cadastro)
+    ]
+    return ft.Container(
+        content=ft.Column(linhas, spacing=0, tight=True, scroll=ft.ScrollMode.AUTO),
         border=ft.Border.all(1, BORDA_SUAVE),
-        border_radius=12,
-        ink=True,
-        tooltip="Tocar para editar",
-        on_click=lambda e, i=dict(item): on_editar(i),
+        border_radius=14,
+        bgcolor=FUNDO_CARD,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
     )
 
 
@@ -10450,6 +10472,18 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             )
         )
         page.update()
+
+    def conversar(item: dict):
+        """WhatsApp do presidente direto da lista, como na tela de Oradores."""
+        telefone = (item.get("telefone") or "").strip()
+        if not telefone:
+            mostrar_aviso(
+                page,
+                "Sem telefone",
+                f"{item.get('nome') or 'Este presidente'} não tem telefone cadastrado.",
+            )
+            return
+        abrir_url(page, gerar_link_whatsapp(telefone, ""))
 
     anciaos = sum(1 for item in cadastro if item["categoria"] == "Ancião")
     resumo = (
@@ -10510,10 +10544,7 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             )
         ]
     else:
-        corpo = [
-            _cartao_presidente(indice, item, len(cadastro), mover, editar, excluir)
-            for indice, item in enumerate(cadastro)
-        ]
+        corpo = [_lista_presidentes(cadastro, mover, editar, excluir, conversar)]
 
     return ft.Column(
         [cabecalho, ft.Container(height=12), *corpo],

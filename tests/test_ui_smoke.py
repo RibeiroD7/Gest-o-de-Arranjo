@@ -715,3 +715,38 @@ def test_tela_oradores_no_filtro_outras_congregacoes():
     outras = dados[dados["congregacao"] != "Minha"]
     assert len(outras) == 2
     assert capturado["render"](outras) is not None
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_presidentes_sao_linhas_num_quadro_so(mobile):
+    """A aba Presidentes segue o formato da tela de Oradores.
+
+    Eram cartões grandes e soltos: cabiam sete numa tela e reordenar o rodízio
+    virava um rolar sem fim. O teste trava o formato — um quadro só, uma linha
+    por presidente, e a última sem divisória embaixo.
+    """
+    import armazenamento
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM presidentes")
+        conn.execute("DELETE FROM presidentes_cadastro")
+        conn.commit()
+    finally:
+        conn.close()
+    for nome in ("Primeiro", "Segundo", "Terceiro"):
+        database.salvar_presidente_cadastro(nome, "Ancião", telefone="11999998888")
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        secao = main._secao_presidentes(_page(), lambda: None)
+        quadros = [c for c in secao.controls if isinstance(c, flet.Container)]
+        assert quadros, "a lista deveria estar dentro de um container"
+        linhas = quadros[-1].content.controls
+        assert len(linhas) == 3, "uma linha por presidente, num quadro só"
+        assert linhas[-1].border.bottom.width == 0, "a última linha não leva divisória"
+        assert linhas[0].border.bottom.width == 1
+    finally:
+        armazenamento.definir_layout_mobile(False)
