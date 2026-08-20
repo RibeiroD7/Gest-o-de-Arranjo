@@ -62,6 +62,9 @@ MAP_DIA_SEMANA = {
 
 PARES_MESES = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12)]
 
+# Como o quadro é nomeado na pasta da congregação (ver _nome_arquivo).
+PREFIXO_ARQUIVO = "DISCURSOS PÚBLICOS"
+
 
 def _carregar_configuracao() -> dict:
     conn = get_connection()
@@ -216,8 +219,16 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
     return linhas
 
 
-def _nome_arquivo(ano: int, mes_inicial: int) -> str:
-    return f"Quadro_Anuncios_{rotulo_par_meses(mes_inicial)}_{ano}.pdf"
+def _nome_arquivo(mes_inicial: int) -> str:
+    """Nome do PDF no formato em que o quadro é arquivado e enviado.
+
+    Sai como ``DISCURSOS PÚBLICOS - SETEMBRO-OUTUBRO.pdf``, igual aos que já
+    estão na pasta da congregação: o arquivo vai para lá como está, sem
+    renomear na mão a cada dois meses. O ano não entra no nome porque ele é a
+    pasta ("2026/Quadro"); gerar o mesmo par de meses de novo regrava o
+    arquivo em ``exports/``, que é área de passagem.
+    """
+    return f"{PREFIXO_ARQUIVO} - {rotulo_par_meses(mes_inicial).upper()}.pdf"
 
 
 def _tamanho_ajustado(texto: str, largura_max: float, tamanho_inicial: int = 14, minimo: int = 9) -> int:
@@ -379,7 +390,7 @@ def gerar_quadro_anuncios(ano: int, mes_inicial: int) -> tuple[str | None, str |
     nome_congregacao = config.get("nome_congregacao") or "Minha congregação"
 
     os.makedirs(EXPORTS_DIR, exist_ok=True)
-    caminho = os.path.join(EXPORTS_DIR, _nome_arquivo(ano, inicio))
+    caminho = os.path.join(EXPORTS_DIR, _nome_arquivo(inicio))
 
     doc = SimpleDocTemplate(
         caminho,

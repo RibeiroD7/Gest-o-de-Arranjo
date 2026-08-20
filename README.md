@@ -98,7 +98,9 @@ uma planilha (veja abaixo).
   congregação dele e o tema já programados.
 - **Quadro de Anúncios** — prévia fiel e exportação em PDF do quadro de
   conferência pública, publicado de 2 em 2 meses, no layout oficial usado no
-  quadro de anúncios da congregação.
+  quadro de anúncios da congregação. O arquivo já sai nomeado como
+  `DISCURSOS PÚBLICOS - SETEMBRO-OUTUBRO.pdf`, pronto para ir para a pasta do
+  ano sem renomear (o ano fica no título do documento).
 - **Relatórios** — tela com o retrato do arranjo, o que só aparece somando o
   ano inteiro: números do ano (semanas com e sem orador, com presidente,
   recebidos, enviados, aguardando confirmação), o **mês a mês** da cobertura
