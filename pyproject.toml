@@ -1,6 +1,6 @@
 [project]
 name = "gestao-arranjo"
-version = "2.4.1"
+version = "2.4.2"
 description = "Gestão de Arranjo — coordenação de discursos públicos (Windows, Linux e Android)"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
