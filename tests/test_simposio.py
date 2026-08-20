@@ -21,6 +21,8 @@ def _preparar():
         create_tables(conn)
         conn.execute("DELETE FROM arranjo_oradores")
         conn.execute("DELETE FROM arranjos")
+        # orador_temas aponta para oradores: apagar na ordem das dependências.
+        conn.execute("DELETE FROM orador_temas")
         conn.execute("DELETE FROM oradores")
         conn.execute("DELETE FROM congregacoes")
         conn.execute("INSERT INTO congregacoes (nome) VALUES ('Minha')")
@@ -465,3 +467,116 @@ def _campos_do_dialog(dialog):
         elif isinstance(controle, flet.Dropdown) and rotulo == "congregação":
             campos["congregacao"] = controle
     return campos
+
+
+class TestArquivadoNaoSeguraONome:
+    """Excluir um orador com histórico arquiva (ativo=0) em vez de apagar.
+
+    O índice único pegava todas as linhas, então esse arquivado — que não
+    aparece em lugar nenhum da tela — segurava o nome para sempre: recadastrar
+    a pessoa, ou renomear outra para aquele nome, batia num "já existe"
+    apontando para um registro invisível.
+    """
+
+    def _cong(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            return conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _arquivar(self, orador_id):
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE oradores SET ativo = 0 WHERE id = ?", (orador_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_da_para_reusar_o_nome_de_um_arquivado(self):
+        cong = self._cong()
+        antigo = database.salvar_orador("Fulano", "", "Ancião", cong, "", set())
+        self._arquivar(antigo)
+
+        novo = database.salvar_orador("Fulano", "", "Ancião", cong, "", set())
+        assert novo != antigo, "o arquivado continua guardado, com o histórico dele"
+
+    def test_da_para_renomear_alguem_para_o_nome_de_um_arquivado(self):
+        """O caso relatado: renomear um ativo para o nome de um arquivado."""
+        cong = self._cong()
+        antigo = database.salvar_orador("Henrique Dias", "", "Ancião", cong, "", set())
+        self._arquivar(antigo)
+        outro = database.salvar_orador(
+            "Gustavo Prado Junior", "", "Ancião", cong, "", set()
+        )
+
+        database.salvar_orador(
+            "Henrique Dias", "", "Ancião", cong, "", set(), orador_id=outro
+        )
+
+        conn = get_connection()
+        try:
+            nome = conn.execute(
+                "SELECT nome FROM oradores WHERE id = ?", (outro,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert nome == "Henrique Dias"
+
+    def test_dois_ativos_com_o_mesmo_nome_continuam_barrados(self):
+        """A regra de verdade não afrouxou: só o arquivado deixou de contar."""
+        import sqlite3
+
+        cong = self._cong()
+        database.salvar_orador("Xará", "", "Ancião", cong, "", set())
+        with pytest.raises(sqlite3.IntegrityError):
+            database.salvar_orador("Xará", "", "Ancião", cong, "", set())
+
+    def test_a_migracao_nao_funde_ativo_com_arquivado(self):
+        """Fundir os dois juntaria históricos de pessoas talvez diferentes."""
+        cong = self._cong()
+        antigo = database.salvar_orador("Repetido", "", "Ancião", cong, "", set())
+        self._arquivar(antigo)
+        novo = database.salvar_orador("Repetido", "", "Ancião", cong, "", set())
+
+        conn = get_connection()
+        try:
+            database.migrar_oradores(conn)
+            restantes = {
+                linha[0]
+                for linha in conn.execute("SELECT id FROM oradores WHERE nome='Repetido'")
+            }
+        finally:
+            conn.close()
+        assert restantes == {antigo, novo}, "os dois têm de sobreviver"
+
+
+class TestTemasPreparados:
+    def test_traz_numero_e_titulo_em_ordem(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+            conn.execute(
+                "INSERT OR REPLACE INTO temas (nr, titulo) VALUES (9, 'Nono'), (2, 'Segundo')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        oid = database.salvar_orador("Com Temas", "", "Ancião", cong, "", {9, 2})
+
+        assert database.carregar_temas_com_titulo_de_orador(oid) == [
+            (2, "Segundo"),
+            (9, "Nono"),
+        ]
+
+    def test_sem_temas_devolve_lista_vazia(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+        finally:
+            conn.close()
+        oid = database.salvar_orador("Sem Temas", "", "Ancião", cong, "", set())
+        assert database.carregar_temas_com_titulo_de_orador(oid) == []

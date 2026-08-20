@@ -675,6 +675,7 @@ def test_tela_oradores_no_filtro_outras_congregacoes():
     try:
         database.create_tables(conn)
         conn.execute("DELETE FROM arranjo_oradores")
+        conn.execute("DELETE FROM orador_temas")
         conn.execute("DELETE FROM oradores")
         conn.execute("DELETE FROM congregacoes")
         conn.execute("INSERT INTO congregacoes (nome) VALUES ('Minha'), ('Vila'), ('Alfa')")

@@ -61,6 +61,7 @@ from database import (
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
     carregar_tema,
+    carregar_temas_com_titulo_de_orador,
     carregar_temas_de_orador,
     carregar_todas_designacoes_presidente,
     contar_designacoes_por_mes,
@@ -3275,6 +3276,58 @@ def _iniciais_nome(nome: str) -> str:
     return (partes[0][0] + partes[-1][0]).upper()
 
 
+def abrir_dialog_temas_do_orador(page: ft.Page, orador_id: int, nome: str) -> None:
+    """Mostra os temas que o orador tem preparados, com número e título."""
+    temas = carregar_temas_com_titulo_de_orador(orador_id)
+
+    if temas:
+        corpo: list[ft.Control] = [
+            ft.Text(
+                f"{nr} — {titulo}" if titulo else f"{nr}",
+                size=fonte(13),
+                color=TEXTO_PRIMARIO,
+            )
+            for nr, titulo in temas
+        ]
+    else:
+        corpo = [
+            ft.Text(
+                "Nenhum tema marcado no cadastro dele. Se ele faz qualquer "
+                "tema, marque essa opção ao editar.",
+                size=fonte(13),
+                color=TEXTO_SECUNDARIO,
+                italic=True,
+            )
+        ]
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"Temas de {nome}", size=fonte(16)),
+            content=ft.Container(
+                width=_largura_dialog(page, 460),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            f"{len(temas)} tema(s) preparado(s)",
+                            size=fonte(12),
+                            color=TEXTO_SECUNDARIO,
+                        ),
+                        ft.Container(height=6),
+                        *corpo,
+                    ],
+                    spacing=6,
+                    tight=True,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+            ),
+            actions=[ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def _rotulo_ultima_saida(ultima_saida: dict[int, str], orador_id: int) -> str:
     """Quando o orador discursou fora pela última vez — vazio se não há dados."""
     if not ultima_saida:
@@ -3290,6 +3343,7 @@ def _criar_lista_oradores(
     on_excluir: Callable[[int], None],
     on_conversar: Callable[[int], None] | None = None,
     ultima_saida: dict[int, str] | None = None,
+    on_temas: Callable[[int, str], None] | None = None,
 ) -> ft.Container:
     """Lista de oradores com iniciais, privilégio, telefone e chip de temas.
 
@@ -3339,15 +3393,26 @@ def _criar_lista_oradores(
             else:
                 estado_selecao["ids"].discard(rid)
 
-        def selo(texto: str, cor: str) -> ft.Control:
+        def selo(texto: str, cor: str, ao_clicar=None) -> ft.Control:
             return ft.Container(
                 content=ft.Text(texto, size=fonte(11), weight=ft.FontWeight.W_600, color=cor),
                 bgcolor=ft.Colors.with_opacity(0.13, cor),
                 border_radius=9,
                 padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                ink=ao_clicar is not None,
+                tooltip="Ver os temas preparados" if ao_clicar else None,
+                on_click=ao_clicar,
             )
 
-        selos = [selo(chip_texto, chip_cor)]
+        # O selo de temas abre a lista: o número sozinho não diz se a pessoa
+        # pode fazer o discurso que se está tentando encaixar.
+        selos = [
+            selo(
+                chip_texto,
+                chip_cor,
+                (lambda e, rid=orador_id, n=nome: on_temas(rid, n)) if on_temas else None,
+            )
+        ]
         # Quem faz só o discurso local não vai na lista mandada para outra
         # congregação: o selo explica, e o checkbox fica travado.
         so_local = not mapa.get("aprovado_fora", 1)
@@ -3598,6 +3663,9 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
             return
         abrir_url(page, gerar_link_whatsapp(telefone, ""))
 
+    def ver_temas(orador_id: int, nome: str):
+        abrir_dialog_temas_do_orador(page, orador_id, nome)
+
     def gerar_pdf_envio(_=None):
         acionar_geracao_pdf_envio(page, estado_selecao["ids"])
 
@@ -3654,12 +3722,13 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                 ultima_saida={
                     int(k): v for k, v in ultima_data_discurso_por_orador().items()
                 },
+                on_temas=ver_temas,
             )
 
         if df_filtrado.empty:
             return _criar_lista_oradores(
                 df_filtrado, estado_selecao, abrir_editar, abrir_excluir,
-                conversar_com_orador,
+                conversar_com_orador, on_temas=ver_temas,
             )
 
         def bloco_congregacao(nome_congregacao: str, grupo: Tabela) -> ft.Control:
@@ -3691,7 +3760,7 @@ def tela_oradores(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
                 controls=[
                     _criar_lista_oradores(
                         grupo, estado_selecao, abrir_editar, abrir_excluir,
-                        conversar_com_orador,
+                        conversar_com_orador, on_temas=ver_temas,
                     )
                 ],
             )

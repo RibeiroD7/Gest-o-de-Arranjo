@@ -405,6 +405,28 @@ def create_tables(conn):
             "ALTER TABLE oradores ADD COLUMN aprovado_fora INTEGER NOT NULL DEFAULT 1"
         )
 
+    # O índice de nome único vale só para quem está ATIVO — precisa vir depois
+    # da coluna `ativo` existir. Excluir um orador com histórico não apaga o
+    # registro, arquiva; o índice antigo pegava todas as linhas e deixava esse
+    # arquivado segurando o nome para sempre, então cadastrar de novo (ou
+    # renomear alguém para aquele nome) batia num "já existe" apontando para
+    # quem não aparece em lugar nenhum.
+    criado = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+        ("idx_oradores_nome_congregacao",),
+    ).fetchone()
+    if criado and "ativo" not in (criado[0] or ""):
+        cursor.execute("DROP INDEX idx_oradores_nome_congregacao")
+        criado = None
+    if not criado:
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_oradores_nome_congregacao
+            ON oradores(nome, congregacao_id)
+            WHERE COALESCE(ativo, 1) = 1
+            """
+        )
+
     # Temas prioritários para a minha congregação (escolha assistida de recebidos).
     colunas_temas = [linha[1] for linha in cursor.execute("PRAGMA table_info(temas)")]
     if "prioritario" not in colunas_temas:
@@ -477,7 +499,13 @@ def create_tables(conn):
 
 
 def migrar_oradores(conn) -> None:
-    """Remove oradores duplicados e impede novas duplicatas por nome/congregação."""
+    """Funde oradores duplicados por nome/congregação — só entre os ATIVOS.
+
+    Um arquivado (``ativo = 0``) pode legitimamente repetir o nome de alguém
+    ativo: é o registro antigo, guardado só para as designações passadas não
+    perderem o nome. Fundir os dois juntaria históricos de pessoas que podem
+    nem ser a mesma, e é justamente o par que o índice único agora permite.
+    """
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -487,6 +515,7 @@ def migrar_oradores(conn) -> None:
           ON o1.nome = o2.nome
          AND COALESCE(o1.congregacao_id, -1) = COALESCE(o2.congregacao_id, -1)
          AND o1.id < o2.id
+        WHERE COALESCE(o1.ativo, 1) = 1 AND COALESCE(o2.ativo, 1) = 1
         """
     )
     for dup_id, keep_id in cursor.fetchall():
@@ -506,14 +535,24 @@ def migrar_oradores(conn) -> None:
             "UPDATE designacoes SET presidente_id = ? WHERE presidente_id = ?",
             (keep_id, dup_id),
         )
+        # As designações do arranjo apontam para o orador por chave
+        # estrangeira; sem transferir, o DELETE abaixo falha e a abertura do
+        # app morre com "FOREIGN KEY constraint failed".
+        cursor.execute(
+            "UPDATE OR IGNORE arranjo_oradores SET orador_id = ? WHERE orador_id = ?",
+            (keep_id, dup_id),
+        )
+        cursor.execute(
+            "UPDATE OR IGNORE arranjo_oradores SET orador_2_id = ? WHERE orador_2_id = ?",
+            (keep_id, dup_id),
+        )
+        cursor.execute("DELETE FROM arranjo_oradores WHERE orador_id = ?", (dup_id,))
+        cursor.execute(
+            "UPDATE arranjo_oradores SET orador_2_id = NULL WHERE orador_2_id = ?",
+            (dup_id,),
+        )
         cursor.execute("DELETE FROM oradores WHERE id = ?", (dup_id,))
 
-    cursor.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_oradores_nome_congregacao
-        ON oradores(nome, congregacao_id)
-        """
-    )
     conn.commit()
 
 
@@ -1521,6 +1560,31 @@ def carregar_temas_de_orador(orador_id: int) -> set[int]:
             "SELECT tema_nr FROM orador_temas WHERE orador_id = ?", (orador_id,)
         ).fetchall()
         return {int(linha[0]) for linha in linhas}
+    finally:
+        conn.close()
+
+
+def carregar_temas_com_titulo_de_orador(orador_id: int) -> list[tuple[int, str]]:
+    """Temas que o orador tem preparados, com título — [(nr, titulo)].
+
+    O número sozinho não diz nada para quem está montando o arranjo; é o
+    título que responde "ele pode fazer este discurso?".
+    """
+    conn = get_connection()
+    try:
+        return [
+            (int(nr), titulo or "")
+            for nr, titulo in conn.execute(
+                """
+                SELECT ot.tema_nr, t.titulo
+                FROM orador_temas ot
+                LEFT JOIN temas t ON t.nr = ot.tema_nr
+                WHERE ot.orador_id = ?
+                ORDER BY ot.tema_nr
+                """,
+                (orador_id,),
+            )
+        ]
     finally:
         conn.close()
 
