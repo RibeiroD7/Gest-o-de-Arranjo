@@ -118,6 +118,18 @@ TIPOS_SEM_PRESIDENTE_LOCAL = {
 }
 
 
+def _aplicar_padrao_escala_especiais(cursor) -> None:
+    """Marca os anciãos do cadastro como presidentes de datas especiais.
+
+    É o critério que valia antes de a escala existir. Serve à migração e à
+    restauração de um backup anterior a ela.
+    """
+    cursor.execute(
+        "UPDATE presidentes_cadastro SET preside_especiais = 1 "
+        "WHERE categoria = 'Ancião'"
+    )
+
+
 def _aplicar_padrao_presidente_por_tipo(cursor) -> None:
     """Desliga o presidente local nos tipos em que não há reunião no salão."""
     marcadores = ",".join("?" * len(TIPOS_SEM_PRESIDENTE_LOCAL))
@@ -370,7 +382,13 @@ def create_tables(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL UNIQUE,
             categoria TEXT NOT NULL DEFAULT 'Ancião'
-                CHECK(categoria IN ('Ancião', 'Servo Ministerial'))
+                CHECK(categoria IN ('Ancião', 'Servo Ministerial')),
+            -- Duas escalas independentes. Quem preside a Celebração ou a
+            -- visita do superintendente não é necessariamente quem entra no
+            -- rodízio de todo fim de semana, e vice-versa: há quem esteja no
+            -- cadastro SÓ para as datas especiais.
+            preside_normais INTEGER NOT NULL DEFAULT 1,
+            preside_especiais INTEGER NOT NULL DEFAULT 0
         )
     """)
 
@@ -479,6 +497,21 @@ def create_tables(conn):
     # contato para reler nome/telefone/foto quando ele mudar no aparelho.
     if "contato_id" not in colunas_cadastro:
         cursor.execute("ALTER TABLE presidentes_cadastro ADD COLUMN contato_id TEXT")
+    # Quem já estava no cadastro presidia o fim de semana; e a escala das datas
+    # especiais era "os anciãos do cadastro". A migração congela exatamente
+    # isso, para nada mudar de comportamento na atualização — daí em diante
+    # quem decide são as duas marcações na tela.
+    if "preside_normais" not in colunas_cadastro:
+        cursor.execute(
+            "ALTER TABLE presidentes_cadastro "
+            "ADD COLUMN preside_normais INTEGER NOT NULL DEFAULT 1"
+        )
+    if "preside_especiais" not in colunas_cadastro:
+        cursor.execute(
+            "ALTER TABLE presidentes_cadastro "
+            "ADD COLUMN preside_especiais INTEGER NOT NULL DEFAULT 0"
+        )
+        _aplicar_padrao_escala_especiais(cursor)
     if "contato_id" not in colunas_oradores:
         cursor.execute("ALTER TABLE oradores ADD COLUMN contato_id TEXT")
 
@@ -1799,17 +1832,26 @@ def excluir_presidente(data: str) -> None:
         conn.close()
 
 
-def listar_presidentes_cadastro() -> list[dict]:
-    """Lista o cadastro de presidentes na ordem da rotação."""
+def listar_presidentes_cadastro(escala: str | None = None) -> list[dict]:
+    """Lista o cadastro de presidentes na ordem da rotação.
+
+    ``escala`` filtra por quem serve para quê: ``"normais"`` traz quem preside
+    a reunião de todo fim de semana, ``"especiais"`` traz quem preside a
+    Celebração, a visita do superintendente e afins. Sem ``escala``, traz o
+    cadastro inteiro — é o que a tela de Presidentes mostra.
+    """
+    onde = {
+        "normais": " WHERE COALESCE(preside_normais, 1) = 1",
+        "especiais": " WHERE COALESCE(preside_especiais, 0) = 1",
+    }.get(escala or "", "")
     conn = get_connection()
     try:
         linhas = conn.execute(
-            """
-            SELECT id, nome, categoria, ordem, COALESCE(telefone, ''),
-                   COALESCE(contato_id, '')
-            FROM presidentes_cadastro
-            ORDER BY COALESCE(ordem, 999999), nome
-            """
+            "SELECT id, nome, categoria, ordem, COALESCE(telefone, ''), "
+            "COALESCE(contato_id, ''), COALESCE(preside_normais, 1), "
+            "COALESCE(preside_especiais, 0) "
+            f"FROM presidentes_cadastro{onde} "  # noqa: S608 — literal fixo
+            "ORDER BY COALESCE(ordem, 999999), nome"
         ).fetchall()
         return [
             {
@@ -1819,6 +1861,8 @@ def listar_presidentes_cadastro() -> list[dict]:
                 "ordem": linha[3],
                 "telefone": linha[4],
                 "contato_id": linha[5],
+                "preside_normais": bool(linha[6]),
+                "preside_especiais": bool(linha[7]),
             }
             for linha in linhas
         ]
@@ -1946,25 +1990,40 @@ def salvar_presidente_cadastro(
     cadastro_id: int | None = None,
     telefone: str = "",
     contato_id: str | None = None,
+    preside_normais: bool = True,
+    preside_especiais: bool | None = None,
 ) -> int:
-    """Cria ou atualiza um presidente no cadastro; retorna o ID."""
+    """Cria ou atualiza um presidente no cadastro; retorna o ID.
+
+    ``preside_normais`` e ``preside_especiais`` são independentes: dá para
+    estar só numa das escalas, nas duas, ou em nenhuma (fica no cadastro sem
+    entrar em rodízio nenhum). ``preside_especiais=None`` segue o privilégio
+    (ancião entra), que é o mesmo critério da migração.
+    """
+    if preside_especiais is None:
+        preside_especiais = categoria == "Ancião"
     conn = get_connection()
     try:
         if cadastro_id:
             conn.execute(
                 "UPDATE presidentes_cadastro SET nome = ?, categoria = ?, "
-                "telefone = ?, contato_id = ? WHERE id = ?",
-                (nome, categoria, telefone, contato_id or None, cadastro_id),
+                "telefone = ?, contato_id = ?, preside_normais = ?, "
+                "preside_especiais = ? WHERE id = ?",
+                (nome, categoria, telefone, contato_id or None,
+                 1 if preside_normais else 0, 1 if preside_especiais else 0,
+                 cadastro_id),
             )
         else:
             cursor = conn.execute(
                 """
                 INSERT INTO presidentes_cadastro (
-                    nome, categoria, telefone, contato_id, ordem
-                ) VALUES (?, ?, ?, ?,
+                    nome, categoria, telefone, contato_id,
+                    preside_normais, preside_especiais, ordem
+                ) VALUES (?, ?, ?, ?, ?, ?,
                     (SELECT COALESCE(MAX(ordem), 0) + 1 FROM presidentes_cadastro))
                 """,
-                (nome, categoria, telefone, contato_id or None),
+                (nome, categoria, telefone, contato_id or None,
+                 1 if preside_normais else 0, 1 if preside_especiais else 0),
             )
             cadastro_id = int(cursor.lastrowid)
         conn.commit()
@@ -2880,6 +2939,13 @@ def restaurar_backup(caminho: str | Path) -> tuple[bool, str]:
         linhas_tipos = tabelas.get("tipos_evento_especial") or []
         if linhas_tipos and not any("tem_presidente" in linha for linha in linhas_tipos):
             _aplicar_padrao_presidente_por_tipo(cursor)
+        # Mesma história com a escala das datas especiais: sem a coluna, ela
+        # cairia no DEFAULT 0 e o rodízio das especiais ficaria sem ninguém.
+        linhas_cadastro = tabelas.get("presidentes_cadastro") or []
+        if linhas_cadastro and not any(
+            "preside_especiais" in linha for linha in linhas_cadastro
+        ):
+            _aplicar_padrao_escala_especiais(cursor)
         conn.commit()
     except Exception as exc:
         conn.rollback()

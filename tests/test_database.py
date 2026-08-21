@@ -593,3 +593,55 @@ class TestTipoEventoTemPresidente:
         ok, _ = restaurar_backup(caminho)
         assert ok is True
         assert self._tipos()["Congresso Regional"] is True
+
+
+class TestEscalaDePresidentes:
+    """Restaurar backup antigo não pode esvaziar a escala das datas especiais."""
+
+    def test_backup_antigo_remarca_os_anciaos(self):
+        conn = get_connection()
+        try:
+            database.create_tables(conn)
+            # datas_especiais aponta para o cadastro: sai antes, senão a FK
+            # barra o DELETE (outros testes deixam datas gravadas).
+            conn.execute("DELETE FROM datas_especiais")
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+        database.salvar_presidente_cadastro("Um Ancião", "Ancião")
+        database.salvar_presidente_cadastro("Um Servo", "Servo Ministerial")
+
+        import json
+        from pathlib import Path
+
+        caminho, _ = exportar_backup()
+        dados = json.loads(Path(caminho).read_text(encoding="utf-8"))
+        for linha in dados["tabelas"]["presidentes_cadastro"]:
+            linha.pop("preside_especiais", None)
+        Path(caminho).write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+
+        ok, _ = restaurar_backup(caminho)
+        assert ok is True
+        por_nome = {p["nome"]: p for p in database.listar_presidentes_cadastro()}
+        assert por_nome["Um Ancião"]["preside_especiais"] is True
+        assert por_nome["Um Servo"]["preside_especiais"] is False
+
+    def test_backup_novo_manda_no_que_o_usuario_escolheu(self):
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM datas_especiais")
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+        # Ancião deliberadamente fora das especiais: a restauração respeita.
+        database.salvar_presidente_cadastro(
+            "Fora das Especiais", "Ancião", preside_especiais=False)
+        caminho, _ = exportar_backup()
+        ok, _ = restaurar_backup(caminho)
+        assert ok is True
+        por_nome = {p["nome"]: p for p in database.listar_presidentes_cadastro()}
+        assert por_nome["Fora das Especiais"]["preside_especiais"] is False

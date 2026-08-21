@@ -82,7 +82,11 @@ uma planilha (veja abaixo).
   mensagem já começada (o telefone vem do cadastro em Congregações).
 - **Minha congregação** — tela com o que é seu: os **dados** da congregação
   (usados nos cabeçalhos dos PDFs) e os **presidentes**, com o cadastro de
-  quem pode presidir e a ordem do rodízio. A atribuição semana a semana
+  quem pode presidir e a ordem do rodízio. Cada um tem **duas escalas
+  independentes**: presidir a reunião de fim de semana e presidir as datas
+  especiais. Dá para estar só numa — quem entra no cadastro apenas para a
+  Celebração e a visita do superintendente não aparece no rodízio de todo
+  sábado. A atribuição semana a semana
   continua na Programação, por ano e mês. Semanas tomadas por
   uma **data especial** (assembleia, congresso, visita) não pedem presidente:
   a linha mostra o evento no lugar do seletor, e o rodízio automático já as
@@ -93,8 +97,9 @@ uma planilha (veja abaixo).
 - **Rodízio das datas especiais** — na aba **Especiais**, o botão *Preencher
   em rodízio* escolhe quem preside. É **uma fila por tipo de evento** (uma
   para a Celebração, outra para a visita do superintendente, outra para o
-  discurso especial) e **só entre anciãos**: presidir a Celebração não faz
-  ninguém perder a vez na visita. Entre empatados na fila do tipo — o caso
+  discurso especial): presidir a Celebração não faz ninguém perder a vez na
+  visita. Entram só os **marcados como presidentes de datas especiais**, que é
+  a escala à parte do cadastro. Entre empatados na fila do tipo — o caso
   comum, porque cada evento acontece uma ou duas vezes por ano — vai quem está
   há mais tempo sem qualquer data especial, para o primeiro do cadastro não
   ficar com todos os tipos. Cada tipo tem uma marca **Presidente** (na

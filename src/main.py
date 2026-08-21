@@ -6218,7 +6218,7 @@ def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
     ``servicos.escolher_rodizio_presidentes`` (lógica pura, testada) e persiste
     as escolhas. Retorna quantas semanas foram preenchidas.
     """
-    cadastro = listar_presidentes_cadastro()
+    cadastro = listar_presidentes_cadastro(escala="normais")
     if not cadastro:
         return 0
 
@@ -6251,19 +6251,17 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
     misturam — presidir a Celebração deste ano não faz ninguém perder a vez na
     visita do superintendente, que é o que uma fila só faria.
 
-    Só entram anciãos, e só as datas cujo tipo pede presidente local (a
-    Assembleia não tem reunião no salão para presidir). Cada fila é medida
-    contra as datas daquele tipo em TODOS os anos, não só as do mês: são uma
-    ou duas por ano, e olhar um mês de cada vez daria sempre o primeiro do
-    cadastro.
+    Entram só os marcados como presidentes de datas especiais — escala à parte
+    da semanal, que o usuário define no cadastro —, e só as datas cujo tipo
+    pede presidente local (a Assembleia não tem reunião no salão para
+    presidir). Cada fila é medida contra as datas daquele tipo em TODOS os
+    anos, não só as do mês: são uma ou duas por ano, e olhar um mês de cada
+    vez daria sempre o primeiro do cadastro.
 
     Retorna quantas datas foram preenchidas.
     """
-    anciaos = [
-        item["id"] for item in listar_presidentes_cadastro()
-        if item["categoria"] == "Ancião"
-    ]
-    if not anciaos:
+    elegiveis = [item["id"] for item in listar_presidentes_cadastro(escala="especiais")]
+    if not elegiveis:
         return 0
 
     sem_presidente = tipos_evento_sem_presidente()
@@ -6295,7 +6293,7 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
         # Todas do mesmo mês e ano: DD/MM/AAAA já ordena por dia como texto
         # (é o mesmo critério que a lista da tela usa).
         escolhas = escolher_rodizio_datas_especiais(
-            anciaos, sorted(datas), historico_por_tipo.get(tipo, {}), historico_geral
+            elegiveis, sorted(datas), historico_por_tipo.get(tipo, {}), historico_geral
         )
         for data_str, presidente_id in escolhas:
             definir_presidente_data_especial(especiais[data_str]["id"], presidente_id)
@@ -6512,7 +6510,7 @@ def abrir_dialog_data_especial(
                     key=str(item["id"]),
                     text=f"{item['nome']} ({item['categoria']})",
                 )
-                for item in listar_presidentes_cadastro()
+                for item in listar_presidentes_cadastro(escala="especiais")
             ],
         ],
         value=str(registro["presidente_id"]) if editando and registro.get("presidente_id") else "",
@@ -7528,7 +7526,9 @@ def abrir_dialog_oradores_mes(
     def preencher_presidentes():
         datas = _semanas_reuniao_mes(ano, mes)
         presidentes = carregar_presidentes_por_ano(ano)
-        cadastro = listar_presidentes_cadastro()
+        # Quem está no cadastro só para as datas especiais não é oferecido
+        # aqui: é o ponto de ter duas escalas.
+        cadastro = listar_presidentes_cadastro(escala="normais")
         # Assembleia, congresso, visita…: a semana existe, mas não é a reunião
         # normal, então não cobra presidente aqui (quem cuida é a aba Especiais).
         especiais_mes = listar_datas_especiais_por_ano(ano)
@@ -10609,6 +10609,50 @@ def abrir_dialog_presidente(
             ft.dropdown.Option("Servo Ministerial"),
         ],
     )
+    # Duas escalas independentes: há quem entre no cadastro só para presidir a
+    # Celebração e a visita do superintendente, sem pegar fim de semana comum.
+    # Novo presidente nasce na escala semanal, que é o caso comum.
+    campo_normais = ft.Checkbox(
+        label="Preside a reunião de fim de semana",
+        value=item.get("preside_normais", True) if editando else True,
+        tooltip="Entra no rodízio semanal da Programação.",
+    )
+    campo_especiais = ft.Checkbox(
+        label="Preside datas especiais",
+        # Cadastro novo segue o privilégio, que é a prática da congregação e o
+        # mesmo critério da migração: ancião entra, servo não. Marcar ou
+        # desmarcar continua sendo do usuário.
+        value=(item.get("preside_especiais", False) if editando
+               else (item.get("categoria") or "Ancião") == "Ancião"),
+        tooltip="Entra no rodízio da Celebração, da visita do superintendente "
+                "e dos outros eventos — que é uma fila por tipo, à parte da semanal.",
+    )
+
+    def acompanhar_privilegio(e=None):
+        # Só enquanto cadastra: em edição, a escolha já feita manda.
+        if not editando:
+            campo_especiais.value = campo_categoria.value == "Ancião"
+        conferir_escalas()
+
+    campo_categoria.on_select = acompanhar_privilegio
+    aviso_escala = ft.Text(
+        "", size=fonte(12), color=COR_AVISO, visible=False,
+    )
+
+    def conferir_escalas(_=None):
+        # Nenhuma das duas é permitido (fica no cadastro para o histórico),
+        # mas é o tipo de coisa que se faz sem querer ao desmarcar.
+        nenhuma = not campo_normais.value and not campo_especiais.value
+        aviso_escala.value = (
+            "Sem nenhuma das duas ele fica no cadastro, mas fora dos rodízios."
+            if nenhuma else ""
+        )
+        aviso_escala.visible = nenhuma
+        page.update()
+
+    campo_normais.on_change = conferir_escalas
+    campo_especiais.on_change = conferir_escalas
+
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
     botao_contato = _botao_buscar_contato(page, campo_telefone, campo_nome, vinculo)
     icone_contato = ft.IconButton(
@@ -10636,6 +10680,8 @@ def abrir_dialog_presidente(
                 cadastro_id=item.get("id"),
                 telefone=(campo_telefone.value or "").strip(),
                 contato_id=vinculo["contato_id"],
+                preside_normais=bool(campo_normais.value),
+                preside_especiais=bool(campo_especiais.value),
             )
         except Exception:  # noqa: BLE001 — o nome é único no banco
             texto_erro.value = "Já existe um presidente com esse nome."
@@ -10666,6 +10712,12 @@ def abrir_dialog_presidente(
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         campo_categoria,
+                        ft.Container(height=2),
+                        ft.Text("Escalas", size=fonte(12), weight=ft.FontWeight.W_600,
+                                color=TEXTO_SECUNDARIO),
+                        campo_normais,
+                        campo_especiais,
+                        aviso_escala,
                         texto_erro,
                     ],
                     spacing=12,
@@ -10711,18 +10763,32 @@ def _linha_presidente(
         width=20,
         alignment=ft.Alignment.CENTER,
     )
-    chip = ft.Container(
-        content=ft.Text(
-            "Ancião" if eh_anciao else "Servo",
-            size=fonte(11),
-            weight=ft.FontWeight.W_600,
-            color=cor_privilegio,
-            no_wrap=True,
-        ),
-        bgcolor=ft.Colors.with_opacity(0.13, cor_privilegio),
-        border_radius=9,
-        padding=ft.Padding.symmetric(horizontal=9, vertical=3),
-    )
+    def _selo(texto: str, cor: str, dica: str = "") -> ft.Control:
+        return ft.Container(
+            content=ft.Text(texto, size=fonte(11), weight=ft.FontWeight.W_600,
+                            color=cor, no_wrap=True),
+            bgcolor=ft.Colors.with_opacity(0.13, cor),
+            border_radius=9,
+            padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+            tooltip=dica or None,
+        )
+
+    chip = _selo("Ancião" if eh_anciao else "Servo", cor_privilegio)
+    # De relance: quem é só das datas especiais e quem ficou fora dos dois
+    # rodízios (dá para acontecer sem querer ao desmarcar as duas).
+    normais = item.get("preside_normais", True)
+    especiais = item.get("preside_especiais", False)
+    if especiais and not normais:
+        selo_escala = _selo("só especiais", COR_DESTAQUE_SUAVE,
+                            "Preside apenas Celebração, visita do superintendente e afins")
+    elif especiais:
+        selo_escala = _selo("+ especiais", COR_SUCESSO,
+                            "Preside o fim de semana e também as datas especiais")
+    elif not normais:
+        selo_escala = _selo("fora do rodízio", COR_AVISO,
+                            "Não entra em nenhum dos dois rodízios")
+    else:
+        selo_escala = None
 
     def _seta(icone: str, dica: str, delta: int, desabilitada: bool) -> ft.Control:
         return ft.IconButton(
@@ -10819,6 +10885,7 @@ def _linha_presidente(
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         chip,
+                        *([selo_escala] if selo_escala else []),
                         *([botao_conversar] if botao_conversar else []),
                         subir,
                         descer,
@@ -10858,6 +10925,7 @@ def _linha_presidente(
                     expand=True,
                 ),
                 chip,
+                *([selo_escala] if selo_escala else []),
                 *([botao_conversar] if botao_conversar else []),
                 botao_editar,
                 botao_excluir,
@@ -10965,9 +11033,10 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         abrir_url(page, gerar_link_whatsapp(telefone, ""))
 
     anciaos = sum(1 for item in cadastro if item["categoria"] == "Ancião")
+    de_especiais = sum(1 for item in cadastro if item.get("preside_especiais"))
     resumo = (
         f"{len(cadastro)} cadastrados · {anciaos} anciãos e "
-        f"{len(cadastro) - anciaos} servos"
+        f"{len(cadastro) - anciaos} servos · {de_especiais} em datas especiais"
         if cadastro
         else "Ninguém cadastrado ainda"
     )
@@ -10987,7 +11056,8 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             ft.Text(resumo, size=fonte(13), weight=ft.FontWeight.W_600,
                     color=TEXTO_PRIMARIO),
             ft.Text(
-                "A ordem desta lista define o rodízio automático.",
+                "A ordem desta lista define os rodízios. Cada um pode presidir "
+                "o fim de semana, as datas especiais, ou as duas coisas.",
                 size=fonte(11),
                 color=TEXTO_SECUNDARIO,
             ),

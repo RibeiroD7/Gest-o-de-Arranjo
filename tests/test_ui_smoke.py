@@ -937,3 +937,85 @@ def test_celebracao_pode_cair_em_dia_de_semana():
     assert registro["tipo"] == "Celebração"
     # E ela pede presidente, ao contrário da assembleia.
     assert "02/04/2026" not in main.datas_sem_reuniao(2026)
+
+
+def test_duas_escalas_de_presidente():
+    """Fim de semana e datas especiais são listas separadas.
+
+    Dá para estar só numa, nas duas, ou em nenhuma — quem só preside a
+    Celebração não deve aparecer no rodízio de todo sábado.
+    """
+    import database
+
+    _zerar_especiais()
+    so_semanal = database.salvar_presidente_cadastro(
+        "Só Semanal", "Servo Ministerial", preside_normais=True, preside_especiais=False)
+    so_especial = database.salvar_presidente_cadastro(
+        "Só Especial", "Ancião", preside_normais=False, preside_especiais=True)
+    ambos = database.salvar_presidente_cadastro(
+        "Os Dois", "Ancião", preside_normais=True, preside_especiais=True)
+    nenhum = database.salvar_presidente_cadastro(
+        "Nenhum", "Ancião", preside_normais=False, preside_especiais=False)
+
+    normais = {p["id"] for p in database.listar_presidentes_cadastro(escala="normais")}
+    especiais = {p["id"] for p in database.listar_presidentes_cadastro(escala="especiais")}
+    todos = {p["id"] for p in database.listar_presidentes_cadastro()}
+
+    assert normais == {so_semanal, ambos}
+    assert especiais == {so_especial, ambos}
+    # Sem escala nenhuma, continua no cadastro — só fora dos rodízios.
+    assert nenhum in todos and nenhum not in normais and nenhum not in especiais
+
+    # E o rodízio das especiais usa a marcação, não o privilégio.
+    database.salvar_data_especial("13/02/2027", "Discurso Especial", "", "", None)
+    assert main.preencher_presidentes_especiais_rodizio(2027, 2) == 1
+    escolhido = database.listar_datas_especiais_por_ano(2027)["13/02/2027"]["presidente_id"]
+    assert escolhido in (so_especial, ambos)
+
+
+def test_ancao_fora_da_escala_semanal_nao_pega_sabado():
+    """O caso que motivou tudo: presidente só de datas especiais."""
+    import database
+
+    _zerar_especiais()
+    semanal = database.salvar_presidente_cadastro(
+        "Do Sábado", "Ancião", preside_normais=True, preside_especiais=False)
+    database.salvar_presidente_cadastro(
+        "Só Celebração", "Ancião", preside_normais=False, preside_especiais=True)
+
+    main.salvar_configuracao({
+        "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+        "coordenador_discursos": "", "telefone_coordenador": "",
+        "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+    })
+    assert main.preencher_presidentes_rodizio(2027, 3) > 0
+    designados = {
+        pid for pid in database.carregar_todas_designacoes_presidente().values() if pid
+    }
+    assert designados == {semanal}, "só quem está na escala semanal pega sábado"
+
+
+def test_migracao_preserva_o_comportamento_antigo():
+    """Antes, a escala especial era 'os anciãos do cadastro'. Isso é congelado."""
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM presidentes")
+        conn.execute("DELETE FROM presidentes_cadastro")
+        # Simula o banco antigo: linhas sem as colunas novas.
+        conn.execute("INSERT INTO presidentes_cadastro (nome, categoria) VALUES (?, ?)",
+                     ("Velho Ancião", "Ancião"))
+        conn.execute("INSERT INTO presidentes_cadastro (nome, categoria) VALUES (?, ?)",
+                     ("Velho Servo", "Servo Ministerial"))
+        conn.execute("UPDATE presidentes_cadastro SET preside_especiais = 1 "
+                     "WHERE categoria = 'Ancião'")
+        conn.commit()
+    finally:
+        conn.close()
+    por_nome = {p["nome"]: p for p in database.listar_presidentes_cadastro()}
+    assert por_nome["Velho Ancião"]["preside_normais"] is True
+    assert por_nome["Velho Ancião"]["preside_especiais"] is True
+    assert por_nome["Velho Servo"]["preside_normais"] is True
+    assert por_nome["Velho Servo"]["preside_especiais"] is False
