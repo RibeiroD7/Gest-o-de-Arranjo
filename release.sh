@@ -31,6 +31,9 @@ echo ">> Versão: $VERSAO   (tag $TAG)"
 #    dentro de cada app (PC e mobile).
 sed -i -E "s/^version = \".*\"/version = \"$VERSAO\"/" "$PYPROJECT"
 sed -i -E "s/^VERSAO_APP = \".*\"/VERSAO_APP = \"$VERSAO\"/" src/main.py
+# O CI sobrescreve build_version pela tag, mas deixá-lo parado no arquivo faz
+# quem lê o repositório achar que a versão é outra.
+sed -i -E "s/^build_version = \".*\"/build_version = \"$VERSAO\"/" "$PYPROJECT"
 
 # 3) Não sobrescreve uma tag/versão já publicada ---------------------------
 if git rev-parse "$TAG" >/dev/null 2>&1; then
