@@ -356,7 +356,11 @@ def secoes_presidentes() -> list[dict]:
 
 
 def secoes_resumo_ano(
-    resumo: dict, meses: list[dict], frequencia: list[dict], presidencias: list[dict]
+    resumo: dict,
+    meses: list[dict],
+    frequencia: list[dict],
+    presidencias: list[dict],
+    especiais: list[dict] | None = None,
 ) -> list[dict]:
     """O retrato do ano: o que só aparece somando os meses.
 
@@ -426,5 +430,21 @@ def secoes_resumo_ano(
                 for p in presidencias
             ],
             "Nenhum presidente cadastrado.",
+        ),
+        _secao(
+            "DATAS ESPECIAIS",
+            "Assembleias, congressos, discursos especiais e visitas — e quem presidiu cada um.",
+            ["Data", "Evento", "Presidente"],
+            [90, 240, 193],
+            [
+                [
+                    e.get("data", ""),
+                    e.get("tipo", ""),
+                    e.get("presidente_nome")
+                    or ("a definir" if e.get("pede_presidente", True) else "sem reunião local"),
+                ]
+                for e in (especiais or [])
+            ],
+            "Nenhuma data especial neste ano.",
         ),
     ]

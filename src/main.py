@@ -107,7 +107,7 @@ from database import (
     salvar_presidente_cadastro,
     salvar_tema,
     sincronizar_uso_temas,
-    tipos_evento_com_presidente,
+    tipos_evento_sem_presidente,
     trocar_datas_designacoes,
     ultima_data_discurso_por_orador,
 )
@@ -3355,6 +3355,28 @@ def _rotulo_ultima_saida(ultima_saida: dict[int, str], orador_id: int) -> str:
     return f"último envio: {data}" if data else "nunca foi enviado"
 
 
+def _menu_acoes_mobile(acoes: list[tuple[str, str, Callable]]) -> ft.Control:
+    """Menu "⋮" com as ações da linha — só no celular.
+
+    Cada IconButton come uns 48dp de largura no telefone, e três deles não
+    deixavam sobrar nada para o nome: "Danilo Reis" saía quebrado em duas
+    linhas, "Joci / ar B…". Editar e excluir saem da linha e viram menu — o
+    nome fica com a largura, e excluir por engano num toque fica mais difícil.
+
+    ``acoes`` é uma lista de ``(rótulo, ícone, ao_clicar)``.
+    """
+    return ft.PopupMenuButton(
+        icon=ft.Icons.MORE_VERT,
+        icon_size=fonte(18),
+        icon_color=TEXTO_SECUNDARIO,
+        tooltip="Mais ações",
+        items=[
+            ft.PopupMenuItem(content=rotulo, icon=icone, on_click=ao_clicar)
+            for rotulo, icone, ao_clicar in acoes
+        ],
+    )
+
+
 def _criar_lista_oradores(
     df: Tabela,
     estado_selecao: dict,
@@ -3515,12 +3537,26 @@ def _criar_lista_oradores(
                                 weight=ft.FontWeight.W_600,
                                 color=TEXTO_PRIMARIO,
                                 expand=True,
-                                max_lines=2,
+                                # Uma linha só: com o nome em duas, o cartão
+                                # crescia e cabiam três oradores na tela.
+                                max_lines=1,
                                 overflow=ft.TextOverflow.ELLIPSIS,
                             ),
                             *([botao_conversar] if botao_conversar else []),
-                            botao_editar,
-                            botao_excluir,
+                            _menu_acoes_mobile(
+                                [
+                                    (
+                                        "Editar",
+                                        ft.Icons.EDIT_OUTLINED,
+                                        lambda e, rid=orador_id: on_editar(rid),
+                                    ),
+                                    (
+                                        "Excluir",
+                                        ft.Icons.DELETE_OUTLINE,
+                                        lambda e, rid=orador_id: on_excluir(rid),
+                                    ),
+                                ]
+                            ),
                         ],
                         spacing=0,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -6192,7 +6228,7 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
     if not anciaos:
         return 0
 
-    com_presidente = tipos_evento_com_presidente()
+    sem_presidente = tipos_evento_sem_presidente()
     especiais = listar_datas_especiais_por_ano(ano)
     historico = historico_presidentes_datas_especiais()
     datas_alvo = sorted(
@@ -6202,7 +6238,7 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
             if len(registro["data"]) == 10
             and int(registro["data"][3:5]) == mes
             and not registro.get("presidente_id")
-            and registro["tipo"] in com_presidente
+            and registro["tipo"] not in sem_presidente
         ),
         # Todas do mesmo mês e ano: DD/MM/AAAA já ordena por dia como texto
         # (é o mesmo critério que a lista da tela usa).
@@ -8664,6 +8700,103 @@ def _lista_meses_relatorio(meses: list[dict], largura: int) -> list[ft.Control]:
     ]
 
 
+def _lista_datas_especiais_relatorio(
+    especiais: list[dict], largura: int
+) -> list[ft.Control]:
+    """Cada data especial do ano com o tipo e quem presidiu.
+
+    O "—" tem dois significados diferentes, e por isso são dois textos: numa
+    assembleia ninguém preside (a congregação está fora), enquanto um discurso
+    especial sem nome é presidência ainda por decidir.
+    """
+    if not especiais:
+        return [
+            ft.Text(
+                "Nenhuma data especial neste ano.",
+                size=fonte(13), color=TEXTO_SECUNDARIO, italic=True,
+            )
+        ]
+
+    mobile = eh_mobile()
+    largura_data = 74 if mobile else 90
+
+    def linha(item: dict, ultima: bool) -> ft.Control:
+        presidente = item.get("presidente_nome") or ""
+        pede_presidente = item.get("pede_presidente", True)
+        if presidente:
+            texto_pres, cor_pres, italico = presidente, TEXTO_PRIMARIO, False
+        elif pede_presidente:
+            texto_pres, cor_pres, italico = "a definir", COR_AVISO, True
+        else:
+            texto_pres, cor_pres, italico = "sem reunião local", TEXTO_SECUNDARIO, True
+
+        tipo = ft.Text(
+            item["tipo"], size=fonte(12), color=TEXTO_SECUNDARIO,
+            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        nome = ft.Text(
+            texto_pres, size=fonte(13), weight=ft.FontWeight.W_600,
+            color=cor_pres, italic=italico,
+            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        data = ft.Text(
+            item["data"][:5] if mobile else item["data"],
+            size=fonte(13), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+            width=largura_data, no_wrap=True,
+        )
+        # No celular tipo e presidente empilham: lado a lado, com a data na
+        # frente, os dois ficavam cortados no meio.
+        corpo = (
+            ft.Column([nome, tipo], spacing=2, tight=True, expand=True)
+            if mobile
+            else ft.Row(
+                [
+                    ft.Container(content=tipo, width=max(120, largura - largura_data - 190)),
+                    ft.Container(content=nome, expand=True),
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        )
+        return ft.Container(
+            content=ft.Row(
+                [data, corpo],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=9),
+            border=None if ultima else ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+        )
+
+    return [
+        ft.Container(
+            content=ft.Column(
+                [
+                    linha(item, indice == len(especiais) - 1)
+                    for indice, item in enumerate(especiais)
+                ],
+                spacing=0,
+                tight=True,
+            ),
+            border=ft.Border.all(1, BORDA_SUAVE),
+            border_radius=10,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+    ]
+
+
+def datas_especiais_com_presidente(ano: int) -> list[dict]:
+    """Datas especiais do ano em ordem, já sabendo quais pedem presidente."""
+    sem_presidente = tipos_evento_sem_presidente()
+    registros = sorted(
+        listar_datas_especiais_por_ano(ano).values(),
+        key=lambda r: (r["data"][6:10], r["data"][3:5], r["data"][0:2]),
+    )
+    for registro in registros:
+        registro["pede_presidente"] = registro["tipo"] not in sem_presidente
+    return registros
+
+
 def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     """Painel com o retrato do arranjo: o que só aparece somando o ano inteiro.
 
@@ -8709,6 +8842,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 int(minha_cong) if minha_cong else None
             ),
             "presidencias": relatorio_presidencias(),
+            "especiais_lista": datas_especiais_com_presidente(ano),
         }
 
     area = ft.Column(spacing=16, tight=True)
@@ -8723,6 +8857,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             return secoes_resumo_ano(
                 dados["resumo"], dados["meses"],
                 dados["frequencia"], dados["presidencias"],
+                dados["especiais_lista"],
             )
 
         exportar_relatorio_pdf(
@@ -8820,6 +8955,12 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                     "Nenhum presidente cadastrado.",
                 ),
             ),
+            _quadro_relatorio(
+                f"Datas especiais em {ano}",
+                "Assembleias, congressos, discursos especiais e visitas — e "
+                "quem fez a presidência de cada um.",
+                _lista_datas_especiais_relatorio(dados["especiais_lista"], largura),
+            ),
         ]
 
     def mudar_ano(e=None):
@@ -8869,6 +9010,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             secoes += secoes_resumo_ano(
                 dados["resumo"], dados["meses"],
                 dados["frequencia"], dados["presidencias"],
+                dados["especiais_lista"],
             )
             secoes += secoes_programacao(ano)
             secoes.append(faixa("Oradores"))
@@ -10558,8 +10700,20 @@ def _linha_presidente(
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
-                        botao_editar,
-                        botao_excluir,
+                        _menu_acoes_mobile(
+                            [
+                                (
+                                    "Editar",
+                                    ft.Icons.EDIT_OUTLINED,
+                                    lambda e, i=dict(item): on_editar(i),
+                                ),
+                                (
+                                    "Excluir",
+                                    ft.Icons.DELETE_OUTLINE,
+                                    lambda e, i=dict(item): on_excluir(i),
+                                ),
+                            ]
+                        ),
                     ],
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,

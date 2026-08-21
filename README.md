@@ -110,7 +110,8 @@ uma planilha (veja abaixo).
   `DISCURSOS PÚBLICOS - SETEMBRO-OUTUBRO.pdf`, pronto para ir para a pasta do
   ano sem renomear (o ano fica no título do documento).
 - **Relatórios** — tela com o retrato do arranjo, o que só aparece somando o
-  ano inteiro: números do ano (semanas com e sem orador, com presidente,
+  ano inteiro, incluindo a lista das **datas especiais** do ano com quem fez
+  a presidência de cada uma (e o que ainda está por decidir): números do ano (semanas com e sem orador, com presidente,
   recebidos, enviados, aguardando confirmação), o **mês a mês** da cobertura
   (onde estão os buracos), a frequência dos oradores da sua congregação e
   **quantas vezes cada um presidiu**. Dá para trocar o ano e exportar em PDF.

@@ -538,6 +538,20 @@ class TestTipoEventoTemPresidente:
         database.adicionar_tipo_evento("Escola de Pioneiros")
         assert self._tipos()["Escola de Pioneiros"] is True
 
+    def test_tipo_apagado_do_cadastro_ainda_pede_presidente(self):
+        """Excluir o tipo não pode fazer a data sumir do rodízio em silêncio."""
+        database.adicionar_tipo_evento("Escola de Pioneiros")
+        alvo = next(
+            item for item in database.listar_tipos_evento()
+            if item["nome"] == "Escola de Pioneiros"
+        )
+        database.excluir_tipo_evento(alvo["id"])
+        # Some do cadastro, mas a data já criada continua com esse texto.
+        assert "Escola de Pioneiros" not in {
+            item["nome"] for item in database.listar_tipos_evento()
+        }
+        assert "Escola de Pioneiros" not in database.tipos_evento_sem_presidente()
+
     def test_a_escolha_do_usuario_e_gravada(self):
         alvo = next(
             item for item in database.listar_tipos_evento()
@@ -545,9 +559,9 @@ class TestTipoEventoTemPresidente:
         )
         database.definir_tipo_evento_tem_presidente(alvo["id"], True)
         assert self._tipos()["Assembleia de Circuito"] is True
-        assert "Assembleia de Circuito" in database.tipos_evento_com_presidente()
+        assert "Assembleia de Circuito" not in database.tipos_evento_sem_presidente()
         database.definir_tipo_evento_tem_presidente(alvo["id"], False)
-        assert "Assembleia de Circuito" not in database.tipos_evento_com_presidente()
+        assert "Assembleia de Circuito" in database.tipos_evento_sem_presidente()
 
     def test_backup_antigo_nao_religa_a_assembleia(self):
         """Backup anterior à coluna cairia no DEFAULT 1 e estragaria o rodízio."""

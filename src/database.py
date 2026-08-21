@@ -2119,15 +2119,22 @@ def listar_tipos_evento() -> list[dict]:
         conn.close()
 
 
-def tipos_evento_com_presidente() -> set[str]:
-    """Nomes dos tipos que pedem presidente local (para o rodízio)."""
+def tipos_evento_sem_presidente() -> set[str]:
+    """Nomes dos tipos marcados como SEM presidente local.
+
+    A pergunta é pelo avesso de propósito. Excluir um tipo do cadastro não
+    apaga as datas que já o usavam ("Discurso Especial" some da lista, a data
+    de setembro continua lá), e perguntando "quais têm presidente?" essa data
+    cairia fora do rodízio sem ninguém notar. Perguntando quais NÃO têm, tipo
+    desconhecido pede presidente — que é o caso comum e o erro barato.
+    """
     conn = get_connection()
     try:
         return {
             linha[0]
             for linha in conn.execute(
                 "SELECT nome FROM tipos_evento_especial "
-                "WHERE COALESCE(tem_presidente, 1) = 1"
+                "WHERE COALESCE(tem_presidente, 1) = 0"
             )
         }
     finally:

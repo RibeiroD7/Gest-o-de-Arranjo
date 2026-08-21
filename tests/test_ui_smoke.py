@@ -818,3 +818,43 @@ def test_presidentes_sao_linhas_num_quadro_so(mobile):
         assert linhas[0].border.bottom.width == 1
     finally:
         armazenamento.definir_layout_mobile(False)
+
+
+def test_lista_de_datas_especiais_do_relatorio():
+    """A lista do relatório: em ordem, e distinguindo os dois tipos de vazio.
+
+    "a definir" (um discurso especial ainda sem presidente) e "sem reunião
+    local" (assembleia) são coisas diferentes; um traço só para os dois
+    esconderia justamente o que falta decidir.
+    """
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM datas_especiais")
+        conn.execute("DELETE FROM presidentes_cadastro")
+        conn.commit()
+    finally:
+        conn.close()
+    pid = database.salvar_presidente_cadastro("Ancião Teste", "Ancião")
+    # Fora de ordem de propósito: a função é que ordena.
+    database.salvar_data_especial("26/09/2027", "Discurso Especial", "", "", pid)
+    database.salvar_data_especial("24/01/2027", "Assembleia de Circuito", "", "", None)
+    database.salvar_data_especial("28/03/2027", "Discurso Especial", "", "", None)
+
+    itens = main.datas_especiais_com_presidente(2027)
+    assert [i["data"] for i in itens] == ["24/01/2027", "28/03/2027", "26/09/2027"]
+
+    por_data = {i["data"]: i for i in itens}
+    assert por_data["26/09/2027"]["presidente_nome"] == "Ancião Teste"
+    # Discurso especial sem presidente: falta decidir.
+    assert por_data["28/03/2027"]["pede_presidente"] is True
+    assert not por_data["28/03/2027"]["presidente_nome"]
+    # Assembleia: não é para ter presidente.
+    assert por_data["24/01/2027"]["pede_presidente"] is False
+
+    # E o bloco da tela monta com isso.
+    assert main._lista_datas_especiais_relatorio(itens, 520)[0] is not None
+    vazio = main._lista_datas_especiais_relatorio([], 520)[0]
+    assert "Nenhuma data especial" in vazio.value
