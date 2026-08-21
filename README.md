@@ -114,6 +114,11 @@ uma planilha (veja abaixo).
   gravado. Em **Minha congregação → Dados** há a linha do tempo dessas
   mudanças. Ela é montada sozinha na primeira abertura, deduzida das datas já
   gravadas — um mês cheio de domingos era domingo —, e pode ser corrigida ali.
+- **Presidente fora do cadastro** — na semana comum já dava para digitar o
+  nome de quem presidiu sem estar na escala (o irmão que saiu). A **data
+  especial** passou a aceitar o mesmo: sem isso, a Celebração de anos
+  passados aparecia sem presidente no relatório. O nome aparece na
+  programação e no quadro, e fica fora dos rodízios.
 - **Datas fora do fim de semana** — a **Celebração** é sempre em 14 de nisã e
   cai em qualquer dia da semana (em 2026, numa quinta). O cadastro da data
   especial tem o campo *Outra data* para esses casos: ela costuma não aparecer

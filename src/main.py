@@ -6287,6 +6287,9 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
             len(data_str) == 10
             and int(data_str[3:5]) == mes
             and not registro.get("presidente_id")
+            # Nome digitado à mão também é presidente definido: o rodízio não
+            # pode passar por cima de quem já está registrado ali.
+            and not registro.get("presidente_avulso")
             and registro["tipo"] not in sem_presidente
         ):
             por_tipo.setdefault(registro["tipo"], []).append(data_str)
@@ -6512,6 +6515,11 @@ def abrir_dialog_data_especial(
 
     campo_orador.on_change = ao_mudar_orador
 
+    # Quem presidiu sem estar no cadastro (saiu da congregação, ou nunca
+    # entrou na escala) precisa caber aqui: era o furo que fazia a Celebração
+    # de anos passados aparecer sem presidente no relatório.
+    CHAVE_AVULSO = "__avulso__"
+    avulso_atual = (registro.get("presidente_avulso") or "") if editando else ""
     campo_presidente = ft.Dropdown(
         label="Presidente (opcional)",
         options=[
@@ -6523,10 +6531,29 @@ def abrir_dialog_data_especial(
                 )
                 for item in listar_presidentes_cadastro(escala="especiais")
             ],
+            ft.dropdown.Option(key=CHAVE_AVULSO, text="Outro (fora do cadastro)…"),
         ],
-        value=str(registro["presidente_id"]) if editando and registro.get("presidente_id") else "",
+        value=(
+            str(registro["presidente_id"]) if editando and registro.get("presidente_id")
+            else (CHAVE_AVULSO if avulso_atual else "")
+        ),
         expand=True,
     )
+    campo_presidente_avulso = ft.TextField(
+        label="Nome de quem presidiu",
+        hint_text="Fica fora do rodízio",
+        value=avulso_atual,
+        expand=True,
+        visible=bool(avulso_atual),
+    )
+
+    def alternar_avulso(e=None):
+        campo_presidente_avulso.visible = campo_presidente.value == CHAVE_AVULSO
+        if not campo_presidente_avulso.visible:
+            campo_presidente_avulso.value = ""
+        page.update()
+
+    campo_presidente.on_select = alternar_avulso
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
     def fechar(_=None):
@@ -6563,9 +6590,17 @@ def abrir_dialog_data_especial(
                 campo_tipo.value or (campo_tipo.options[0].key if campo_tipo.options else "Evento"),
                 (campo_orador.value or "").strip(),
                 (campo_tema.value or "").strip(),
-                int(campo_presidente.value) if campo_presidente.value else None,
+                (
+                    int(campo_presidente.value)
+                    if campo_presidente.value and campo_presidente.value != CHAVE_AVULSO
+                    else None
+                ),
                 registro_id=registro["id"] if editando else None,
                 congregacao_id=int(campo_congregacao.value) if campo_congregacao.value else None,
+                presidente_avulso=(
+                    (campo_presidente_avulso.value or "").strip()
+                    if campo_presidente.value == CHAVE_AVULSO else ""
+                ),
             )
         except Exception:
             texto_erro.value = "Não foi possível salvar esta data especial."
@@ -6623,6 +6658,7 @@ def abrir_dialog_data_especial(
                         campo_tema,
                         campo_congregacao,
                         campo_presidente,
+                        campo_presidente_avulso,
                         ft.Text(
                             "Sem orador nem tema, o tipo do evento aparece no lugar do "
                             "orador no Quadro de Anúncios. Com discurso, mostra o orador, "

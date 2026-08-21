@@ -1115,3 +1115,88 @@ class TestDiaDeReuniaoMuda:
         finally:
             conn.close()
         assert [p["inicio"] for p in database.listar_reuniao_historico()] == ["2020-05"]
+
+
+class TestPresidenteAvulsoNaDataEspecial:
+    """Quem presidiu sem estar no cadastro precisa caber na data especial."""
+
+    def _zerar(self):
+        import database
+
+        conn = database.get_connection()
+        try:
+            database.create_tables(conn)
+            conn.execute("DELETE FROM datas_especiais")
+            conn.execute("DELETE FROM presidentes")
+            conn.execute("DELETE FROM presidentes_cadastro")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_grava_e_aparece_como_presidente(self):
+        import database
+
+        self._zerar()
+        database.salvar_data_especial(
+            "27/03/2027", "Celebração", "Um Orador", "", None,
+            presidente_avulso="Irmão Que Saiu")
+        reg = database.listar_datas_especiais_por_ano(2027)["27/03/2027"]
+        assert reg["presidente_nome"] == "Irmão Que Saiu"
+        assert reg["presidente_avulso"] == "Irmão Que Saiu"
+        assert reg["presidente_id"] is None
+
+    def test_cadastro_tem_preferencia_sobre_o_avulso(self):
+        import database
+
+        self._zerar()
+        pid = database.salvar_presidente_cadastro("Do Cadastro", "Ancião")
+        database.salvar_data_especial(
+            "27/03/2027", "Celebração", "", "", pid, presidente_avulso="Ignorado")
+        reg = database.listar_datas_especiais_por_ano(2027)["27/03/2027"]
+        assert reg["presidente_nome"] == "Do Cadastro"
+        assert reg["presidente_avulso"] == ""
+
+    def test_avulso_fica_fora_do_rodizio_e_nao_e_sobrescrito(self):
+        """Ele ocupa a data sem entrar na fila: ninguém 'deve' por aquela vez."""
+        import database
+
+        self._zerar()
+        pid = database.salvar_presidente_cadastro("Ancião A", "Ancião")
+        database.salvar_data_especial(
+            "13/02/2027", "Discurso Especial", "", "", None,
+            presidente_avulso="Irmão Que Saiu")
+        database.salvar_data_especial("14/08/2027", "Discurso Especial", "", "", None)
+
+        # O rodízio pula a data já preenchida à mão e preenche só a outra.
+        assert main.preencher_presidentes_especiais_rodizio(2027, 2) == 0
+        assert main.preencher_presidentes_especiais_rodizio(2027, 8) == 1
+        por_data = {e["data"]: e for e in main.datas_especiais_com_presidente(2027)}
+        assert por_data["13/02/2027"]["presidente_nome"] == "Irmão Que Saiu"
+        assert por_data["14/08/2027"]["presidente_id"] == pid
+
+    def test_migracao_recupera_o_nome_da_semana_comum(self):
+        """O nome já estava gravado na semana; a data especial passa a mostrá-lo."""
+        import database
+
+        self._zerar()
+        database.salvar_data_especial("27/03/2027", "Celebração", "", "", None)
+        database.salvar_presidente_avulso("27/03/2027", "Danilo Reis")
+        conn = database.get_connection()
+        try:
+            # Simula o banco anterior à coluna e roda a migração de novo.
+            conn.execute("UPDATE datas_especiais SET presidente_avulso = NULL")
+            conn.execute(
+                """
+                UPDATE datas_especiais SET presidente_avulso = (
+                    SELECT p.nome_avulso FROM presidentes p
+                    WHERE p.data = datas_especiais.data
+                      AND COALESCE(p.nome_avulso, '') <> ''
+                )
+                WHERE presidente_id IS NULL
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        reg = database.listar_datas_especiais_por_ano(2027)["27/03/2027"]
+        assert reg["presidente_nome"] == "Danilo Reis"

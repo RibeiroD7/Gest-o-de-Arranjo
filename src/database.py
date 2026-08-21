@@ -118,6 +118,38 @@ TIPOS_SEM_PRESIDENTE_LOCAL = {
 }
 
 
+def _recuperar_presidente_avulso_especiais(cursor) -> None:
+    """Traz para a data especial o nome que já estava na semana comum.
+
+    A data especial só aceitava presidente do cadastro, então quem presidiu a
+    Celebração ou o discurso especial ficava sem registro ali — mas o nome
+    costuma estar gravado na semana comum da mesma data. Traz de lá os dois
+    casos: quem está no cadastro (pelo id) e quem foi digitado à mão (pelo
+    nome). Só preenche o que está vazio, então rodar de novo não desfaz nada.
+    """
+    cursor.execute(
+        """
+        UPDATE datas_especiais SET presidente_id = (
+            SELECT p.presidente_id FROM presidentes p
+            WHERE p.data = datas_especiais.data AND p.presidente_id IS NOT NULL
+        )
+        WHERE presidente_id IS NULL
+          AND COALESCE(presidente_avulso, '') = ''
+        """
+    )
+    cursor.execute(
+        """
+        UPDATE datas_especiais SET presidente_avulso = (
+            SELECT p.nome_avulso FROM presidentes p
+            WHERE p.data = datas_especiais.data
+              AND COALESCE(p.nome_avulso, '') <> ''
+        )
+        WHERE presidente_id IS NULL
+          AND COALESCE(presidente_avulso, '') = ''
+        """
+    )
+
+
 def _aplicar_padrao_escala_especiais(cursor) -> None:
     """Marca os anciãos do cadastro como presidentes de datas especiais.
 
@@ -419,6 +451,10 @@ def create_tables(conn):
             orador TEXT,
             tema TEXT,
             presidente_id INTEGER,
+            -- Quem presidiu sem estar no cadastro (saiu da congregação, ou
+            -- nunca entrou na escala). Mesmo papel do nome_avulso da semana
+            -- comum: o nome aparece, mas fica fora dos rodízios.
+            presidente_avulso TEXT,
             FOREIGN KEY (presidente_id) REFERENCES presidentes_cadastro(id)
         )
     """)
@@ -498,6 +534,9 @@ def create_tables(conn):
     colunas_especiais = [linha[1] for linha in cursor.execute("PRAGMA table_info(datas_especiais)")]
     if "congregacao_id" not in colunas_especiais:
         cursor.execute("ALTER TABLE datas_especiais ADD COLUMN congregacao_id INTEGER")
+    if "presidente_avulso" not in colunas_especiais:
+        cursor.execute("ALTER TABLE datas_especiais ADD COLUMN presidente_avulso TEXT")
+    _recuperar_presidente_avulso_especiais(cursor)
 
     colunas_cadastro = [linha[1] for linha in cursor.execute("PRAGMA table_info(presidentes_cadastro)")]
     if "ordem" not in colunas_cadastro:
@@ -1929,7 +1968,8 @@ def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
                 linha[0]: linha[1]
                 for linha in conn.execute(
                     "SELECT data, presidente_id FROM datas_especiais "
-                    "WHERE presidente_id IS NOT NULL"
+                    "WHERE presidente_id IS NOT NULL "
+                    "   OR COALESCE(presidente_avulso, '') <> ''"
                 )
             }
         )
@@ -2076,9 +2116,11 @@ def listar_datas_especiais_por_ano(ano: int) -> dict[str, dict]:
                    COALESCE(e.orador, '') AS orador,
                    COALESCE(e.tema, '') AS tema,
                    e.presidente_id,
-                   COALESCE(c.nome, '') AS presidente_nome,
+                   -- Do cadastro, ou o nome digitado à mão.
+                   COALESCE(c.nome, e.presidente_avulso, '') AS presidente_nome,
                    e.congregacao_id,
-                   COALESCE(cong.nome, '') AS congregacao_nome
+                   COALESCE(cong.nome, '') AS congregacao_nome,
+                   COALESCE(e.presidente_avulso, '') AS presidente_avulso
             FROM datas_especiais e
             LEFT JOIN presidentes_cadastro c ON e.presidente_id = c.id
             LEFT JOIN congregacoes cong ON e.congregacao_id = cong.id
@@ -2097,9 +2139,27 @@ def listar_datas_especiais_por_ano(ano: int) -> dict[str, dict]:
                 "presidente_nome": linha[6],
                 "congregacao_id": linha[7],
                 "congregacao_nome": linha[8],
+                "presidente_avulso": linha[9],
             }
             for linha in linhas
         }
+    finally:
+        conn.close()
+
+
+def definir_presidente_avulso_data_especial(registro_id: int, nome: str) -> None:
+    """Grava quem presidiu uma data especial sem estar no cadastro."""
+    nome_limpo = (nome or "").strip()
+    if not nome_limpo:
+        raise ValueError("O nome do presidente avulso não pode ser vazio.")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE datas_especiais SET presidente_id = NULL, presidente_avulso = ? "
+            "WHERE id = ?",
+            (nome_limpo, registro_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -2114,7 +2174,8 @@ def definir_presidente_data_especial(registro_id: int, presidente_id: int | None
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE datas_especiais SET presidente_id = ? WHERE id = ?",
+            "UPDATE datas_especiais SET presidente_id = ?, presidente_avulso = NULL "
+            "WHERE id = ?",
             (presidente_id, registro_id),
         )
         conn.commit()
@@ -2130,8 +2191,16 @@ def salvar_data_especial(
     presidente_id: int | None,
     registro_id: int | None = None,
     congregacao_id: int | None = None,
+    presidente_avulso: str = "",
 ) -> None:
-    """Cria ou atualiza uma data especial (substitui se a data já existir)."""
+    """Cria ou atualiza uma data especial (substitui se a data já existir).
+
+    ``presidente_avulso`` é o nome de quem presidiu sem estar no cadastro; os
+    dois se excluem, e quem está no cadastro tem preferência.
+    """
+    avulso = (presidente_avulso or "").strip() or None
+    if presidente_id:
+        avulso = None
     conn = get_connection()
     try:
         if registro_id:
@@ -2139,26 +2208,29 @@ def salvar_data_especial(
                 """
                 UPDATE datas_especiais
                 SET data = ?, tipo = ?, orador = ?, tema = ?,
-                    presidente_id = ?, congregacao_id = ?
+                    presidente_id = ?, congregacao_id = ?, presidente_avulso = ?
                 WHERE id = ?
                 """,
                 (data, tipo, orador or None, tema or None, presidente_id,
-                 congregacao_id, registro_id),
+                 congregacao_id, avulso, registro_id),
             )
         else:
             conn.execute(
                 """
                 INSERT INTO datas_especiais
-                    (data, tipo, orador, tema, presidente_id, congregacao_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (data, tipo, orador, tema, presidente_id, congregacao_id,
+                     presidente_avulso)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(data) DO UPDATE SET
                     tipo = excluded.tipo,
                     orador = excluded.orador,
                     tema = excluded.tema,
                     presidente_id = excluded.presidente_id,
-                    congregacao_id = excluded.congregacao_id
+                    congregacao_id = excluded.congregacao_id,
+                    presidente_avulso = excluded.presidente_avulso
                 """,
-                (data, tipo, orador or None, tema or None, presidente_id, congregacao_id),
+                (data, tipo, orador or None, tema or None, presidente_id,
+                 congregacao_id, avulso),
             )
         conn.commit()
     finally:
@@ -3085,6 +3157,11 @@ def restaurar_backup(caminho: str | Path) -> tuple[bool, str]:
         # das datas que acabaram de entrar, senão os anos antigos voltariam a
         # ser montados no dia de hoje até a próxima abertura do app.
         _derivar_reuniao_historico(conn)
+        # Idem para o presidente avulso da data especial: o backup pode ser
+        # anterior à coluna, e o nome está na semana comum da mesma data.
+        cursor = conn.cursor()
+        _recuperar_presidente_avulso_especiais(cursor)
+        conn.commit()
     except Exception as exc:
         conn.rollback()
         return False, f"Erro ao restaurar: {exc}. O banco original não foi alterado."
