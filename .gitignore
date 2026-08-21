@@ -12,8 +12,10 @@ backups/
 .pytest_cache/
 .ruff_cache/
 
-# Dados pessoais (nomes/telefones) ficam fora do repositório
-data/gestao_arranjo.db
+# Dados da congregação ficam fora do repositório. O Temas.xlsx e o
+# temas_seed.json guardavam as datas em que cada discurso foi feito aqui.
+data/
+src/assets/temas_seed.json
 exports/
 gestao_arranjo.log*
 

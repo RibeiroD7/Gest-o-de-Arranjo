@@ -36,33 +36,6 @@ def garantir_pastas() -> None:
         pasta.mkdir(parents=True, exist_ok=True)
 
 
-def caminho_temas_embutido() -> Path | None:
-    """Procura o Temas.xlsx nos locais possíveis (gravável, assets, relativo)."""
-    candidatos = [
-        DATA_DIR / "Temas.xlsx",
-        ASSETS_DIR / "Temas.xlsx",
-        Path("assets") / "Temas.xlsx",
-        Path("data") / "Temas.xlsx",
-    ]
-    return next((p for p in candidatos if p.exists()), None)
-
-
-def caminho_temas_seed_json() -> Path | None:
-    """Procura o temas_seed.json embutido (carga inicial dos temas sem Excel)."""
-    candidatos = [
-        ASSETS_DIR / "temas_seed.json",
-        Path("assets") / "temas_seed.json",
-    ]
-    return next((p for p in candidatos if p.exists()), None)
-
-
-# Layout da interface: definido pelo main a partir de `page.platform`.
-# ATENÇÃO: não dá para deduzir do FLET_APP_STORAGE_DATA — o Flet também define
-# essa variável no DESKTOP empacotado, então usá-la aqui fazia o app de PC
-# instalado abrir com o layout de celular.
-_LAYOUT_MOBILE: bool | None = None
-
-
 def definir_layout_mobile(mobile: bool) -> None:
     """Define se a interface deve usar o layout de celular (Android/iOS)."""
     global _LAYOUT_MOBILE
