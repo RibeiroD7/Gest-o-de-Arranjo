@@ -107,6 +107,13 @@ uma planilha (veja abaixo).
   assembleia e congresso vêm desmarcados, o rodízio não gasta a vez de ninguém
   com eles, e nessas datas o app também **não deixa mandar orador para fora** —
   a congregação de destino é do mesmo circuito e está no mesmo evento.
+- **Quando o dia da reunião mudou** — a congregação troca de dia (e horário) de
+  tempos em tempos, e o histórico precisa ser montado no dia que valia em cada
+  mês: usar sempre o dia de hoje fazia a Programação de um ano antigo procurar
+  sábados numa época de domingo, e as semanas apareciam vazias com tudo
+  gravado. Em **Minha congregação → Dados** há a linha do tempo dessas
+  mudanças. Ela é montada sozinha na primeira abertura, deduzida das datas já
+  gravadas — um mês cheio de domingos era domingo —, e pode ser corrigida ali.
 - **Datas fora do fim de semana** — a **Celebração** é sempre em 14 de nisã e
   cai em qualquer dia da semana (em 2026, numa quinta). O cadastro da data
   especial tem o campo *Outra data* para esses casos: ela costuma não aparecer

@@ -423,6 +423,18 @@ def create_tables(conn):
         )
     """)
 
+    # A congregação muda de dia e/ou horário de reunião de tempos em tempos
+    # (a cada dois anos, mais ou menos). A configuração guarda só o vigente, e
+    # com isso os meses antigos eram montados no dia de hoje: 2021 era domingo,
+    # e a Programação daquele ano procurava sábados. Aqui fica a linha do tempo.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reuniao_historico (
+            inicio TEXT PRIMARY KEY,          -- 'AAAA-MM' a partir do qual vale
+            dia_semana TEXT NOT NULL,
+            horario TEXT NOT NULL DEFAULT ''
+        )
+    """)
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tipos_evento_especial (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -441,6 +453,7 @@ def create_tables(conn):
         # usuário, e rodar de novo não desfaz o que ele mudou.
         _aplicar_padrao_presidente_por_tipo(cursor)
     _semear_tipos_evento(conn)
+    _derivar_reuniao_historico(conn)
     _migrar_oradores_fantasma(conn)
 
     colunas_oradores = [linha[1] for linha in cursor.execute("PRAGMA table_info(oradores)")]
@@ -2162,6 +2175,126 @@ def excluir_data_especial(registro_id: int) -> None:
         conn.close()
 
 
+def listar_reuniao_historico() -> list[dict]:
+    """Linha do tempo do dia/horário da reunião, do mais antigo para o atual."""
+    conn = get_connection()
+    try:
+        return [
+            {"inicio": linha[0], "dia_semana": linha[1], "horario": linha[2]}
+            for linha in conn.execute(
+                "SELECT inicio, dia_semana, COALESCE(horario, '') "
+                "FROM reuniao_historico ORDER BY inicio"
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def salvar_reuniao_historico(inicio: str, dia_semana: str, horario: str = "") -> None:
+    """Grava (ou substitui) o período que começa em ``inicio`` ('AAAA-MM')."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO reuniao_historico (inicio, dia_semana, horario) "
+            "VALUES (?, ?, ?) ON CONFLICT(inicio) DO UPDATE SET "
+            "dia_semana = excluded.dia_semana, horario = excluded.horario",
+            (inicio, dia_semana, horario or ""),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def excluir_reuniao_historico(inicio: str) -> None:
+    """Remove um período da linha do tempo."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM reuniao_historico WHERE inicio = ?", (inicio,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reuniao_em(ano: int, mes: int) -> dict | None:
+    """Dia e horário da reunião naquele mês, ou ``None`` se não houver registro.
+
+    Vale o período mais recente que já tinha começado. Sem histórico (ou para
+    meses anteriores ao primeiro período), devolve ``None`` e quem chama cai
+    na configuração atual.
+    """
+    alvo = f"{ano:04d}-{mes:02d}"
+    conn = get_connection()
+    try:
+        linha = conn.execute(
+            "SELECT dia_semana, COALESCE(horario, '') FROM reuniao_historico "
+            "WHERE inicio <= ? ORDER BY inicio DESC LIMIT 1",
+            (alvo,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return {"dia_semana": linha[0], "horario": linha[1]} if linha else None
+
+
+def _derivar_reuniao_historico(conn) -> None:
+    """Monta a linha do tempo a partir das datas já gravadas.
+
+    Rodada uma vez, na criação da tabela. As datas que já estão no banco dizem
+    em que dia a reunião era: um mês cheio de domingos era domingo. Deduzir
+    disso evita perguntar ao usuário o que o próprio histórico já responde —
+    e evita chutar, que era a alternativa.
+    """
+    cursor = conn.cursor()
+    if cursor.execute("SELECT COUNT(*) FROM reuniao_historico").fetchone()[0]:
+        return
+
+    # Um voto por data registrada (presidentes e oradores recebidos). As duas
+    # tabelas podem ainda não existir: esta função roda no meio da criação do
+    # esquema, e num banco novo não há histórico nenhum para derivar.
+    existentes = {
+        linha[0] for linha in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    votos: dict[str, dict[int, int]] = {}
+    for tabela, consulta in (
+        ("presidentes", "SELECT data FROM presidentes"),
+        ("arranjo_oradores",
+         "SELECT data FROM arranjo_oradores WHERE tipo = 'recebido'"),
+    ):
+        if tabela not in existentes:
+            continue
+        for (data,) in cursor.execute(consulta):
+            if not data or len(data) != 10:
+                continue
+            try:
+                dia = date(int(data[6:10]), int(data[3:5]), int(data[0:2]))
+            except ValueError:
+                continue
+            mes = f"{dia.year:04d}-{dia.month:02d}"
+            votos.setdefault(mes, {})
+            votos[mes][dia.weekday()] = votos[mes].get(dia.weekday(), 0) + 1
+
+    if not votos:
+        return
+
+    nomes = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
+             "Sexta-feira", "Sábado", "Domingo"]
+    anterior = None
+    for mes in sorted(votos):
+        # Datas especiais caem em dias avulsos (a Celebração numa quinta); o
+        # dia da reunião é o que mais se repete no mês.
+        weekday = max(votos[mes], key=lambda w: (votos[mes][w], -w))
+        if weekday == anterior:
+            continue
+        cursor.execute(
+            "INSERT OR IGNORE INTO reuniao_historico (inicio, dia_semana, horario) "
+            "VALUES (?, ?, '')",
+            (mes, nomes[weekday]),
+        )
+        anterior = weekday
+    conn.commit()
+
+
 def listar_tipos_evento() -> list[dict]:
     """Tipos de evento especial disponíveis (ordenados por nome).
 
@@ -2841,6 +2974,7 @@ TABELAS_BACKUP = [
     "anos_planejamento",
     "datas_especiais",
     "tipos_evento_especial",
+    "reuniao_historico",
 ]
 
 
@@ -2947,6 +3081,10 @@ def restaurar_backup(caminho: str | Path) -> tuple[bool, str]:
         ):
             _aplicar_padrao_escala_especiais(cursor)
         conn.commit()
+        # Backup anterior à linha do tempo do dia de reunião: remonta a partir
+        # das datas que acabaram de entrar, senão os anos antigos voltariam a
+        # ser montados no dia de hoje até a próxima abertura do app.
+        _derivar_reuniao_historico(conn)
     except Exception as exc:
         conn.rollback()
         return False, f"Erro ao restaurar: {exc}. O banco original não foi alterado."

@@ -77,6 +77,7 @@ from database import (
     excluir_orador,
     excluir_presidente,
     excluir_presidente_cadastro,
+    excluir_reuniao_historico,
     excluir_tema,
     excluir_tipo_evento,
     exportar_backup,
@@ -89,6 +90,7 @@ from database import (
     listar_anos_planejamento,
     listar_datas_especiais_por_ano,
     listar_presidentes_cadastro,
+    listar_reuniao_historico,
     listar_tipos_evento,
     listar_vinculos_de_contato,
     oradores_com_temas_da_congregacao,
@@ -97,6 +99,7 @@ from database import (
     relatorio_presidencias,
     remover_orador_arranjo,
     restaurar_backup,
+    reuniao_em,
     salvar_arranjo,
     salvar_data_especial,
     salvar_escala_fonte,
@@ -105,6 +108,7 @@ from database import (
     salvar_presidente,
     salvar_presidente_avulso,
     salvar_presidente_cadastro,
+    salvar_reuniao_historico,
     salvar_tema,
     sincronizar_uso_temas,
     tipos_evento_sem_presidente,
@@ -2317,9 +2321,16 @@ def _proximas_datas_reuniao(quantidade: int = 4) -> list[date]:
 
 
 def _semanas_reuniao_mes(ano: int, mes: int) -> list[date]:
-    """Datas de reunião de fim de semana da minha congregação num mês."""
-    config = carregar_configuracao()
-    weekday = _dia_semana_para_weekday(config.get("dia_reuniao", ""))
+    """Datas de reunião de fim de semana da minha congregação num mês.
+
+    O dia vem da linha do tempo: a congregação muda de dia de tempos em
+    tempos, e usar sempre o dia de hoje fazia a Programação de 2021 (domingo)
+    procurar sábados — as semanas apareciam vazias com tudo gravado.
+    Sem registro para aquele mês, vale a configuração atual.
+    """
+    periodo = reuniao_em(ano, mes)
+    dia = periodo["dia_semana"] if periodo else carregar_configuracao().get("dia_reuniao", "")
+    weekday = _dia_semana_para_weekday(dia)
     if weekday is None:
         weekday = 5
     return _datas_por_weekday_no_mes(ano, mes, weekday)
@@ -9263,6 +9274,76 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
         texto_sucesso.visible = True
         page.update()
 
+    # Linha do tempo do dia de reunião: a congregação muda de dia de tempos em
+    # tempos, e os meses antigos precisam ser montados no dia que valia neles.
+    lista_periodos = ft.Column(spacing=0, tight=True)
+    campo_inicio = ft.TextField(label="A partir de", hint_text="MM/AAAA", expand=True)
+    campo_novo_dia = ft.TextField(label="Dia", hint_text="Ex: Domingo", expand=True)
+    erro_periodo = ft.Text("", size=fonte(12), color=COR_ERRO, visible=False)
+
+    def montar_periodos():
+        periodos = listar_reuniao_historico()
+        if not periodos:
+            lista_periodos.controls = [
+                ft.Text("Sem mudanças registradas: vale o dia acima em todos os meses.",
+                        size=fonte(12), color=TEXTO_SECUNDARIO, italic=True)
+            ]
+            return
+
+        def linha(item, ultima):
+            def remover(_=None, inicio=item["inicio"]):
+                excluir_reuniao_historico(inicio)
+                montar_periodos()
+                page.update()
+
+            mes, ano = item["inicio"][5:7], item["inicio"][0:4]
+            return ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Text(f"{mes}/{ano}", size=fonte(13), width=76,
+                                weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
+                        ft.Text(item["dia_semana"], size=fonte(13),
+                                color=TEXTO_SECUNDARIO, expand=True),
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE, icon_size=fonte(17),
+                            icon_color=COR_ERRO, tooltip="Remover este período",
+                            on_click=remover,
+                        ),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.Padding.symmetric(horizontal=10, vertical=2),
+                border=None if ultima else ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+            )
+
+        lista_periodos.controls = [
+            linha(item, i == len(periodos) - 1) for i, item in enumerate(periodos)
+        ]
+
+    def adicionar_periodo(_=None):
+        texto = (campo_inicio.value or "").strip()
+        dia = (campo_novo_dia.value or "").strip()
+        casou = re.fullmatch(r"(\d{1,2})/(\d{4})", texto)
+        if not casou or not 1 <= int(casou.group(1)) <= 12:
+            erro_periodo.value = "Informe o mês no formato MM/AAAA."
+            erro_periodo.visible = True
+            page.update()
+            return
+        if _dia_semana_para_weekday(dia) is None:
+            erro_periodo.value = "Informe um dia da semana (ex: Domingo)."
+            erro_periodo.visible = True
+            page.update()
+            return
+        salvar_reuniao_historico(f"{int(casou.group(2)):04d}-{int(casou.group(1)):02d}", dia)
+        campo_inicio.value = ""
+        campo_novo_dia.value = ""
+        erro_periodo.visible = False
+        montar_periodos()
+        page.update()
+
+    montar_periodos()
+
     formulario = ft.Container(
         content=ft.Column(
             [
@@ -9278,6 +9359,29 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                 linha_campos(campo_coordenador, campo_telefone),
                 linha_campos(campo_dia, campo_horario),
                 campo_circuito,
+                ft.Container(height=8),
+                criar_secao_titulo("Quando o dia da reunião mudou"),
+                ft.Text(
+                    "A Programação monta cada mês no dia que valia nele. O dia "
+                    "acima vale do último período em diante.",
+                    size=fonte(12), color=TEXTO_SECUNDARIO,
+                ),
+                ft.Container(
+                    content=lista_periodos,
+                    border=ft.Border.all(1, BORDA_SUAVE),
+                    border_radius=10,
+                    padding=ft.Padding.symmetric(vertical=6),
+                ),
+                linha_campos(campo_inicio, campo_novo_dia),
+                ft.Row(
+                    [
+                        ft.OutlinedButton("Adicionar período", icon=ft.Icons.ADD,
+                                          on_click=adicionar_periodo),
+                        erro_periodo,
+                    ],
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Container(height=8),
                 ft.Row(
                     [

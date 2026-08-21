@@ -1019,3 +1019,99 @@ def test_migracao_preserva_o_comportamento_antigo():
     assert por_nome["Velho Ancião"]["preside_especiais"] is True
     assert por_nome["Velho Servo"]["preside_normais"] is True
     assert por_nome["Velho Servo"]["preside_especiais"] is False
+
+
+class TestDiaDeReuniaoMuda:
+    """A congregação troca de dia a cada par de anos; o mês antigo é montado
+    no dia que valia nele, não no de hoje."""
+
+    def _zerar(self):
+        import database
+
+        conn = database.get_connection()
+        try:
+            database.create_tables(conn)
+            conn.execute("DELETE FROM reuniao_historico")
+            conn.execute("DELETE FROM datas_especiais")
+            conn.execute("DELETE FROM presidentes")
+            conn.commit()
+        finally:
+            conn.close()
+        main.salvar_configuracao({
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        })
+
+    def test_sem_historico_vale_a_configuracao(self):
+        import database
+
+        self._zerar()
+        assert database.reuniao_em(2021, 6) is None
+        assert all(d.weekday() == 5 for d in main._semanas_reuniao_mes(2021, 6))
+
+    def test_periodo_antigo_manda_no_mes_antigo(self):
+        import database
+
+        self._zerar()
+        database.salvar_reuniao_historico("2020-05", "Domingo")
+        database.salvar_reuniao_historico("2024-01", "Sábado")
+
+        assert database.reuniao_em(2021, 6)["dia_semana"] == "Domingo"
+        assert all(d.weekday() == 6 for d in main._semanas_reuniao_mes(2021, 6))
+        # A virada acontece no mês exato em que o período começa.
+        assert all(d.weekday() == 6 for d in main._semanas_reuniao_mes(2023, 12))
+        assert all(d.weekday() == 5 for d in main._semanas_reuniao_mes(2024, 1))
+        # Antes do primeiro período, cai na configuração.
+        assert database.reuniao_em(2019, 3) is None
+
+    def test_derivacao_le_as_datas_ja_gravadas(self):
+        """Ninguém precisa digitar a linha do tempo: o histórico já a contém."""
+        import database
+
+        self._zerar()
+        conn = database.get_connection()
+        try:
+            # Três domingos de 2021 e três sábados de 2024.
+            for data in ("06/06/2021", "13/06/2021", "20/06/2021"):
+                conn.execute("INSERT INTO presidentes (data, nome_avulso) VALUES (?, 'X')", (data,))
+            for data in ("06/01/2024", "13/01/2024", "20/01/2024"):
+                conn.execute("INSERT INTO presidentes (data, nome_avulso) VALUES (?, 'X')", (data,))
+            conn.commit()
+            database._derivar_reuniao_historico(conn)
+        finally:
+            conn.close()
+        periodos = {p["inicio"]: p["dia_semana"] for p in database.listar_reuniao_historico()}
+        assert periodos == {"2021-06": "Domingo", "2024-01": "Sábado"}
+
+    def test_data_especial_em_dia_avulso_nao_confunde_a_derivacao(self):
+        """A Celebração cai em qualquer dia; o dia da reunião é o que se repete."""
+        import database
+
+        self._zerar()
+        conn = database.get_connection()
+        try:
+            for data in ("06/06/2021", "13/06/2021", "20/06/2021", "27/06/2021"):
+                conn.execute("INSERT INTO presidentes (data, nome_avulso) VALUES (?, 'X')", (data,))
+            # Uma quinta-feira solta no meio do mês.
+            conn.execute("INSERT INTO presidentes (data, nome_avulso) VALUES ('17/06/2021', 'X')")
+            conn.commit()
+            database._derivar_reuniao_historico(conn)
+        finally:
+            conn.close()
+        periodos = {p["inicio"]: p["dia_semana"] for p in database.listar_reuniao_historico()}
+        assert periodos == {"2021-06": "Domingo"}
+
+    def test_derivacao_nao_atropela_o_que_o_usuario_definiu(self):
+        import database
+
+        self._zerar()
+        database.salvar_reuniao_historico("2020-05", "Domingo")
+        conn = database.get_connection()
+        try:
+            conn.execute("INSERT INTO presidentes (data, nome_avulso) VALUES ('06/01/2024', 'X')")
+            conn.commit()
+            database._derivar_reuniao_historico(conn)
+        finally:
+            conn.close()
+        assert [p["inicio"] for p in database.listar_reuniao_historico()] == ["2020-05"]
