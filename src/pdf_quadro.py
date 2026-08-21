@@ -27,7 +27,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from database import get_connection
+from database import get_connection, reuniao_em
 from util import SEPARADOR_SIMPOSIO
 
 EXPORTS_DIR = os.path.join("exports")
@@ -52,6 +52,14 @@ FONTE_NEGRITO = "Helvetica-Bold"
 NOMES_MESES = [
     "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
+
+# Nome do dia para o cabeçalho de cada data do quadro. Sai da própria data,
+# não da configuração: o quadro trazia "SÁBADO" fixo e mentia em todo mês de
+# uma época em que a reunião era no domingo.
+NOMES_DIA_SEMANA = [
+    "SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA", "QUINTA-FEIRA",
+    "SEXTA-FEIRA", "SÁBADO", "DOMINGO",
 ]
 
 MAP_DIA_SEMANA = {
@@ -111,9 +119,15 @@ def par_meses_do_mes(mes: int) -> tuple[int, int]:
 
 
 def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
-    """Uma linha por data de reunião do mês: presidente, orador, tema e congregação."""
-    config = _carregar_configuracao()
-    weekday = _dia_semana_para_weekday(config.get("dia_reuniao", ""))
+    """Uma linha por data de reunião do mês: presidente, orador, tema e congregação.
+
+    O dia vem da linha do tempo da congregação, não da configuração atual: um
+    quadro de 2021 (domingo) montado com o sábado de hoje procurava datas que
+    não existem e saía vazio, com tudo gravado no banco.
+    """
+    periodo = reuniao_em(ano, mes)
+    dia = periodo["dia_semana"] if periodo else _carregar_configuracao().get("dia_reuniao", "")
+    weekday = _dia_semana_para_weekday(dia)
     datas = _datas_reuniao_do_mes(ano, mes, weekday)
     mes_str = f"{mes:02d}"
 
@@ -290,7 +304,8 @@ def _construir_tabela_mes(ano: int, mes: int, nome_congregacao: str) -> Table:
 
     for indice, item in enumerate(dados):
         dia = item["data"].day
-        rotulo_data = f"SÁBADO, {dia} DE {NOMES_MESES[mes].upper()}"
+        nome_dia = NOMES_DIA_SEMANA[item["data"].weekday()]
+        rotulo_data = f"{nome_dia}, {dia} DE {NOMES_MESES[mes].upper()}"
         largura_vermelha = sum(LARGURAS_COLUNAS[:3])
         presidente = item["presidente"]
         texto_presidente = (

@@ -3162,6 +3162,12 @@ def restaurar_backup(caminho: str | Path) -> tuple[bool, str]:
         cursor = conn.cursor()
         _recuperar_presidente_avulso_especiais(cursor)
         conn.commit()
+        # A aba Temas só conta o que está em tema_uso_por_ano, e a coluna de
+        # cada ano nasce daí. Sem isso, restaurar um backup com anos antigos
+        # deixava esses anos sem coluna e sem contagem até a próxima abertura
+        # do app — parecia que os discursos daqueles anos não existiam.
+        realocar_uso_para_ano_da_data(conn)
+        sincronizar_uso_temas(conn)
     except Exception as exc:
         conn.rollback()
         return False, f"Erro ao restaurar: {exc}. O banco original não foi alterado."
