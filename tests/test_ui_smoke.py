@@ -858,3 +858,82 @@ def test_lista_de_datas_especiais_do_relatorio():
     assert main._lista_datas_especiais_relatorio(itens, 520)[0] is not None
     vazio = main._lista_datas_especiais_relatorio([], 520)[0]
     assert "Nenhuma data especial" in vazio.value
+
+
+def _zerar_especiais():
+    import database
+
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        conn.execute("DELETE FROM datas_especiais")
+        conn.execute("DELETE FROM presidentes_cadastro")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_datas_sem_reuniao_barram_orador_e_designacao():
+    """Assembleia e congresso saem das sugestões de data do arranjo.
+
+    Ninguém discursa aqui nem viaja para fora nesse fim de semana: a
+    congregação de destino é do mesmo circuito e está no mesmo evento.
+    """
+    import database
+
+    _zerar_especiais()
+    database.salvar_data_especial("24/01/2027", "Assembleia de Circuito", "", "", None)
+    database.salvar_data_especial("13/02/2027", "Discurso Especial", "", "", None)
+
+    bloqueadas = main.datas_sem_reuniao(2027)
+    assert bloqueadas == {"24/01/2027": "Assembleia de Circuito"}
+    # O discurso especial tem reunião: não bloqueia mandar alguém para fora.
+    assert "13/02/2027" not in bloqueadas
+
+    arranjo = {"ano": 2027, "mes_inicio": 1, "congregacao_host_id": None}
+    sugeridas = {
+        item["data"] for item in main._sugerir_datas_arranjo(arranjo, "enviado", [])
+    }
+    assert "24/01/2027" not in sugeridas, "assembleia não pode ser oferecida"
+
+
+def test_rodizio_das_especiais_e_um_por_tipo():
+    """Uma fila para a Celebração, outra para a visita — não uma só.
+
+    Com fila única, quem presidisse a Celebração de abril já entraria no fim
+    da fila da visita de maio, que é outro evento e outra escala.
+    """
+    import database
+
+    _zerar_especiais()
+    for nome in ("Ancião A", "Ancião B", "Ancião C"):
+        database.salvar_presidente_cadastro(nome, "Ancião")
+
+    # Celebração já feita pelo A; a de 2027 deve ir para outro.
+    ids = {p["nome"]: p["id"] for p in database.listar_presidentes_cadastro()}
+    database.salvar_data_especial("02/04/2026", "Celebração", "", "", ids["Ancião A"])
+    database.salvar_data_especial("02/04/2027", "Celebração", "", "", None)
+    database.salvar_data_especial("14/05/2027", "Visita do Superintendente", "", "", None)
+
+    assert main.preencher_presidentes_especiais_rodizio(2027, 4) == 1
+    assert main.preencher_presidentes_especiais_rodizio(2027, 5) == 1
+
+    por_data = {e["data"]: e["presidente_nome"] for e in main.datas_especiais_com_presidente(2027)}
+    # A Celebração pula o A (já fez uma).
+    assert por_data["02/04/2027"] != "Ancião A"
+    # A visita é fila virgem: o A NÃO está barrado nela por causa da Celebração.
+    # Mas os dois de 2027 têm de ser pessoas diferentes.
+    assert por_data["14/05/2027"] != por_data["02/04/2027"]
+
+
+def test_celebracao_pode_cair_em_dia_de_semana():
+    """14 de nisã anda pelos dias: em 2026 a Celebração foi numa quinta."""
+    import database
+
+    _zerar_especiais()
+    database.salvar_data_especial("02/04/2026", "Celebração", "Jonas Teixeira", "", None)
+    registro = database.listar_datas_especiais_por_ano(2026).get("02/04/2026")
+    assert registro is not None
+    assert registro["tipo"] == "Celebração"
+    # E ela pede presidente, ao contrário da assembleia.
+    assert "02/04/2026" not in main.datas_sem_reuniao(2026)

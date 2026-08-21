@@ -82,7 +82,7 @@ from database import (
     exportar_backup,
     garantir_configuracao_inicial,
     get_connection,
-    historico_presidentes_datas_especiais,
+    historico_presidentes_por_tipo_de_evento,
     importar_temas_pdf,
     listar_anos_arranjos,
     listar_anos_colunas,
@@ -697,6 +697,22 @@ def _rotulo_dia_congregacao(nome: str, dia: str, horario: str) -> str:
     return rotulo
 
 
+def datas_sem_reuniao(ano: int) -> dict[str, str]:
+    """Datas do ano em que não há reunião nenhuma: ``{data: tipo do evento}``.
+
+    São as datas especiais cujo tipo está marcado como sem presidente local —
+    assembleia, congresso. Nelas a congregação está fora do salão: não há
+    presidente, não se recebe orador e não se manda ninguém para fora, porque
+    a congregação de destino é do mesmo circuito e está no mesmo evento.
+    """
+    sem_presidente = tipos_evento_sem_presidente()
+    return {
+        data: registro["tipo"]
+        for data, registro in listar_datas_especiais_por_ano(ano).items()
+        if registro["tipo"] in sem_presidente
+    }
+
+
 def _sugerir_datas_arranjo(
     arranjo: dict,
     tipo: str,
@@ -715,6 +731,10 @@ def _sugerir_datas_arranjo(
         for data_norm in [_normalizar_data_arranjo(registro.get("data"))]
         if data_norm
     }
+
+    # Assembleia e congresso somem das sugestões: ninguém discursa nem viaja
+    # nesse fim de semana, e oferecer a data só convida ao erro.
+    ocupadas |= set(datas_sem_reuniao(ano))
 
     reunioes = _obter_reunioes_dialog(arranjo)
     host_nome = reunioes["host_nome"]
@@ -5791,6 +5811,18 @@ def abrir_seletor_oradores(
             texto_erro.visible = True
             page.update()
             return
+        # As sugestões já pulam assembleia e congresso; a data manual não passa
+        # por elas, e é justamente por ali que a data errada entraria.
+        bloqueadas = datas_sem_reuniao(int(dados_arranjo.get("ano", ANO_PADRAO_ARRANJOS)))
+        conflito = next((d for d in datas_selecionadas if d in bloqueadas), None)
+        if conflito:
+            texto_erro.value = (
+                f"{conflito} é {bloqueadas[conflito]}: a congregação não se reúne "
+                "nesse dia, então não há orador nem designação."
+            )
+            texto_erro.visible = True
+            page.update()
+            return
         if not eh_oradores and not campo_tema.value:
             texto_erro.value = "Selecione um tema."
             texto_erro.visible = True
@@ -6214,10 +6246,16 @@ def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
 def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
     """Preenche por rodízio os presidentes das datas especiais do mês.
 
+    Cada TIPO de evento tem a sua fila: uma para a Celebração, outra para a
+    visita do superintendente, outra para o discurso especial. Elas não se
+    misturam — presidir a Celebração deste ano não faz ninguém perder a vez na
+    visita do superintendente, que é o que uma fila só faria.
+
     Só entram anciãos, e só as datas cujo tipo pede presidente local (a
-    Assembleia não tem reunião no salão para presidir). A fila é medida contra
-    as datas especiais de TODOS os anos, não só as do mês: são poucas por ano,
-    e olhar um mês de cada vez daria sempre o primeiro do cadastro.
+    Assembleia não tem reunião no salão para presidir). Cada fila é medida
+    contra as datas daquele tipo em TODOS os anos, não só as do mês: são uma
+    ou duas por ano, e olhar um mês de cada vez daria sempre o primeiro do
+    cadastro.
 
     Retorna quantas datas foram preenchidas.
     """
@@ -6230,24 +6268,43 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
 
     sem_presidente = tipos_evento_sem_presidente()
     especiais = listar_datas_especiais_por_ano(ano)
-    historico = historico_presidentes_datas_especiais()
-    datas_alvo = sorted(
-        (
-            registro["data"]
-            for registro in especiais.values()
-            if len(registro["data"]) == 10
-            and int(registro["data"][3:5]) == mes
+    historico_por_tipo = historico_presidentes_por_tipo_de_evento()
+
+    # Agrupa por tipo: cada um roda o seu rodízio, com a sua memória.
+    por_tipo: dict[str, list[str]] = {}
+    for registro in especiais.values():
+        data_str = registro["data"]
+        if (
+            len(data_str) == 10
+            and int(data_str[3:5]) == mes
             and not registro.get("presidente_id")
             and registro["tipo"] not in sem_presidente
-        ),
+        ):
+            por_tipo.setdefault(registro["tipo"], []).append(data_str)
+
+    # Só desempata: entre quem nunca fez ESTE tipo, vai quem está há mais
+    # tempo sem qualquer data especial.
+    historico_geral = {
+        data: pid
+        for datas in historico_por_tipo.values()
+        for data, pid in datas.items()
+    }
+
+    preenchidas = 0
+    for tipo, datas in por_tipo.items():
         # Todas do mesmo mês e ano: DD/MM/AAAA já ordena por dia como texto
         # (é o mesmo critério que a lista da tela usa).
-    )
-
-    escolhas = escolher_rodizio_datas_especiais(anciaos, datas_alvo, historico)
-    for data_str, presidente_id in escolhas:
-        definir_presidente_data_especial(especiais[data_str]["id"], presidente_id)
-    return len(escolhas)
+        escolhas = escolher_rodizio_datas_especiais(
+            anciaos, sorted(datas), historico_por_tipo.get(tipo, {}), historico_geral
+        )
+        for data_str, presidente_id in escolhas:
+            definir_presidente_data_especial(especiais[data_str]["id"], presidente_id)
+            # O tipo seguinte precisa enxergar o que este acabou de decidir:
+            # com Celebração e discurso especial no mesmo mês, os dois cairiam
+            # no mesmo irmão olhando a mesma foto antiga.
+            historico_geral[data_str] = presidente_id
+        preenchidas += len(escolhas)
+    return preenchidas
 
 
 def abrir_dialog_gerenciar_tipos_evento(
@@ -6363,13 +6420,24 @@ def abrir_dialog_data_especial(
     """Cadastra/edita uma data especial: tipo, orador, tema e presidente opcionais."""
     editando = registro is not None
     datas_mes = [_formatar_data_arranjo(d) for d in _semanas_reuniao_mes(ano, mes)]
-    if editando and registro["data"] not in datas_mes:
+    fora_do_fim_de_semana = editando and registro["data"] not in datas_mes
+    if fora_do_fim_de_semana:
         datas_mes.insert(0, registro["data"])
 
     campo_data = ft.Dropdown(
         label="Data",
         options=[ft.dropdown.Option(d) for d in datas_mes],
         value=registro["data"] if editando else None,
+        expand=True,
+    )
+    # Nem toda data especial cai no fim de semana: a Celebração é sempre em
+    # 14 de nisã e anda pelos dias da semana (em 2026 foi numa quinta). Sem
+    # este campo ela não tinha como ser cadastrada, e é uma data que precisa
+    # de orador e presidente como qualquer outra.
+    campo_data_livre = ft.TextField(
+        label="Outra data (dia de semana)",
+        hint_text="DD/MM/AAAA — ex.: a Celebração",
+        value=registro["data"] if fora_do_fim_de_semana else "",
         expand=True,
     )
     tipos = [item["nome"] for item in listar_tipos_evento()]
@@ -6456,14 +6524,33 @@ def abrir_dialog_data_especial(
         page.pop_dialog()
 
     def salvar(_=None):
-        if not campo_data.value:
-            texto_erro.value = "Selecione a data."
+        # A data digitada manda: quem preencheu "outra data" quer aquele dia,
+        # não o que ficou selecionado no seletor de fins de semana.
+        data_livre = (campo_data_livre.value or "").strip()
+        data_final = _normalizar_data_arranjo(data_livre) if data_livre else campo_data.value
+        if data_livre and not data_final:
+            texto_erro.value = "A outra data precisa estar no formato DD/MM/AAAA."
+            texto_erro.visible = True
+            page.update()
+            return
+        if not data_final:
+            texto_erro.value = "Selecione a data ou informe outra."
+            texto_erro.visible = True
+            page.update()
+            return
+        # A lista de datas especiais é por mês: gravar fora dele faria o
+        # registro sumir da tela logo depois de salvo.
+        if int(data_final[3:5]) != mes or int(data_final[6:10]) != ano:
+            texto_erro.value = (
+                f"Esta aba é de {NOMES_MESES[mes]} de {ano}. Abra o mês da data "
+                "para cadastrá-la lá."
+            )
             texto_erro.visible = True
             page.update()
             return
         try:
             salvar_data_especial(
-                campo_data.value,
+                data_final,
                 campo_tipo.value or (campo_tipo.options[0].key if campo_tipo.options else "Evento"),
                 (campo_orador.value or "").strip(),
                 (campo_tema.value or "").strip(),
@@ -6491,6 +6578,7 @@ def abrir_dialog_data_especial(
                         *(
                             [
                                 campo_data,
+                                campo_data_livre,
                                 ft.Row(
                                     [
                                         campo_tipo,
@@ -6519,6 +6607,7 @@ def abrir_dialog_data_especial(
                                     spacing=12,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
+                                campo_data_livre,
                             ]
                         ),
                         campo_orador,

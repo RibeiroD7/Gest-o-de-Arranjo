@@ -137,6 +137,7 @@ def escolher_rodizio_datas_especiais(
     ordem_ids: list[int],
     datas_alvo: list[str],
     historico_especiais: dict[str, int],
+    historico_geral: dict[str, int] | None = None,
 ) -> list[tuple[str, int]]:
     """Decide quem preside cada data especial ainda vazia.
 
@@ -151,14 +152,22 @@ def escolher_rodizio_datas_especiais(
     está marcado para uma data especial daqui a um mês não é escolhido para a
     de amanhã só porque a de um mês ainda não aconteceu.
 
-    Empates vão para a ordem do cadastro. Datas que já têm presidente são
-    puladas.
+    Empates são o caso comum, porque cada tipo acontece uma ou duas vezes por
+    ano: com sete anciãos, quase todos estão em "nunca fiz este". Desempatar
+    pela ordem do cadastro dava o primeiro da lista para TODOS os tipos — o
+    mesmo irmão pegava a Celebração de abril e a visita de maio. Então o
+    desempate olha ``historico_geral``: entre os empatados, vai quem está há
+    mais tempo sem QUALQUER data especial. A fila do tipo continua mandando; o
+    geral só resolve quem ela não separa. A ordem do cadastro fica por último.
+
+    Datas que já têm presidente são puladas.
 
     Args:
         ordem_ids: ids dos anciãos, na ordem do cadastro de presidentes.
         datas_alvo: datas DD/MM/AAAA das especiais a preencher, cronológicas.
-        historico_especiais: {data DD/MM/AAAA: presidente_id} de todas as datas
-            especiais já designadas, de qualquer ano.
+        historico_especiais: {data DD/MM/AAAA: presidente_id} das datas
+            especiais DESTE tipo, de qualquer ano.
+        historico_geral: idem, mas de todos os tipos. Só desempata.
 
     Returns:
         Lista ``[(data_str, presidente_id)]`` só das datas preenchidas.
@@ -175,10 +184,15 @@ def escolher_rodizio_datas_especiais(
         if dia is not None and pid in ordem_pos:
             agenda[pid].append(dia)
 
-    def distancia(pid: int, dia: date) -> int:
-        datas = agenda.get(pid)
+    agenda_geral: dict[int, list[date]] = defaultdict(list)
+    for data_str, pid in (historico_geral or {}).items():
+        dia = _para_data(data_str)
+        if dia is not None and pid in ordem_pos:
+            agenda_geral[pid].append(dia)
+
+    def _distancia(datas: list[date] | None, dia: date) -> int:
         if not datas:
-            return 10**6  # nunca presidiu uma data especial: primeiro da fila
+            return 10**6  # nunca presidiu: o mais livre possível
         return min(abs((dia - outra).days) for outra in datas)
 
     escolhas: list[tuple[str, int]] = []
@@ -189,11 +203,18 @@ def escolher_rodizio_datas_especiais(
         dia = _para_data(data_str)
         if dia is None:
             continue
-        escolhido = min(
-            ordem_ids, key=lambda pid, dia=dia: (-distancia(pid, dia), ordem_pos[pid])
-        )
+
+        def ordenar(pid: int, dia=dia):
+            return (
+                -_distancia(agenda.get(pid), dia),
+                -_distancia(agenda_geral.get(pid), dia),
+                ordem_pos[pid],
+            )
+
+        escolhido = min(ordem_ids, key=ordenar)
         escolhas.append((data_str, escolhido))
         agenda[escolhido].append(dia)
+        agenda_geral[escolhido].append(dia)
         ocupadas.add(chave)
     return escolhas
 

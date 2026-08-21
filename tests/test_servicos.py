@@ -116,6 +116,34 @@ class TestEscolherRodizioDatasEspeciais:
         escolhas = escolher_rodizio_datas_especiais([10], ["30/02/2027"], {})
         assert escolhas == []
 
+    def test_historico_geral_so_desempata(self):
+        """A fila do tipo manda; o geral resolve o que ela não separa.
+
+        Ninguém nunca fez este tipo (10 e 20 empatados nele). O 10 presidiu
+        outra data especial na semana passada, então a vez é do 20 — sem isso,
+        a ordem do cadastro daria o 10 para todos os tipos.
+        """
+        escolhas = escolher_rodizio_datas_especiais(
+            [10, 20], ["13/02/2027"], {}, {"06/02/2027": 10}
+        )
+        assert escolhas == [("13/02/2027", 20)]
+
+    def test_fila_do_tipo_ganha_do_geral(self):
+        """Quem está livre no geral mas fez ESTE tipo ontem não leva."""
+        # 10 nunca fez este tipo (mas fez outra especial há pouco);
+        # 20 fez este tipo semana passada. Mesmo assim vai o 10.
+        escolhas = escolher_rodizio_datas_especiais(
+            [10, 20],
+            ["13/02/2027"],
+            {"06/02/2027": 20},
+            {"06/02/2027": 20, "07/02/2027": 10},
+        )
+        assert escolhas == [("13/02/2027", 10)]
+
+    def test_sem_historico_geral_segue_a_ordem_do_cadastro(self):
+        escolhas = escolher_rodizio_datas_especiais([30, 10], ["13/02/2027"], {})
+        assert escolhas == [("13/02/2027", 30)]
+
 
 class TestOradoresMaisTempoSemDiscurso:
     def test_nunca_discursou_vem_primeiro(self):

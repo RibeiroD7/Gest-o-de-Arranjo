@@ -91,13 +91,22 @@ uma planilha (veja abaixo).
   O rodízio também evita dois anciãos ou dois servos ministeriais seguidos,
   cedendo quando ninguém do outro privilégio está de folga.
 - **Rodízio das datas especiais** — na aba **Especiais**, o botão *Preencher
-  em rodízio* escolhe quem preside o discurso especial, a visita do
-  superintendente e afins. É uma fila à parte da semanal e **só entre
-  anciãos**: a vez anda pelas datas especiais, então quem presidiu sábado
-  passado continua na frente se nunca fez uma. Cada tipo de evento tem uma
-  marca **Presidente** (na engrenagem ao lado do campo Tipo) dizendo se ali há
-  reunião no salão — assembleia e congresso vêm desmarcados, e o rodízio não
-  gasta a vez de ninguém com eles.
+  em rodízio* escolhe quem preside. É **uma fila por tipo de evento** (uma
+  para a Celebração, outra para a visita do superintendente, outra para o
+  discurso especial) e **só entre anciãos**: presidir a Celebração não faz
+  ninguém perder a vez na visita. Entre empatados na fila do tipo — o caso
+  comum, porque cada evento acontece uma ou duas vezes por ano — vai quem está
+  há mais tempo sem qualquer data especial, para o primeiro do cadastro não
+  ficar com todos os tipos. Cada tipo tem uma marca **Presidente** (na
+  engrenagem ao lado do campo Tipo) dizendo se ali há reunião no salão:
+  assembleia e congresso vêm desmarcados, o rodízio não gasta a vez de ninguém
+  com eles, e nessas datas o app também **não deixa mandar orador para fora** —
+  a congregação de destino é do mesmo circuito e está no mesmo evento.
+- **Datas fora do fim de semana** — a **Celebração** é sempre em 14 de nisã e
+  cai em qualquer dia da semana (em 2026, numa quinta). O cadastro da data
+  especial tem o campo *Outra data* para esses casos: ela costuma não aparecer
+  no Quadro de Anúncios, que só lista os dias de reunião, mas continua
+  precisando de orador e presidente.
 - **Mensagem da presidência** — na **tela inicial**, tanto no card da próxima
   reunião quanto nas semanas seguintes, o botão de WhatsApp monta a mensagem
   para o presidente daquele dia: você digita só o número do cântico e o app

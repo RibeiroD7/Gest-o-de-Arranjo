@@ -1881,23 +1881,27 @@ def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
         conn.close()
 
 
-def historico_presidentes_datas_especiais() -> dict[str, int]:
-    """Quem presidiu cada data especial, de todos os anos: {data: presidente_id}.
+def historico_presidentes_por_tipo_de_evento() -> dict[str, dict[str, int]]:
+    """Quem presidiu cada data especial, agrupado por tipo de evento.
 
-    É a memória do rodízio das datas especiais. Separado de
-    ``carregar_todas_designacoes_presidente`` de propósito: lá a pergunta é
-    "quem presidiu alguma coisa"; aqui é "de quem é a vez do próximo evento",
-    e as semanas comuns não entram nessa conta.
+    ``{tipo: {data: presidente_id}}``, de todos os anos. É a memória dos
+    rodízios das datas especiais, e vem separada por tipo porque cada evento
+    tem a sua fila: quem presidiu a Celebração deste ano não perde a vez na
+    visita do superintendente por causa disso.
+
+    Separado de ``carregar_todas_designacoes_presidente`` de propósito: lá a
+    pergunta é "quem presidiu alguma coisa"; aqui é "de quem é a vez do
+    próximo evento DESTE tipo", e as semanas comuns não entram na conta.
     """
     conn = get_connection()
     try:
-        return {
-            linha[0]: linha[1]
-            for linha in conn.execute(
-                "SELECT data, presidente_id FROM datas_especiais "
-                "WHERE presidente_id IS NOT NULL"
-            )
-        }
+        historico: dict[str, dict[str, int]] = {}
+        for data, presidente_id, tipo in conn.execute(
+            "SELECT data, presidente_id, tipo FROM datas_especiais "
+            "WHERE presidente_id IS NOT NULL"
+        ):
+            historico.setdefault(tipo, {})[data] = presidente_id
+        return historico
     finally:
         conn.close()
 
