@@ -64,11 +64,11 @@ class TestLerVcard:
         vcf = (
             "BEGIN:VCARD\r\n"
             "VERSION:2.1\r\n"
-            "FN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Jo=C3=A3o Ruas\r\n"
+            "FN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Aur=C3=A9lio Braga\r\n"
             "TEL;CELL:11988887777\r\n"
             "END:VCARD\r\n"
         )
-        assert ler_vcard(vcf)[0].nome == "Marcelo Bastos"
+        assert ler_vcard(vcf)[0].nome == "Aurélio Braga"
 
     def test_vcard_40_com_prefixo_tel(self):
         vcf = "BEGIN:VCARD\nVERSION:4.0\nFN:Rafael Pires\nTEL;VALUE=uri:tel:+5511988887777\nEND:VCARD\n"
@@ -77,7 +77,7 @@ class TestLerVcard:
     def test_linha_dobrada_e_remontada(self):
         """O vCard quebra linhas longas e marca a continuação com um espaço."""
         vcf = "BEGIN:VCARD\nFN:Adriano Prado\n  Medeiros\nTEL:11999999999\nEND:VCARD\n"
-        assert ler_vcard(vcf)[0].nome == "Adriano Prado"
+        assert ler_vcard(vcf)[0].nome == "Adriano Prado Medeiros"
 
     def test_grupo_antes_da_propriedade(self):
         """O iPhone exporta com grupos: `item1.TEL:...`."""
@@ -263,10 +263,10 @@ class TestFotoDoContato:
 
 class TestIniciaisDoNome:
     def test_nome_composto(self):
-        assert iniciais_do_nome("Fábio Moreira Pereira") == "LP"
+        assert iniciais_do_nome("Fábio Moreira Pereira") == "FP"
 
     def test_nome_simples(self):
-        assert iniciais_do_nome("Danilo") == "GI"
+        assert iniciais_do_nome("Danilo") == "DA"
 
     def test_vazio(self):
         assert iniciais_do_nome("") == "?"
