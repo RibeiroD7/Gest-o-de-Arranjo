@@ -250,8 +250,8 @@ def _ctrl_pressionado() -> bool:
 
             # 0x11 = VK_CONTROL; bit alto ligado = tecla pressionada.
             return bool(ctypes.windll.user32.GetKeyState(0x11) & 0x8000)
-        except Exception:  # noqa: BLE001 — sem API do sistema: usa o fallback
-            pass
+        except (AttributeError, OSError):  # sem a API do sistema: usa o fallback
+            logger.debug("GetKeyState indisponível; usando o Ctrl por tempo")
     return time.monotonic() < _TECLADO["ctrl_ate"]
 
 SECOES = [
@@ -1930,6 +1930,7 @@ def confirmar_exclusao_orador(
             fechar()
             recarregar()
         except Exception:
+            logger.exception("Falha ao excluir orador")
             fechar()
             mostrar_aviso(page, "Erro", "Não foi possível excluir este orador.")
 
@@ -2036,8 +2037,14 @@ def abrir_dialog_congregacao(
                     """,
                     params,
                 )
+        except sqlite3.IntegrityError:
+            texto_erro.value = "Já existe uma congregação com esse nome."
+            texto_erro.visible = True
+            page.update()
+            return
         except Exception:
-            texto_erro.value = "Não foi possível salvar. Verifique se o nome já existe."
+            logger.exception("Falha ao salvar congregação")
+            texto_erro.value = "Não foi possível salvar a congregação."
             texto_erro.visible = True
             page.update()
             return
@@ -2094,6 +2101,7 @@ def confirmar_exclusao_congregacao(
             fechar()
             recarregar()
         except Exception:
+            logger.exception("Falha ao excluir congregação")
             fechar()
             mostrar_aviso(
                 page,
@@ -2181,6 +2189,7 @@ def entregar_arquivo(page: ft.Page, caminho, abrir_desktop) -> None:
                 src_bytes=_P(caminho).read_bytes(),
             )
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao salvar o arquivo no aparelho")
             mostrar_aviso(page, "Não foi possível salvar o arquivo",
                           f"Detalhes: {exc}")
 
@@ -2297,6 +2306,7 @@ def acionar_geracao_pdf_envio(page: ft.Page, orador_ids: set[int]) -> None:
                 f"A lista de oradores para envio foi salva em:\n{caminho}",
             )
     except Exception as exc:
+        logger.exception("Falha ao gerar o PDF da lista de envio")
         mostrar_aviso(
             page,
             "Erro ao gerar PDF",
@@ -3111,6 +3121,7 @@ def tela_inicio(
             if not eh_mobile():
                 mostrar_sucesso(page, f"Quadro exportado: {caminho}")
         except Exception as exc:
+            logger.exception("Falha ao exportar o quadro do mês")
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
     par_inicio, par_fim = par_meses_do_mes_quadro(mes)
@@ -3966,6 +3977,7 @@ def abrir_dialog_tema(
             )
             definir_tema_prioritario(tema_nr, bool(campo_prioritario.value))
         except Exception:
+            logger.exception("Falha ao salvar tema")
             texto_erro.value = "Não foi possível salvar o tema."
             texto_erro.visible = True
             page.update()
@@ -4034,6 +4046,7 @@ def confirmar_exclusao_tema(
             fechar()
             recarregar()
         except Exception:
+            logger.exception("Falha ao excluir tema")
             fechar()
             mostrar_aviso(
                 page,
@@ -4317,6 +4330,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
                     page, "Lendo PDF...", lambda: importar_temas_pdf(arquivo.path)
                 )
             except Exception as exc:
+                logger.exception("Falha ao importar temas do PDF")
                 erros.append(f"{arquivo.name}: {exc}")
                 continue
             resumos.append(
@@ -5291,6 +5305,7 @@ def abrir_dialog_editar_orador_arranjo(
                 registro_id, tema_nr, congregacao_id, data_norm, orador_2_id
             )
         except Exception:
+            logger.exception("Falha ao salvar alterações da designação")
             texto_erro.value = "Não foi possível salvar as alterações."
             texto_erro.visible = True
             page.update()
@@ -5894,8 +5909,14 @@ def abrir_seletor_oradores(
                     data=data_norm,
                     orador_2_id=orador_2_id,
                 )
+        except sqlite3.IntegrityError:
+            texto_erro.value = "Já existe um registro deste orador nesta data."
+            texto_erro.visible = True
+            page.update()
+            return
         except Exception:
-            texto_erro.value = "Não foi possível adicionar. Verifique se já existe nesta data."
+            logger.exception("Falha ao adicionar designação ao arranjo")
+            texto_erro.value = "Não foi possível adicionar a designação."
             texto_erro.visible = True
             page.update()
             return
@@ -5962,6 +5983,7 @@ def abrir_seletor_oradores(
         )
         page.update()
     except Exception:
+        logger.exception("Falha ao abrir o seletor de oradores")
         mostrar_aviso(page, "Erro", "Não foi possível abrir o seletor de oradores.")
 
 
@@ -6094,6 +6116,7 @@ def abrir_dialog_selecao_exportacao_png(
                     f"A imagem foi salva em:\n{caminho}",
                 )
         except Exception as exc:
+            logger.exception("Falha ao gerar a imagem da lista")
             texto_erro.value = f"Não foi possível gerar a imagem. Detalhes: {exc}"
             texto_erro.visible = True
             page.update()
@@ -6606,6 +6629,7 @@ def abrir_dialog_data_especial(
                 ),
             )
         except Exception:
+            logger.exception("Falha ao salvar data especial")
             texto_erro.value = "Não foi possível salvar esta data especial."
             texto_erro.visible = True
             page.update()
@@ -6722,6 +6746,7 @@ async def _dialog_whatsapp_designacao_envio(
                 try:
                     await _share_global.share_files([ft.ShareFile.from_path(caminho)])
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception("Falha ao compartilhar o arquivo")
                     mostrar_aviso(page, "Não foi possível compartilhar", f"Detalhes: {exc}")
 
         page.show_dialog(
@@ -6792,6 +6817,7 @@ async def _dialog_whatsapp_designacao_envio(
                             [ft.ShareFile.from_path(caminho)],
                         )
                     except Exception as exc:  # noqa: BLE001
+                        logger.exception("Falha ao compartilhar a imagem")
                         mostrar_aviso(page, "Não foi possível compartilhar",
                                       f"Detalhes: {exc}")
 
@@ -6850,6 +6876,7 @@ async def _dialog_whatsapp_designacao_envio(
         )
         page.update()
     except Exception as exc:
+        logger.exception("Falha ao gerar a imagem para o WhatsApp")
         mostrar_aviso(page, "Erro", f"Não foi possível gerar a imagem: {exc}")
 
 
@@ -7384,6 +7411,7 @@ def abrir_dialog_oradores_mes(
             remover_orador_arranjo(registro_id)
             atualizar_listas()
         except Exception:
+            logger.exception("Falha ao remover orador do arranjo")
             mostrar_aviso(page, "Erro", "Não foi possível remover o orador.")
 
     def editar_orador(item: dict):
@@ -8218,6 +8246,7 @@ def abrir_dialog_arranjo(
                 (campo_horario.value or "").strip(),
             )
         except Exception:
+            logger.exception("Falha ao salvar os dados da congregação")
             texto_erro.value = (
                 "Não foi possível salvar. Verifique se já existe arranjo para este mês."
             )
@@ -8280,6 +8309,7 @@ def confirmar_exclusao_arranjo(
             fechar()
             recarregar()
         except Exception:
+            logger.exception("Falha ao excluir o arranjo do mês")
             fechar()
             mostrar_aviso(page, "Não foi possível excluir", "Ocorreu um erro ao excluir o arranjo.")
 
@@ -9471,6 +9501,7 @@ def tela_ajustes(
         try:
             caminho, contagens = exportar_backup()
         except Exception as exc:
+            logger.exception("Falha ao exportar backup")
             mostrar_aviso(page, "Erro ao exportar", f"Não foi possível gerar o backup: {exc}")
             return
 
@@ -9568,6 +9599,7 @@ def tela_ajustes(
                 page, "Gerando planilha...", gerar_planilha_modelo
             )
         except Exception as exc:
+            logger.exception("Falha ao gerar a planilha-modelo")
             mostrar_aviso(page, "Erro ao gerar", f"Não foi possível criar a planilha: {exc}")
             return
 
@@ -9631,6 +9663,7 @@ def tela_ajustes(
                 lambda: importar_planilha_dados(arquivos[0].path),
             )
         except Exception as exc:
+            logger.exception("Falha ao importar a planilha")
             mostrar_aviso(page, "Não foi possível importar", str(exc))
             return
         recarregar()
@@ -10597,6 +10630,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                     f"O quadro de anúncios foi salvo em:\n{caminho}",
                 )
         except Exception as exc:
+            logger.exception("Falha ao gerar o PDF do quadro")
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
     def abrir_pdf(_=None):
@@ -10613,6 +10647,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                 mostrar_aviso(page, "Erro ao gerar PDF", erro)
                 return
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao gerar o PDF do quadro")
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
             return
 
@@ -10621,6 +10656,7 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
                 try:
                     await _share_global.share_files([ft.ShareFile.from_path(caminho)])
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception("Falha ao abrir o PDF do quadro")
                     mostrar_aviso(page, "Não foi possível abrir o PDF", f"Detalhes: {exc}")
 
             page.run_task(_abrir)
@@ -10882,8 +10918,14 @@ def abrir_dialog_presidente(
                 preside_normais=bool(campo_normais.value),
                 preside_especiais=bool(campo_especiais.value),
             )
-        except Exception:  # noqa: BLE001 — o nome é único no banco
+        except sqlite3.IntegrityError:
             texto_erro.value = "Já existe um presidente com esse nome."
+            texto_erro.visible = True
+            page.update()
+            return
+        except Exception:
+            logger.exception("Falha ao salvar presidente")
+            texto_erro.value = "Não foi possível salvar o presidente."
             texto_erro.visible = True
             page.update()
             return
@@ -11192,6 +11234,7 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             try:
                 excluir_presidente_cadastro(item["id"])
             except Exception:  # noqa: BLE001
+                logger.exception("Falha ao excluir presidente")
                 mostrar_aviso(page, "Erro", "Não foi possível excluir este presidente.")
                 return
             ao_mudar()
@@ -12109,7 +12152,8 @@ def _verificar_atualizacao(page: ft.Page) -> None:
 
         try:
             dados = await asyncio.to_thread(_buscar_release)
-        except Exception:  # noqa: BLE001 — offline/erro de rede: ignora
+        except Exception:  # noqa: BLE001 — offline/erro de rede: só o log
+            logger.debug("Não deu para verificar atualizações agora", exc_info=True)
             return
         tag = (dados.get("tag_name") or "").strip()
         if not ha_versao_mais_nova(tag, VERSAO_APP):

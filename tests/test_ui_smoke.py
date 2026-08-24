@@ -1287,3 +1287,40 @@ class TestPresidenteAvulsoNaDataEspecial:
             conn.close()
         reg = database.listar_datas_especiais_por_ano(2027)["27/03/2027"]
         assert reg["presidente_nome"] == "Danilo Reis"
+
+
+def test_todo_except_amplo_deixa_rastro_no_log():
+    """Capturar Exception e não registrar nada deixa o usuário sem socorro.
+
+    Quando algo falha no aparelho de outra pessoa, o que sobra é a mensagem
+    "não foi possível" na tela e o arquivo de log. Se o log estiver mudo, não
+    há como descobrir o que aconteceu. Vale para os módulos que atendem a
+    interface; os que não têm logger próprio ficam de fora.
+    """
+    import ast
+    import pathlib
+
+    arquivo = pathlib.Path(main.__file__)
+    arvore = ast.parse(arquivo.read_text(encoding="utf-8"))
+    mudos = []
+    for no in ast.walk(arvore):
+        if not isinstance(no, ast.ExceptHandler):
+            continue
+        amplo = no.type is None or (
+            isinstance(no.type, ast.Name) and no.type.id == "Exception"
+        )
+        if not amplo:
+            continue
+        registra = any(
+            isinstance(filho, ast.Attribute)
+            and isinstance(filho.value, ast.Name)
+            and filho.value.id == "logger"
+            for filho in ast.walk(no)
+        )
+        if not registra:
+            mudos.append(f"{arquivo.name}:{no.lineno}")
+
+    assert not mudos, (
+        "except Exception sem logger: a falha some sem deixar rastro — "
+        + ", ".join(mudos)
+    )
