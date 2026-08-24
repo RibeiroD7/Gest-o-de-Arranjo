@@ -65,11 +65,98 @@ def _escala_padrao():
 
 
 @pytest.mark.parametrize("escala", [1.0, 1.4])
-def test_todas_as_telas_constroem(escala):
+@pytest.mark.parametrize("mobile", [False, True])
+def test_todas_as_telas_constroem(escala, mobile):
+    """Cada tela monta nos dois layouts e nas duas pontas da escala de fonte.
+
+    O layout de celular não é o mesmo código com outra largura: cada tela tem
+    ramos ``if eh_mobile()`` que trocam cards por listas, escondem colunas e
+    fixam larguras. Construir só o layout de PC deixava metade do Android sem
+    rede de proteção.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
     tema.definir_escala(escala)
-    page, fp = _page(), flet.FilePicker()
-    for nome, construir in _telas(page, fp).items():
-        assert construir() is not None, f"tela {nome} não construiu (escala {escala})"
+    try:
+        page, fp = _page(), flet.FilePicker()
+        for nome, construir in _telas(page, fp).items():
+            assert construir() is not None, (
+                f"tela {nome} não construiu (escala {escala}, celular={mobile})"
+            )
+    finally:
+        armazenamento.definir_layout_mobile(False)
+
+
+@pytest.fixture
+def _arranjo_de_exemplo():
+    """Um mês montado de verdade: congregação, oradores, tema, presidente e data.
+
+    Tela vazia esconde a metade do código que só roda quando existe conteúdo
+    (tabelas, agrupamentos, rodízios). No fim apaga o que criou, para os testes
+    seguintes continuarem partindo de um banco limpo.
+    """
+    import database
+
+    tabelas = (
+        "arranjo_oradores", "arranjos", "datas_especiais", "orador_temas",
+        "oradores", "congregacoes", "presidentes", "presidentes_cadastro",
+    )
+    conn = database.get_connection()
+    try:
+        database.create_tables(conn)
+        # Parte de um banco limpo: os testes deste arquivo compartilham o
+        # mesmo banco temporário e nem todos apagam o que criaram.
+        for tabela in tabelas:
+            conn.execute(f"DELETE FROM {tabela}")
+        conn.execute(
+            "INSERT INTO congregacoes (nome) VALUES ('Minha'), ('Vila Nova')"
+        )
+        ids = {n: i for i, n in conn.execute("SELECT id, nome FROM congregacoes")}
+        conn.execute(
+            "INSERT INTO oradores (nome, categoria, congregacao_id) VALUES "
+            "('Orador Um', 'Ancião', ?), ('Orador Dois', 'Servo Ministerial', ?)",
+            (ids["Minha"], ids["Vila Nova"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    main.salvar_configuracao(
+        {
+            "nome_congregacao": "Minha", "endereco": "Rua A, 100", "cidade": "São Paulo",
+            "cep": "01000-000", "coordenador_discursos": "Coordenador",
+            "telefone_coordenador": "11999998888", "dia_reuniao": "sábado",
+            "horario_reuniao": "19:00", "circuito": "",
+        }
+    )
+    presidente = database.salvar_presidente_cadastro("Presidente Um", "Ancião")
+    database.salvar_data_especial("11/04/2026", "Celebração", "", "", presidente)
+
+    conn = database.get_connection()
+    try:
+        oradores = {n: i for i, n in conn.execute("SELECT id, nome FROM oradores")}
+        yield {"oradores": oradores}
+    finally:
+        for tabela in tabelas:
+            conn.execute(f"DELETE FROM {tabela}")
+        conn.commit()
+        conn.close()
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_todas_as_telas_constroem_com_dados(_arranjo_de_exemplo, mobile):
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        page, fp = _page(), flet.FilePicker()
+        for nome, construir in _telas(page, fp).items():
+            assert construir() is not None, (
+                f"tela {nome} não construiu com dados (celular={mobile})"
+            )
+    finally:
+        armazenamento.definir_layout_mobile(False)
 
 
 @pytest.mark.parametrize("escala", [1.0, 1.4])
