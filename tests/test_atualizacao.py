@@ -15,7 +15,7 @@ flet = pytest.importorskip("flet")
 flet.run = lambda *a, **k: None  # evita abrir a janela ao importar main
 
 import armazenamento  # noqa: E402
-import main  # noqa: E402
+import atualizacao  # noqa: E402
 
 ASSETS = [
     {"name": "GestaoArranjo-2.11.2-android-32bits.apk",
@@ -40,16 +40,16 @@ def celular(monkeypatch):
 class TestUrlInstaladorPlataforma:
     def test_android_atual_recebe_o_apk_arm64(self, celular):
         celular("aarch64")
-        assert main._url_instalador_plataforma(ASSETS) == "https://exemplo/arm64.apk"
+        assert atualizacao._url_instalador_plataforma(ASSETS) == "https://exemplo/arm64.apk"
 
     def test_android_antigo_recebe_o_apk_de_32_bits(self, celular):
         celular("armv7l")
-        assert main._url_instalador_plataforma(ASSETS) == "https://exemplo/32bits.apk"
+        assert atualizacao._url_instalador_plataforma(ASSETS) == "https://exemplo/32bits.apk"
 
     def test_arquitetura_desconhecida_fica_com_o_arm64(self, celular):
         # Praticamente todo aparelho em uso é arm64; na dúvida, é o palpite certo.
         celular("")
-        assert main._url_instalador_plataforma(ASSETS) == "https://exemplo/arm64.apk"
+        assert atualizacao._url_instalador_plataforma(ASSETS) == "https://exemplo/arm64.apk"
 
     def test_computador_recebe_o_instalador_do_sistema(self):
         esperado = (
@@ -57,7 +57,7 @@ class TestUrlInstaladorPlataforma:
             if sys.platform.startswith("win")
             else "https://exemplo/linux.tar.gz"
         )
-        assert main._url_instalador_plataforma(ASSETS) == esperado
+        assert atualizacao._url_instalador_plataforma(ASSETS) == esperado
 
     def test_release_sem_arquivo_para_a_plataforma(self):
-        assert main._url_instalador_plataforma([]) is None
+        assert atualizacao._url_instalador_plataforma([]) is None

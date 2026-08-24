@@ -30,7 +30,7 @@ echo ">> Versão: $VERSAO   (tag $TAG)"
 # 2) Mantém a versão sincronizada: pyproject.toml e o VERSAO_APP mostrado
 #    dentro de cada app (PC e mobile).
 sed -i -E "s/^version = \".*\"/version = \"$VERSAO\"/" "$PYPROJECT"
-sed -i -E "s/^VERSAO_APP = \".*\"/VERSAO_APP = \"$VERSAO\"/" src/main.py
+sed -i -E "s|^VERSAO_APP = \".*\"|VERSAO_APP = \"$VERSAO\"|" src/versao.py
 # O CI sobrescreve build_version pela tag, mas deixá-lo parado no arquivo faz
 # quem lê o repositório achar que a versão é outra.
 sed -i -E "s/^build_version = \".*\"/build_version = \"$VERSAO\"/" "$PYPROJECT"
