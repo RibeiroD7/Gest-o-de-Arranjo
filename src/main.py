@@ -213,6 +213,7 @@ from util import (
     aviso_backup_antigo,
     formatar_data_hora_sao_paulo,
     nome_oradores,
+    rotulo_de_prazo,
 )
 from versao import VERSAO_APP
 
@@ -2326,6 +2327,35 @@ def _semanas_reuniao_mes(ano: int, mes: int) -> list[date]:
     return _datas_por_weekday_no_mes(ano, mes, weekday)
 
 
+# Cor de cada nível de urgência devolvido por rotulo_de_prazo.
+CORES_PRAZO = {
+    "vencido": COR_ERRO,
+    "urgente": COR_ERRO,
+    "atencao": COR_AVISO,
+    "tranquilo": TEXTO_SECUNDARIO,
+    "": TEXTO_SECUNDARIO,
+}
+
+
+def _linha_pendencia(data_pendencia, texto: str, hoje: date) -> ft.Control:
+    """Uma pendência do Início: o que falta e para quando."""
+    prazo, nivel = rotulo_de_prazo(data_pendencia, hoje)
+    cor = CORES_PRAZO.get(nivel, TEXTO_SECUNDARIO)
+    conteudo: list[ft.Control] = [
+        ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, size=fonte(15), color=cor),
+        ft.Text(texto, size=fonte(12), color=TEXTO_PRIMARIO, expand=True, max_lines=2),
+    ]
+    if prazo:
+        conteudo.append(
+            ft.Text(prazo, size=fonte(11), color=cor, weight=ft.FontWeight.W_600)
+        )
+    return ft.Row(
+        [c for c in conteudo],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+
+
 def _resumo_mes_programacao(
     ano: int,
     mes: int,
@@ -2348,12 +2378,23 @@ def _resumo_mes_programacao(
     contagens = contagens_ano.get(mes, {"recebidos": 0, "enviados": 0})
     cobertas = sum(1 for d in datas_semanas if d in recebidos or d in especiais)
     pres_definidos = sum(1 for d in datas_semanas if d in presidentes or d in especiais)
+    # A primeira data que ainda está sem: é dela que sai o prazo mostrado nas
+    # pendências do Início. Contar quantas faltam não diz se corre ou espera.
+    def _primeira_sem(preenchidas: dict) -> date | None:
+        for data_semana in semanas:
+            chave = _formatar_data_arranjo(data_semana)
+            if chave not in preenchidas and chave not in especiais:
+                return data_semana
+        return None
+
     return {
         "semanas": len(semanas),
         "cobertas": cobertas,
         "presidentes": pres_definidos,
         "recebidos": contagens["recebidos"],
         "enviados": contagens["enviados"],
+        "primeira_sem_orador": _primeira_sem(recebidos),
+        "primeira_sem_presidente": _primeira_sem(presidentes),
     }
 
 
@@ -3005,7 +3046,9 @@ def tela_inicio(
         padding=16,
     )
 
-    pendencias: list[str] = []
+    # (data da falha, texto). A data ordena a lista e vira o prazo na tela;
+    # None é pendência sem data marcada, como as que esperam resposta.
+    pendencias: list[tuple[date | None, str]] = []
     # Cache por ano: a janela de atenção pode cruzar a virada (nov → jan).
     dados_por_ano: dict[int, dict] = {
         ano: {
@@ -3040,42 +3083,48 @@ def tela_inicio(
         if ano_ref != ano:
             nome_mes = f"{nome_mes}/{ano_ref}"
         if r["semanas"] and r["cobertas"] == 0:
-            pendencias.append(f"{nome_mes}: nenhuma semana com orador")
+            pendencias.append(
+                (r["primeira_sem_orador"], f"{nome_mes}: nenhuma semana com orador")
+            )
         elif r["cobertas"] < r["semanas"]:
-            pendencias.append(f"{nome_mes}: só {r['cobertas']} de {r['semanas']} semanas com orador")
+            pendencias.append((
+                r["primeira_sem_orador"],
+                f"{nome_mes}: só {r['cobertas']} de {r['semanas']} semanas com orador",
+            ))
         if r["cobertas"] and r["presidentes"] < r["semanas"]:
             faltam = r["semanas"] - r["presidentes"]
-            pendencias.append(f"{nome_mes}: {faltam} semana(s) sem presidente")
+            pendencias.append((
+                r["primeira_sem_presidente"],
+                f"{nome_mes}: {faltam} semana(s) sem presidente",
+            ))
 
     # Designações aguardando confirmação do orador (status "pendente").
+    # Ordem por proximidade: o que acontece antes cobra antes. Sem data (as
+    # que esperam resposta) fica no fim do bloco datado.
+    pendencias.sort(key=lambda item: item[0] or date.max)
+
     aguardando = contar_designacoes_por_status(ano).get("pendente", 0)
     if aguardando:
         pendencias.insert(
-            0, f"{aguardando} designação(ões) aguardando confirmação"
+            0, (None, f"{aguardando} designação(ões) aguardando confirmação")
         )
 
     # Conflitos (mesmo orador na mesma data) vêm primeiro — são os mais críticos.
     conflitos = detectar_conflitos_oradores(carregar_designacoes_ano(ano))
     for conflito in reversed(conflitos[:3]):
         nome = conflito["orador_nome"] or "Orador"
-        pendencias.insert(
-            0, f"Conflito: {nome} em {conflito['data']} ({conflito['ocorrencias']}×)"
-        )
+        pendencias.insert(0, (
+            _parse_data_arranjo(conflito["data"]),
+            f"Conflito: {nome} em {conflito['data']} ({conflito['ocorrencias']}×)",
+        ))
 
     if len(pendencias) > 6:
         restante = len(pendencias) - 6
-        pendencias = pendencias[:6] + [f"… e mais {restante} pendência(s)"]
+        pendencias = pendencias[:6] + [(None, f"… e mais {restante} pendência(s)")]
 
     linhas_pendencias: list[ft.Control] = [
-        ft.Row(
-            [
-                ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, size=fonte(15), color=COR_AVISO),
-                ft.Text(texto, size=fonte(12), color=TEXTO_PRIMARIO, expand=True, max_lines=2),
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.START,
-        )
-        for texto in pendencias
+        _linha_pendencia(data_pendencia, texto, hoje)
+        for data_pendencia, texto in pendencias
     ] or [
         ft.Row(
             [

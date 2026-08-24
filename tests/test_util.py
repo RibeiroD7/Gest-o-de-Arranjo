@@ -15,6 +15,7 @@ from util import (
     aviso_backup_antigo,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
+    rotulo_de_prazo,
 )
 
 
@@ -201,3 +202,30 @@ class TestAvisoBackupAntigo:
         """O Drive devolve UTC com Z; o banco local guarda hora do aparelho."""
         # 12:00Z é 09:00 em São Paulo: o backup é anterior à alteração das 10h.
         assert aviso_backup_antigo("2026-08-22T12:00:00Z", "2026-08-22T10:00:00-03:00")
+
+
+class TestRotuloDePrazo:
+    """O prazo é o que separa "falta 1 orador" de "falta 1 orador para sábado"."""
+
+    HOJE = date(2026, 9, 1)
+
+    def test_sem_data_nao_tem_rotulo(self):
+        assert rotulo_de_prazo(None, self.HOJE) == ("", "")
+
+    def test_data_passada(self):
+        assert rotulo_de_prazo(date(2026, 8, 29), self.HOJE) == ("já passou", "vencido")
+
+    def test_hoje_e_amanha(self):
+        assert rotulo_de_prazo(self.HOJE, self.HOJE) == ("é hoje", "urgente")
+        assert rotulo_de_prazo(date(2026, 9, 2), self.HOJE) == ("é amanhã", "urgente")
+
+    def test_dentro_da_semana_e_urgente(self):
+        assert rotulo_de_prazo(date(2026, 9, 8), self.HOJE) == ("em 7 dias", "urgente")
+
+    def test_ate_tres_semanas_pede_atencao(self):
+        assert rotulo_de_prazo(date(2026, 9, 9), self.HOJE) == ("em 8 dias", "atencao")
+        assert rotulo_de_prazo(date(2026, 9, 22), self.HOJE) == ("em 21 dias", "atencao")
+
+    def test_mais_longe_conta_em_semanas(self):
+        assert rotulo_de_prazo(date(2026, 9, 23), self.HOJE) == ("em 3 semanas", "tranquilo")
+        assert rotulo_de_prazo(date(2026, 11, 30), self.HOJE) == ("em 12 semanas", "tranquilo")

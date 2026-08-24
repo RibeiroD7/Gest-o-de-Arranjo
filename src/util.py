@@ -207,6 +207,35 @@ def aviso_backup_antigo(
     )
 
 
+# Uma pendência daqui a dez semanas e outra daqui a nove dias pediam a mesma
+# frase na tela do Início: "falta 1 orador". Estes rótulos existem para as
+# duas não se parecerem.
+DIAS_URGENTE = 7
+DIAS_ATENCAO = 21
+
+
+def rotulo_de_prazo(data: date | None, hoje: date) -> tuple[str, str]:
+    """Quanto falta para ``data`` e o quanto isso é urgente.
+
+    Devolve (rótulo, nível), com nível em "vencido", "urgente", "atencao" ou
+    "tranquilo". Sem data, devolve dois vazios: nem toda pendência tem prazo.
+    """
+    if data is None:
+        return "", ""
+    dias = (data - hoje).days
+    if dias < 0:
+        return "já passou", "vencido"
+    if dias == 0:
+        return "é hoje", "urgente"
+    if dias == 1:
+        return "é amanhã", "urgente"
+    if dias <= DIAS_URGENTE:
+        return f"em {dias} dias", "urgente"
+    if dias <= DIAS_ATENCAO:
+        return f"em {dias} dias", "atencao"
+    return f"em {dias // 7} semanas", "tranquilo"
+
+
 # Os meses por extenso, como aparecem nas telas, nos PDFs e nas imagens. O
 # índice é o número do mês (1 a 12), por isso a primeira posição é vazia.
 NOMES_MESES = [
