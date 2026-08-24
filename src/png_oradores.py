@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from armazenamento import ASSETS_DIR, EXPORTS_DIR
 from log_app import logger
-from util import nome_oradores
+from util import NOMES_MESES, nome_oradores
 
 ESCALA = 3
 DPI = 300
@@ -38,22 +38,6 @@ COR_LINHA_ALT = "#F3F7FB"
 COR_SUBLINHADO = "#64B5F6"
 
 NOMES_ESPECIAIS = {"Reunião Especial", "Arranjo Local"}
-
-NOMES_MESES = [
-    "",
-    "Janeiro",
-    "Fevereiro",
-    "Março",
-    "Abril",
-    "Maio",
-    "Junho",
-    "Julho",
-    "Agosto",
-    "Setembro",
-    "Outubro",
-    "Novembro",
-    "Dezembro",
-]
 
 
 def _px(valor: int | float) -> int:

@@ -28,7 +28,7 @@ from reportlab.platypus import (
 )
 
 from database import get_connection, reuniao_em
-from util import SEPARADOR_SIMPOSIO
+from util import NOMES_MESES, SEPARADOR_SIMPOSIO
 
 EXPORTS_DIR = os.path.join("exports")
 
@@ -48,11 +48,6 @@ ALTURAS_CORPO = [31, 30, 31]
 ALTURA_DIVISOR = 16
 ALTURA_RODAPE = 15
 FONTE_NEGRITO = "Helvetica-Bold"
-
-NOMES_MESES = [
-    "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-]
 
 # Nome do dia para o cabeçalho de cada data do quadro. Sai da própria data,
 # não da configuração: o quadro trazia "SÁBADO" fixo e mentia em todo mês de

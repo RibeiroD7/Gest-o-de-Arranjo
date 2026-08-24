@@ -207,6 +207,25 @@ def aviso_backup_antigo(
     )
 
 
+# Os meses por extenso, como aparecem nas telas, nos PDFs e nas imagens. O
+# índice é o número do mês (1 a 12), por isso a primeira posição é vazia.
+NOMES_MESES = [
+    "",
+    "Janeiro",
+    "Fevereiro",
+    "Março",
+    "Abril",
+    "Maio",
+    "Junho",
+    "Julho",
+    "Agosto",
+    "Setembro",
+    "Outubro",
+    "Novembro",
+    "Dezembro",
+]
+
+
 # Como os dois nomes de um simpósio aparecem juntos, em toda parte.
 SEPARADOR_SIMPOSIO = "/"
 
