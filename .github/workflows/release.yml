@@ -46,21 +46,7 @@ jobs:
           SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
           ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
           SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
-        run: |
-          python - <<'EOF'
-          import os, pathlib
-          arquivo = pathlib.Path("src/credenciais_app.py")
-          texto = arquivo.read_text(encoding="utf-8")
-          for chave, variavel in (
-              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
-              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
-              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
-              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
-          ):
-              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
-          arquivo.write_text(texto, encoding="utf-8")
-          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
-          EOF
+        run: python .github/scripts/injetar_credenciais.py
 
       - name: Remover a extensão de contatos (só Android)
         # flutter_contacts não tem implementação para desktop; o app importa a
@@ -132,21 +118,7 @@ jobs:
           SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
           ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
           SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
-        run: |
-          python - <<'EOF'
-          import os, pathlib
-          arquivo = pathlib.Path("src/credenciais_app.py")
-          texto = arquivo.read_text(encoding="utf-8")
-          for chave, variavel in (
-              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
-              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
-              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
-              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
-          ):
-              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
-          arquivo.write_text(texto, encoding="utf-8")
-          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
-          EOF
+        run: python .github/scripts/injetar_credenciais.py
 
       - name: Remover a extensão de contatos (só Android)
         # flutter_contacts não tem implementação para desktop; o app importa a
@@ -215,21 +187,7 @@ jobs:
           SECRET_DESKTOP: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP }}
           ID_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_ID_DISPOSITIVO }}
           SECRET_DISPOSITIVO: ${{ secrets.GOOGLE_CLIENT_SECRET_DISPOSITIVO }}
-        run: |
-          python - <<'EOF'
-          import os, pathlib
-          arquivo = pathlib.Path("src/credenciais_app.py")
-          texto = arquivo.read_text(encoding="utf-8")
-          for chave, variavel in (
-              ("CLIENT_ID_DESKTOP", "ID_DESKTOP"),
-              ("CLIENT_SECRET_DESKTOP", "SECRET_DESKTOP"),
-              ("CLIENT_ID_DISPOSITIVO", "ID_DISPOSITIVO"),
-              ("CLIENT_SECRET_DISPOSITIVO", "SECRET_DISPOSITIVO"),
-          ):
-              texto = texto.replace(f'{chave} = ""', f'{chave} = "{os.environ.get(variavel, "")}"')
-          arquivo.write_text(texto, encoding="utf-8")
-          print("Credenciais embutidas:", [c for c in ("ID_DESKTOP","ID_DISPOSITIVO") if os.environ.get(c)])
-          EOF
+        run: python .github/scripts/injetar_credenciais.py
 
       - name: Compilar
         # --split-per-abi gera um APK por arquitetura (bem menor que o
