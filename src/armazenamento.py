@@ -36,6 +36,12 @@ def garantir_pastas() -> None:
         pasta.mkdir(parents=True, exist_ok=True)
 
 
+# Layout em uso. Começa em desktop e só muda quando o main descobre a
+# plataforma real. O padrão aqui existe para quem chamar eh_mobile() antes
+# disso (um teste, um script) receber uma resposta em vez de NameError.
+_LAYOUT_MOBILE = False
+
+
 def definir_layout_mobile(mobile: bool) -> None:
     """Define se a interface deve usar o layout de celular (Android/iOS)."""
     global _LAYOUT_MOBILE

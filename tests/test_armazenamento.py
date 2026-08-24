@@ -38,3 +38,21 @@ class TestEhMobile:
         monkeypatch.setenv("GA_FORCAR_MOBILE", "1")
         armazenamento.definir_layout_mobile(False)
         assert armazenamento.eh_mobile() is True
+
+
+def test_eh_mobile_responde_antes_de_definir_layout():
+    """Quem chamar eh_mobile() sem passar pelo main recebe False, não NameError.
+
+    O layout só é definido em main(), quando o Flet informa a plataforma. Um
+    teste ou script que importe o módulo e pergunte antes disso precisa de uma
+    resposta utilizável.
+    """
+    import importlib
+
+    import armazenamento
+
+    recarregado = importlib.reload(armazenamento)
+    try:
+        assert recarregado.eh_mobile() is False
+    finally:
+        recarregado.definir_layout_mobile(False)
