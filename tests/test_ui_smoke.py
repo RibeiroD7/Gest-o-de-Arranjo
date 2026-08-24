@@ -1324,3 +1324,26 @@ def test_todo_except_amplo_deixa_rastro_no_log():
         "except Exception sem logger: a falha some sem deixar rastro — "
         + ", ".join(mudos)
     )
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_rodape_do_mes_oferece_a_agenda(mobile):
+    """O .ics do mês sai de onde o mês está aberto, nos dois layouts."""
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    try:
+        nada = lambda *a, **k: None  # noqa: E731
+        rodape = main._criar_rodape_dialog_mes(nada, nada, nada, nada, on_agenda=nada)
+        rotulos = [
+            b.content for b in rodape.content.controls if isinstance(b.content, str)
+        ]
+        assert ("Agenda" if mobile else "Exportar para a agenda") in rotulos
+        # Sem a ação, o botão não aparece: quem chama de outro lugar não muda.
+        sem_agenda = main._criar_rodape_dialog_mes(nada, nada, nada)
+        rotulos_sem = [
+            b.content for b in sem_agenda.content.controls if isinstance(b.content, str)
+        ]
+        assert not any("genda" in r for r in rotulos_sem)
+    finally:
+        armazenamento.definir_layout_mobile(False)

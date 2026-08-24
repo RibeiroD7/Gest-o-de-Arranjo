@@ -22,6 +22,7 @@ import flet as ft
 
 import nuvem_drive
 import tema as _tema  # apelidado: `tema` é usado como variável local (título) em várias telas
+from agenda_ics import eventos_do_mes, gerar_ics
 from armazenamento import (
     EXPORTS_DIR,
     FOTOS_DIR,
@@ -56,6 +57,7 @@ from database import (
     carregar_arranjos_por_ano,
     carregar_dataframe_temas,
     carregar_designacoes_ano,
+    carregar_enviados_por_ano,
     carregar_escala_fonte,
     carregar_oradores_arranjo,
     carregar_presidentes_por_ano,
@@ -5144,6 +5146,7 @@ def _criar_rodape_dialog_mes(
     on_editar: Callable,
     on_excluir: Callable,
     on_falar_responsavel: Callable | None = None,
+    on_agenda: Callable | None = None,
 ) -> ft.Container:
     """Barra fixa de ações na parte inferior do dialog."""
     mobile = eh_mobile()
@@ -5159,6 +5162,19 @@ def _criar_rodape_dialog_mes(
                 )
             ]
             if on_falar_responsavel
+            else []
+        ),
+        *(
+            [
+                ft.OutlinedButton(
+                    content="Agenda" if mobile else "Exportar para a agenda",
+                    icon=ft.Icons.EVENT_OUTLINED,
+                    tooltip="Gera um arquivo .ics com os compromissos do mês "
+                            "para importar na agenda do celular",
+                    on_click=on_agenda,
+                )
+            ]
+            if on_agenda
             else []
         ),
         ft.OutlinedButton(
@@ -7827,6 +7843,33 @@ def abrir_dialog_oradores_mes(
             page, arranjo_id, "enviado", atualizar_listas, arranjo=arranjo
         )
 
+    def exportar_agenda(_=None):
+        """Escreve o mês num .ics para entrar na agenda do celular."""
+        try:
+            eventos = eventos_do_mes(
+                ano,
+                mes,
+                carregar_recebidos_por_ano(ano),
+                carregar_enviados_por_ano(ano),
+                carregar_presidentes_por_ano(ano),
+                listar_datas_especiais_por_ano(ano),
+            )
+            if not eventos:
+                mostrar_aviso(
+                    page,
+                    "Nada para exportar",
+                    "Este mês ainda não tem orador, designação ou data especial.",
+                )
+                return
+            EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            caminho = EXPORTS_DIR / f"arranjo_{ano}_{mes:02d}.ics"
+            caminho.write_text(gerar_ics(eventos), encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Falha ao exportar o mês para a agenda")
+            mostrar_aviso(page, "Erro", f"Não foi possível gerar o arquivo: {exc}")
+            return
+        entregar_arquivo(page, str(caminho), abrir_arquivo)
+
     def falar_com_responsavel(_=None):
         abrir_dialog_falar_responsavel(page, arranjo)
 
@@ -8137,7 +8180,11 @@ def abrir_dialog_oradores_mes(
         inset_padding=ft.Padding.all(12 if eh_mobile() else 40),
         actions=[
             _criar_rodape_dialog_mes(
-                fechar, editar_arranjo, excluir_arranjo, falar_com_responsavel
+                fechar,
+                editar_arranjo,
+                excluir_arranjo,
+                falar_com_responsavel,
+                on_agenda=exportar_agenda,
             ),
         ],
         actions_padding=ft.Padding.symmetric(
