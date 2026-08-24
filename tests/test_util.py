@@ -12,6 +12,7 @@ from util import (
     _parse_data_arranjo,
     _rotulo_weekday,
     _weekday_mais_usado,
+    aviso_backup_antigo,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
 )
@@ -163,3 +164,40 @@ class TestFormatarDataHoraSaoPaulo:
         assert formatar_data_hora_sao_paulo(None) == "—"
         assert formatar_data_hora_sao_paulo("") == "—"
         assert formatar_data_hora_sao_paulo("qualquer coisa") == "qualquer coisa"
+
+
+class TestAvisoBackupAntigo:
+    """Restaurar um backup velho por cima de trabalho novo é perda silenciosa.
+
+    Cenário real: a programação do mês é montada no computador e, dias depois,
+    o celular oferece restaurar o backup da nuvem, que ainda é o de antes.
+    """
+
+    def test_backup_mais_velho_que_os_dados_avisa(self):
+        aviso = aviso_backup_antigo(
+            "2026-08-19T14:30:00", "2026-08-22T09:10:00", "Celular"
+        )
+        assert "19/08/2026" in aviso and "22/08/2026" in aviso
+        assert "Celular" in aviso
+
+    def test_backup_mais_novo_nao_avisa(self):
+        assert aviso_backup_antigo("2026-08-22T09:10:00", "2026-08-19T14:30:00") == ""
+
+    def test_diferenca_de_minutos_nao_avisa(self):
+        # O banco é gravado por coisas que não são edição (escala de fonte,
+        # backup do dia): poucos minutos não significam trabalho perdido.
+        assert aviso_backup_antigo("2026-08-22T09:00:00", "2026-08-22T09:05:00") == ""
+
+    def test_sem_aparelho_a_frase_nao_cita_origem(self):
+        aviso = aviso_backup_antigo("2026-08-19T14:30:00", "2026-08-22T09:10:00")
+        assert aviso and "gerado em" not in aviso
+
+    def test_datas_ilegiveis_ou_ausentes_nao_avisam(self):
+        assert aviso_backup_antigo("", "2026-08-22T09:10:00") == ""
+        assert aviso_backup_antigo("2026-08-19T14:30:00", "") == ""
+        assert aviso_backup_antigo("ontem", "2026-08-22T09:10:00") == ""
+
+    def test_backup_da_nuvem_vem_em_utc(self):
+        """O Drive devolve UTC com Z; o banco local guarda hora do aparelho."""
+        # 12:00Z é 09:00 em São Paulo: o backup é anterior à alteração das 10h.
+        assert aviso_backup_antigo("2026-08-22T12:00:00Z", "2026-08-22T10:00:00-03:00")

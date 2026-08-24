@@ -645,3 +645,49 @@ class TestEscalaDePresidentes:
         assert ok is True
         por_nome = {p["nome"]: p for p in database.listar_presidentes_cadastro()}
         assert por_nome["Fora das Especiais"]["preside_especiais"] is False
+
+
+class TestOrigemDoBackup:
+    """O arquivo diz de onde e de quando veio, para o aviso da restauração."""
+
+    def test_exportado_traz_aparelho_e_data(self):
+        _resetar_banco()
+        caminho, _ = exportar_backup()
+        resumo = database.resumo_backup(caminho)
+        assert resumo["gerado_em"]
+        assert resumo["aparelho"] in ("Celular",) or resumo["aparelho"].startswith(
+            "Computador"
+        )
+
+    def test_backup_antigo_sem_aparelho_nao_quebra(self, tmp_path):
+        arquivo = tmp_path / "antigo.json"
+        arquivo.write_text(
+            '{"app": "gestao-arranjo", "versao_backup": 1, '
+            '"gerado_em": "2026-01-05T10:00:00", "tabelas": {}}',
+            encoding="utf-8",
+        )
+        assert database.resumo_backup(arquivo) == {
+            "gerado_em": "2026-01-05T10:00:00",
+            "aparelho": "",
+        }
+
+    def test_arquivo_ilegivel_devolve_vazio(self, tmp_path):
+        arquivo = tmp_path / "quebrado.json"
+        arquivo.write_text("isto não é json", encoding="utf-8")
+        assert database.resumo_backup(arquivo) == {"gerado_em": "", "aparelho": ""}
+        assert database.resumo_backup(tmp_path / "nao_existe.json") == {
+            "gerado_em": "",
+            "aparelho": "",
+        }
+
+    def test_alteracao_local_acompanha_a_escrita_no_banco(self):
+        _resetar_banco()
+        antes = database.alterado_em_local()
+        assert antes, "o banco existe, então a data de alteração não pode ser vazia"
+        conn = get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Depois')")
+            conn.commit()
+        finally:
+            conn.close()
+        assert database.alterado_em_local() >= antes

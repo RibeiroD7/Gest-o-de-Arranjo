@@ -162,6 +162,51 @@ def formatar_data_hora_sao_paulo(iso_utc: str | None) -> str:
     return momento.astimezone(FUSO_SAO_PAULO).strftime("%d/%m/%Y %H:%M")
 
 
+# Restaurar um backup troca tudo o que está no aparelho. Quando o arquivo é
+# mais VELHO do que os dados daqui, o certo é avisar: é o caso de quem mexeu na
+# programação no computador e depois abre o celular, onde o backup na nuvem
+# ainda é o de ontem.
+#
+# A folga existe porque o banco é gravado por coisas que não são edição do
+# usuário (a escala de fonte, o backup do dia), e um punhado de minutos de
+# diferença não significa trabalho perdido.
+FOLGA_BACKUP_MINUTOS = 10
+
+
+def _momento(iso: str | None) -> datetime | None:
+    """Data/hora ISO como instante comparável. Sem fuso, assume o do aparelho."""
+    texto = (iso or "").strip()
+    if not texto:
+        return None
+    try:
+        momento = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return momento.astimezone() if momento.tzinfo is None else momento
+
+
+def aviso_backup_antigo(
+    gerado_em: str | None, alterado_em: str | None, aparelho: str = ""
+) -> str:
+    """Frase de alerta quando o backup é anterior às alterações locais.
+
+    Devolve string vazia quando não há o que avisar: backup mais novo, dentro
+    da folga, ou datas que não dá para ler.
+    """
+    backup, local = _momento(gerado_em), _momento(alterado_em)
+    if backup is None or local is None:
+        return ""
+    if local - backup <= timedelta(minutes=FOLGA_BACKUP_MINUTOS):
+        return ""
+    origem = f", gerado em {aparelho}" if aparelho else ""
+    return (
+        f"Atenção: este backup é de {formatar_data_hora_sao_paulo(gerado_em)}"
+        f"{origem}, e os dados deste aparelho foram alterados depois, em "
+        f"{formatar_data_hora_sao_paulo(alterado_em)}. Restaurar descarta o que "
+        "foi feito aqui desde então."
+    )
+
+
 # Como os dois nomes de um simpósio aparecem juntos, em toda parte.
 SEPARADOR_SIMPOSIO = "/"
 

@@ -47,6 +47,7 @@ from database import (
     adicionar_ano_planejamento,
     adicionar_orador_arranjo,
     adicionar_tipo_evento,
+    alterado_em_local,
     atualizar_data_designacao,
     atualizar_orador_arranjo,
     atualizar_status_orador_arranjo,
@@ -99,6 +100,7 @@ from database import (
     relatorio_presidencias,
     remover_orador_arranjo,
     restaurar_backup,
+    resumo_backup,
     reuniao_em,
     salvar_arranjo,
     salvar_data_especial,
@@ -207,6 +209,7 @@ from util import (
     _parse_data_arranjo,
     _rotulo_weekday,
     _weekday_mais_usado,
+    aviso_backup_antigo,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
     nome_oradores,
@@ -9200,6 +9203,17 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
     )
 
 
+def _texto_de_confirmacao(base: str, aviso: str) -> ft.Control:
+    """Corpo do diálogo de restauração, com o alerta em destaque quando existe."""
+    linhas: list[ft.Control] = [ft.Text(base, size=fonte(13))]
+    if aviso:
+        linhas.append(ft.Container(height=10))
+        linhas.append(
+            ft.Text(aviso, size=fonte(13), color=COR_AVISO, weight=ft.FontWeight.W_600)
+        )
+    return ft.Column(linhas, tight=True, spacing=0)
+
+
 def _cabecalho_card_ajustes(icone: str, titulo: str, descricao: str) -> ft.Control:
     """Título de um card de Ajustes: ícone, nome e uma linha do que ele faz.
 
@@ -9523,15 +9537,19 @@ def tela_ajustes(
                 mensagem,
             )
 
+        resumo = resumo_backup(caminho)
+        aviso = aviso_backup_antigo(
+            resumo["gerado_em"], alterado_em_local(), resumo["aparelho"]
+        )
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
                 title=ft.Text("Restaurar backup"),
-                content=ft.Text(
+                content=_texto_de_confirmacao(
                     "Os dados atuais serão substituídos pelos do arquivo selecionado.\n"
                     "Uma cópia de segurança do estado atual será salva antes.\n\n"
                     "Deseja continuar?",
-                    size=fonte(13),
+                    aviso,
                 ),
                 actions=[
                     ft.TextButton("Cancelar", on_click=fechar),
@@ -10056,15 +10074,16 @@ def tela_ajustes(
             mostrar_sucesso(page, "Dados restaurados da nuvem.")
             recarregar()
 
+        aviso = aviso_backup_antigo(mais_novo.get("modifiedTime"), alterado_em_local())
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
                 title=ft.Text("Restaurar da nuvem?"),
-                content=ft.Text(
+                content=_texto_de_confirmacao(
                     f"O backup mais recente da nuvem é de {quando} (horário de Brasília).\n\n"
                     "Os dados atuais deste aparelho serão SUBSTITUÍDOS. Uma cópia "
                     "de segurança do estado atual é salva antes, na pasta de backups.",
-                    size=fonte(13),
+                    aviso,
                 ),
                 actions=[
                     ft.TextButton("Cancelar", on_click=lambda _: page.pop_dialog()),

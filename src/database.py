@@ -2918,6 +2918,50 @@ TABELAS_BACKUP = [
 ]
 
 
+def nome_do_aparelho() -> str:
+    """De onde saiu o backup, em duas palavras: "Celular" ou "Computador (Windows)".
+
+    Serve para o aviso da restauração dizer de qual ponta veio o arquivo. Não
+    carrega nome de máquina nem nada que identifique a pessoa.
+    """
+    import platform
+
+    from armazenamento import eh_mobile
+
+    if eh_mobile():
+        return "Celular"
+    sistema = (platform.system() or "").strip()
+    return f"Computador ({sistema})" if sistema else "Computador"
+
+
+def resumo_backup(caminho: str | Path) -> dict[str, str]:
+    """O que o arquivo diz sobre si mesmo: quando e onde foi gerado.
+
+    Backups antigos não trazem o aparelho; nesse caso o campo volta vazio.
+    """
+    import json
+
+    try:
+        dados = json.loads(Path(caminho).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"gerado_em": "", "aparelho": ""}
+    if not isinstance(dados, dict):
+        return {"gerado_em": "", "aparelho": ""}
+    return {
+        "gerado_em": str(dados.get("gerado_em") or ""),
+        "aparelho": str(dados.get("aparelho") or ""),
+    }
+
+
+def alterado_em_local() -> str:
+    """Quando o banco deste aparelho mudou pela última vez (ISO, hora local)."""
+    try:
+        modificado = Path(DB_PATH).stat().st_mtime
+    except OSError:
+        return ""
+    return datetime.fromtimestamp(modificado).isoformat(timespec="seconds")
+
+
 def exportar_backup() -> tuple[str, dict[str, int]]:
     """Exporta todos os dados para um JSON versionado em `backups/`.
 
@@ -2939,6 +2983,7 @@ def exportar_backup() -> tuple[str, dict[str, int]]:
         "app": "gestao-arranjo",
         "versao_backup": VERSAO_BACKUP,
         "gerado_em": datetime.now().isoformat(timespec="seconds"),
+        "aparelho": nome_do_aparelho(),
         "tabelas": tabelas,
     }
 
