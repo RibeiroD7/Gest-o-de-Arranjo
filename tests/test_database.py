@@ -750,3 +750,91 @@ class TestVersaoDoEsquema:
             assert database.versao_esquema(conn) == 3
         finally:
             conn.close()
+
+
+class TestConviteEnviado:
+    """O convite mandado deixa data, e as esperas longas são contadas."""
+
+    def _designacao(self, data: str) -> int:
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            conn.execute("DELETE FROM arranjo_oradores")
+            conn.execute("DELETE FROM arranjos")
+            conn.execute("DELETE FROM oradores")
+            conn.execute("DELETE FROM congregacoes")
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Destino')")
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+            conn.execute(
+                "INSERT INTO oradores (nome, categoria, congregacao_id) "
+                "VALUES ('Orador', 'Ancião', ?)", (cong,)
+            )
+            orador = conn.execute("SELECT id FROM oradores").fetchone()[0]
+            conn.execute(
+                "INSERT INTO arranjos (ano, mes_inicio, congregacao_host_id) VALUES (2026, 9, ?)",
+                (cong,),
+            )
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            conn.execute(
+                "INSERT INTO arranjo_oradores (arranjo_id, tipo, orador_id, congregacao_id, data) "
+                "VALUES (?, 'enviado', ?, ?, ?)",
+                (arranjo, orador, cong, data),
+            )
+            conn.commit()
+            return conn.execute("SELECT id FROM arranjo_oradores").fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_registrar_grava_a_data(self):
+        registro = self._designacao("19/09/2026")
+        database.registrar_convite_enviado(registro, "2026-09-10T08:00:00")
+        conn = get_connection()
+        try:
+            gravado = conn.execute(
+                "SELECT convidado_em FROM arranjo_oradores WHERE id = ?", (registro,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert gravado == "2026-09-10T08:00:00"
+
+    def test_conta_so_o_que_passou_do_prazo(self):
+        from datetime import date
+
+        registro = self._designacao("19/09/2026")
+        database.registrar_convite_enviado(registro, "2026-09-18T08:00:00")
+        assert database.contar_convites_sem_resposta(2026, 5, date(2026, 9, 20)) == 0
+        database.registrar_convite_enviado(registro, "2026-09-10T08:00:00")
+        assert database.contar_convites_sem_resposta(2026, 5, date(2026, 9, 20)) == 1
+
+    def test_convite_confirmado_sai_da_conta(self):
+        from datetime import date
+
+        registro = self._designacao("19/09/2026")
+        database.registrar_convite_enviado(registro, "2026-09-01T08:00:00")
+        database.atualizar_status_orador_arranjo(registro, "confirmado")
+        assert database.contar_convites_sem_resposta(2026, 5, date(2026, 9, 20)) == 0
+
+    def test_sem_convite_registrado_nao_conta(self):
+        from datetime import date
+
+        self._designacao("19/09/2026")
+        assert database.contar_convites_sem_resposta(2026, 5, date(2026, 9, 20)) == 0
+
+
+def test_banco_antigo_ganha_a_coluna_do_convite():
+    """Quem atualiza o app tem um banco sem a coluna; a migração a cria."""
+    conn = get_connection()
+    try:
+        create_tables(conn)
+        conn.execute("ALTER TABLE arranjo_oradores DROP COLUMN convidado_em")
+        database._marcar_esquema(conn, 1)
+        colunas = [linha[1] for linha in conn.execute("PRAGMA table_info(arranjo_oradores)")]
+        assert "convidado_em" not in colunas
+
+        create_tables(conn)
+
+        colunas = [linha[1] for linha in conn.execute("PRAGMA table_info(arranjo_oradores)")]
+        assert "convidado_em" in colunas
+        assert database.versao_esquema(conn) == database.ESQUEMA_ATUAL
+    finally:
+        conn.close()

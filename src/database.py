@@ -2,7 +2,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from armazenamento import (
@@ -329,7 +329,21 @@ def _marcar_esquema(conn, versao: int) -> None:
 #
 # Daqui para frente é aqui que entra mudança de esquema: uma função nova, o
 # próximo número, e o banco de quem atualiza passa por ela uma vez só.
-MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = []
+def _migracao_2_convite_enviado(conn) -> None:
+    """Quando o convite da designação foi mandado.
+
+    Sem isso, "aguardando confirmação" não dizia desde quando: um convite de
+    ontem e um de três semanas atrás eram a mesma linha na tela.
+    """
+    colunas = [linha[1] for linha in conn.execute("PRAGMA table_info(arranjo_oradores)")]
+    if "convidado_em" not in colunas:
+        conn.execute("ALTER TABLE arranjo_oradores ADD COLUMN convidado_em TEXT")
+    conn.commit()
+
+
+MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
+    (2, _migracao_2_convite_enviado),
+]
 
 ESQUEMA_ATUAL = MIGRACOES[-1][0] if MIGRACOES else 1
 
@@ -811,6 +825,44 @@ def migrar_arranjo_oradores(conn) -> None:
     conn.commit()
 
 
+def registrar_convite_enviado(registro_id: int, quando: str | None = None) -> None:
+    """Anota que o convite desta designação acabou de ser mandado.
+
+    Só marca a data; quem responde é o orador, e a confirmação continua sendo
+    o selo que o coordenador toca quando a resposta chega.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE arranjo_oradores SET convidado_em = ? WHERE id = ?",
+            (quando or datetime.now().isoformat(timespec="seconds"), registro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def contar_convites_sem_resposta(ano: int, dias: int, hoje: date | None = None) -> int:
+    """Quantas designações do ano esperam resposta há ``dias`` ou mais."""
+    limite = (hoje or date.today()) - timedelta(days=dias)
+    conn = get_connection()
+    try:
+        linha = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM arranjo_oradores
+            WHERE COALESCE(status, 'pendente') = 'pendente'
+              AND convidado_em IS NOT NULL
+              AND substr(convidado_em, 1, 10) <= ?
+              AND substr(data, 7, 4) = ?
+            """,
+            (limite.isoformat(), str(ano)),
+        ).fetchone()
+        return int(linha[0] or 0)
+    finally:
+        conn.close()
+
+
 def carregar_oradores_arranjo(arranjo_id: int) -> list[dict]:
     """Lista oradores vinculados a um arranjo (recebidos ou enviados)."""
     conn = get_connection()
@@ -824,6 +876,7 @@ def carregar_oradores_arranjo(arranjo_id: int) -> list[dict]:
                    ao.congregacao_id,
                    ao.data,
                    COALESCE(ao.status, 'pendente') AS status,
+                   ao.convidado_em,
                    COALESCE(o.nome, '') AS orador_nome,
                    ao.orador_2_id,
                    COALESCE(o2.nome, '') AS orador_2_nome,

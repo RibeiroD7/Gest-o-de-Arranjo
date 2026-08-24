@@ -66,6 +66,7 @@ from database import (
     carregar_temas_com_titulo_de_orador,
     carregar_temas_de_orador,
     carregar_todas_designacoes_presidente,
+    contar_convites_sem_resposta,
     contar_designacoes_por_mes,
     contar_designacoes_por_status,
     create_tables,
@@ -97,6 +98,7 @@ from database import (
     listar_vinculos_de_contato,
     oradores_com_temas_da_congregacao,
     realocar_uso_para_ano_da_data,
+    registrar_convite_enviado,
     relatorio_frequencia_oradores,
     relatorio_presidencias,
     remover_orador_arranjo,
@@ -202,6 +204,7 @@ try:
 except ImportError:  # pragma: no cover — depende da plataforma compilada
     _ServicoContatosNativo = None
 from util import (
+    DIAS_SEM_RESPOSTA,
     NOMES_MESES,
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
@@ -214,6 +217,7 @@ from util import (
     _weekday_mais_usado,
     aviso_backup_antigo,
     descrever_ultimo_envio,
+    espera_de_resposta,
     formatar_data_hora_sao_paulo,
     nome_oradores,
     rotulo_de_prazo,
@@ -3108,9 +3112,13 @@ def tela_inicio(
 
     aguardando = contar_designacoes_por_status(ano).get("pendente", 0)
     if aguardando:
-        pendencias.insert(
-            0, (None, f"{aguardando} designação(ões) aguardando confirmação")
-        )
+        texto_aguardando = f"{aguardando} designação(ões) aguardando confirmação"
+        parados = contar_convites_sem_resposta(ano, DIAS_SEM_RESPOSTA)
+        if parados:
+            texto_aguardando += (
+                f" · {parados} sem resposta há {DIAS_SEM_RESPOSTA}+ dias"
+            )
+        pendencias.insert(0, (None, texto_aguardando))
 
     # Conflitos (mesmo orador na mesma data) vêm primeiro — são os mais críticos.
     conflitos = detectar_conflitos_oradores(carregar_designacoes_ano(ano))
@@ -4966,11 +4974,20 @@ def _selo_status_designacao(registro: dict, on_status: Callable[[int, str], None
     icone, cor, rotulo = STATUS_DESIGNACAO_INFO.get(
         status, STATUS_DESIGNACAO_INFO["pendente"]
     )
+    # Convite mandado e sem resposta: o selo passa a cobrar sozinho.
+    espera, nivel = ("", "")
+    if status == "pendente":
+        espera, nivel = espera_de_resposta(registro.get("convidado_em"))
+    if nivel == "atencao":
+        cor = COR_AVISO
+    dica = f"{rotulo} — toque para alterar"
+    if espera:
+        dica = f"{rotulo} ({espera}) — toque para alterar"
     return ft.IconButton(
         icon=icone,
         icon_size=fonte(17),
         icon_color=cor,
-        tooltip=f"{rotulo} — toque para alterar",
+        tooltip=dica,
         style=ft.ButtonStyle(padding=4),
         on_click=lambda e, rid=int(registro["id"]), atual=status: on_status(
             rid, PROXIMO_STATUS_DESIGNACAO.get(atual, "confirmado")
@@ -6757,6 +6774,7 @@ async def _dialog_whatsapp_designacao_envio(
     page: ft.Page,
     designacao: dict,
     telefone_destino: str = "",
+    ao_enviar: Callable[[], None] | None = None,
 ):
     """Oferece salvar ou enviar por WhatsApp a imagem da designação.
 
@@ -6791,6 +6809,9 @@ async def _dialog_whatsapp_designacao_envio(
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Falha ao compartilhar o arquivo")
                     mostrar_aviso(page, "Não foi possível compartilhar", f"Detalhes: {exc}")
+                    return
+                if ao_enviar:
+                    ao_enviar()
 
         page.show_dialog(
             ft.AlertDialog(
@@ -6866,6 +6887,8 @@ async def _dialog_whatsapp_designacao_envio(
 
                 page.run_task(_compartilhar)
                 fechar_dialog()
+                if ao_enviar:
+                    ao_enviar()
                 return
 
             # No PC: não existe um jeito programático de anexar arquivo num
@@ -6894,6 +6917,8 @@ async def _dialog_whatsapp_designacao_envio(
                     "Mensagem copiada. Cole no WhatsApp e anexe a imagem.",
                 )
             fechar_dialog()
+            if ao_enviar:
+                ao_enviar()
 
         def abrir_pasta(_=None):
             entregar_arquivo(page, caminho, abrir_pasta_do_arquivo)
@@ -6923,7 +6948,9 @@ async def _dialog_whatsapp_designacao_envio(
         mostrar_aviso(page, "Erro", f"Não foi possível gerar a imagem: {exc}")
 
 
-def _abrir_whatsapp_designacao_envio(page: ft.Page, registro: dict) -> None:
+def _abrir_whatsapp_designacao_envio(
+    page: ft.Page, registro: dict, ao_enviar: Callable[[], None] | None = None
+) -> None:
     """Prepara os dados da designação enviada (com a congregação de destino)."""
     cong = None
     if registro.get("congregacao_id"):
@@ -6940,7 +6967,7 @@ def _abrir_whatsapp_designacao_envio(page: ft.Page, registro: dict) -> None:
         "responsavel": cong.get("responsavel", ""),
         "telefone": cong.get("telefone", ""),
     }
-    page.run_task(_dialog_whatsapp_designacao_envio, page, designacao)
+    page.run_task(_dialog_whatsapp_designacao_envio, page, designacao, "", ao_enviar)
 
 
 def _abrir_whatsapp_designacao_recebida(
@@ -7461,7 +7488,12 @@ def abrir_dialog_oradores_mes(
         abrir_dialog_editar_orador_arranjo(page, item, atualizar_listas)
 
     def whatsapp_designacao(item: dict):
-        _abrir_whatsapp_designacao_envio(page, item)
+        def marcar_convite():
+            """Mandou a mensagem: o app conta os dias a partir daqui."""
+            registrar_convite_enviado(int(item["id"]))
+            atualizar_listas()
+
+        _abrir_whatsapp_designacao_envio(page, item, ao_enviar=marcar_convite)
 
     def whatsapp_recebido(item: dict):
         _abrir_whatsapp_designacao_recebida(page, item, arranjo)

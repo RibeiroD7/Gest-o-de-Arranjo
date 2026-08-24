@@ -15,6 +15,7 @@ from util import (
     _weekday_mais_usado,
     aviso_backup_antigo,
     descrever_ultimo_envio,
+    espera_de_resposta,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
     rotulo_de_prazo,
@@ -257,4 +258,32 @@ class TestDescreverUltimoEnvio:
 
     def test_duas_semanas_paradas_chamam_atencao(self):
         _, nivel = descrever_ultimo_envio("2026-09-06T08:30:00-03:00", self.AGORA)
+        assert nivel == "atencao"
+
+
+class TestEsperaDeResposta:
+    """Um convite de ontem e um de três semanas não podem ser a mesma linha."""
+
+    HOJE = date(2026, 9, 20)
+
+    def test_sem_convite_registrado_nao_inventa_espera(self):
+        assert espera_de_resposta(None, self.HOJE) == ("", "")
+        assert espera_de_resposta("", self.HOJE) == ("", "")
+
+    def test_convite_de_hoje(self):
+        texto, nivel = espera_de_resposta("2026-09-20T09:00:00", self.HOJE)
+        assert texto == "convite enviado hoje"
+        assert nivel == ""
+
+    def test_um_dia_no_singular(self):
+        assert espera_de_resposta("2026-09-19T09:00:00", self.HOJE)[0] == "1 dia sem resposta"
+
+    def test_antes_do_prazo_nao_cobra(self):
+        texto, nivel = espera_de_resposta("2026-09-17T09:00:00", self.HOJE)
+        assert texto == "3 dias sem resposta"
+        assert nivel == ""
+
+    def test_passado_o_prazo_cobra(self):
+        texto, nivel = espera_de_resposta("2026-09-15T09:00:00", self.HOJE)
+        assert texto == "5 dias sem resposta"
         assert nivel == "atencao"

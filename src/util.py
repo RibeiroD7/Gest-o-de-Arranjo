@@ -207,6 +207,34 @@ def aviso_backup_antigo(
     )
 
 
+# A partir de quantos dias um convite sem resposta merece ser cobrado. Cinco
+# dias cobrem o fim de semana inteiro: quem foi convidado numa quarta e não
+# respondeu até segunda provavelmente esqueceu.
+DIAS_SEM_RESPOSTA = 5
+
+
+def espera_de_resposta(convidado_em: str | None, hoje: date | None = None) -> tuple[str, str]:
+    """Há quanto tempo este convite foi mandado sem resposta.
+
+    Devolve (texto, nível), com nível "atencao" quando já passou do prazo de
+    cobrança. Sem convite registrado, devolve dois vazios: o convite pode ter
+    saído por fora do app, e inventar espera seria mentira.
+    """
+    momento = _momento(convidado_em)
+    if momento is None:
+        return "", ""
+    hoje = hoje or date.today()
+    dias = (hoje - momento.date()).days
+    if dias <= 0:
+        return "convite enviado hoje", ""
+    if dias == 1:
+        return "1 dia sem resposta", ""
+    return (
+        f"{dias} dias sem resposta",
+        "atencao" if dias >= DIAS_SEM_RESPOSTA else "",
+    )
+
+
 # Depois de quantos dias sem enviar backup para a nuvem a tela chama atenção.
 # Duas semanas é tempo de o envio automático ter falhado várias vezes sem
 # ninguém notar, e ainda sobra margem para quem viajou.
