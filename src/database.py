@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 
@@ -304,7 +305,57 @@ def _migrar_oradores_fantasma(conn) -> None:
     conn.commit()
 
 
+# A versão do esquema fica gravada no próprio arquivo do banco (PRAGMA
+# user_version): é o que diz, sem adivinhação, até onde aquele banco foi
+# migrado. Bancos criados antes disso vêm com 0.
+
+
+def versao_esquema(conn) -> int:
+    """Em que versão do esquema está este arquivo de banco."""
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _marcar_esquema(conn, versao: int) -> None:
+    conn.execute(f"PRAGMA user_version = {int(versao)}")
+    conn.commit()
+
+
+# Migrações numeradas. Cada entrada é (versão, função) e roda uma única vez,
+# em ordem, nos bancos que ainda não chegaram nela. As mudanças de esquema
+# ANTERIORES a esta lista continuam no bloco idempotente de _criar_e_migrar:
+# elas se descobrem sozinhas olhando as colunas existentes, e reescrevê-las
+# como migrações numeradas exigiria adivinhar em que ponto está cada banco
+# instalado por aí.
+#
+# Daqui para frente é aqui que entra mudança de esquema: uma função nova, o
+# próximo número, e o banco de quem atualiza passa por ela uma vez só.
+MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = []
+
+ESQUEMA_ATUAL = MIGRACOES[-1][0] if MIGRACOES else 1
+
+
 def create_tables(conn):
+    """Cria as tabelas e traz o banco até o esquema desta versão do app.
+
+    Roda a cada abertura: o bloco idempotente cria o que falta e levanta
+    bancos antigos, as migrações numeradas rodam as pendentes, e o número da
+    versão fica gravado no arquivo (``PRAGMA user_version``).
+    """
+    _criar_e_migrar(conn)
+    _aplicar_migracoes_numeradas(conn)
+    _marcar_esquema(conn, ESQUEMA_ATUAL)
+
+
+def _aplicar_migracoes_numeradas(conn) -> None:
+    """Roda, em ordem, as migrações que este banco ainda não viu."""
+    versao = versao_esquema(conn)
+    for numero, migracao in MIGRACOES:
+        if versao < numero:
+            migracao(conn)
+            _marcar_esquema(conn, numero)
+
+
+def _criar_e_migrar(conn):
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -609,7 +660,6 @@ def create_tables(conn):
         cursor.execute("ALTER TABLE arranjo_oradores ADD COLUMN orador_2_id INTEGER")
 
     conn.commit()
-    print("Tabelas criadas com sucesso!")
 
 
 def migrar_oradores(conn) -> None:

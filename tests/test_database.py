@@ -691,3 +691,62 @@ class TestOrigemDoBackup:
         finally:
             conn.close()
         assert database.alterado_em_local() >= antes
+
+
+class TestVersaoDoEsquema:
+    """O banco carrega o número do esquema em que está (PRAGMA user_version)."""
+
+    def test_banco_marcado_apos_criar_tabelas(self):
+        conn = get_connection()
+        try:
+            create_tables(conn)
+            assert database.versao_esquema(conn) == database.ESQUEMA_ATUAL
+        finally:
+            conn.close()
+
+    def test_migracao_numerada_roda_uma_vez_so(self, monkeypatch):
+        """A segunda abertura do app não repete o que já foi aplicado."""
+        chamadas = []
+
+        def migracao_de_exemplo(conn):
+            chamadas.append("rodou")
+            conn.execute("CREATE TABLE IF NOT EXISTS exemplo_migracao (id INTEGER)")
+
+        monkeypatch.setattr(database, "MIGRACOES", [(2, migracao_de_exemplo)])
+        monkeypatch.setattr(database, "ESQUEMA_ATUAL", 2)
+
+        conn = get_connection()
+        try:
+            database._marcar_esquema(conn, 1)
+            create_tables(conn)
+            assert chamadas == ["rodou"]
+            assert database.versao_esquema(conn) == 2
+
+            create_tables(conn)
+            assert chamadas == ["rodou"], "migração aplicada de novo"
+        finally:
+            conn.execute("DROP TABLE IF EXISTS exemplo_migracao")
+            conn.commit()
+            conn.close()
+
+    def test_banco_antigo_passa_pela_migracao_pendente(self, monkeypatch):
+        """Quem está numa versão anterior recebe só o que falta."""
+        aplicadas = []
+        monkeypatch.setattr(
+            database,
+            "MIGRACOES",
+            [
+                (2, lambda conn: aplicadas.append(2)),
+                (3, lambda conn: aplicadas.append(3)),
+            ],
+        )
+        monkeypatch.setattr(database, "ESQUEMA_ATUAL", 3)
+
+        conn = get_connection()
+        try:
+            database._marcar_esquema(conn, 2)
+            create_tables(conn)
+            assert aplicadas == [3]
+            assert database.versao_esquema(conn) == 3
+        finally:
+            conn.close()
