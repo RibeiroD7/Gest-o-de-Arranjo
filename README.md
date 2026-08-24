@@ -1,7 +1,7 @@
 # Gestão de Arranjo
 
 Aplicativo para o coordenador de discursos públicos organizar o arranjo de
-oradores entre congregações do circuito: programação mensal, designações,
+oradores entre congregações: programação mensal, designações,
 presidentes da reunião de fim de semana e geração dos materiais para envio e
 impressão.
 
@@ -38,7 +38,7 @@ recente e baixa o arquivo certo para o aparelho.
 - **Programação.** O mês a mês do arranjo: oradores recebidos, designações
   enviadas, presidentes e datas especiais, com sugestão de datas conforme o
   dia de reunião e exportação das listas em PNG para o WhatsApp.
-- **Congregações.** As congregações do circuito e os oradores de cada uma, com
+- **Congregações.** As congregações cadastradas e os oradores de cada uma, com
   botão de WhatsApp para falar com o responsável. A busca acha também pelo
   nome do orador.
 - **Minha congregação.** Os seus dados, os seus oradores e o cadastro de
