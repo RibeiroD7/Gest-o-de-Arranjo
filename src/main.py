@@ -10277,6 +10277,44 @@ def tela_ajustes(
         width=_largura_dialog(page, 560),
     )
 
+    secao_atualizacao = ft.Container(
+        content=ft.Column(
+            [
+                _cabecalho_card_ajustes(
+                    ft.Icons.SYSTEM_UPDATE,
+                    "Atualizações",
+                    f"Versão instalada: {VERSAO_APP}.",
+                ),
+                ft.Container(height=4),
+                ft.Text(
+                    "Procura a última versão publicada e baixa o arquivo certo "
+                    "para este aparelho. A atualização instala por cima: os "
+                    "dados, os backups e as preferências continuam onde estão."
+                    if eh_mobile()
+                    else "Procura a última versão publicada, baixa o instalador "
+                    "e o abre. Os dados, os backups e as preferências "
+                    "continuam onde estão.",
+                    size=fonte(13),
+                    color=TEXTO_SECUNDARIO,
+                ),
+                ft.Container(height=12),
+                ft.FilledButton(
+                    "Buscar atualizações",
+                    icon=ft.Icons.SYSTEM_UPDATE,
+                    on_click=lambda _: verificar_atualizacao_agora(page),
+                ),
+            ],
+            spacing=0,
+            tight=True,
+        ),
+        padding=16 if eh_mobile() else 28,
+        bgcolor=FUNDO_CARD,
+        border=ft.Border.all(1, BORDA_SUAVE),
+        border_radius=14,
+        shadow=_sombra_card(),
+        width=_largura_dialog(page, 560),
+    )
+
     return ft.Column(
         [
             criar_cabecalho_tela(
@@ -10294,6 +10332,8 @@ def tela_ajustes(
             secao_planilha,
             ft.Container(height=24),
             secao_acessibilidade,
+            ft.Container(height=24),
+            secao_atualizacao,
         ],
         spacing=0,
         expand=True,
@@ -11948,10 +11988,19 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
 
 
 def _url_instalador_plataforma(assets: list[dict]) -> str | None:
-    """URL do instalador da release para o sistema atual (Windows/Linux)."""
+    """URL do arquivo da release para o sistema atual (Windows, Linux, Android)."""
     import sys
 
-    if sys.platform.startswith("win"):
+    if eh_mobile():
+        # O APK sai por arquitetura: arm64 nos aparelhos atuais, armeabi-v7a
+        # nos antigos de 32 bits. platform.machine() responde com a ABI do
+        # Python empacotado dentro do próprio APK, que é a do aparelho.
+        import platform
+
+        maquina = (platform.machine() or "").lower()
+        de_32_bits = "armv7" in maquina or maquina == "armv8l"
+        sufixo = "-android-32bits.apk" if de_32_bits else "-android.apk"
+    elif sys.platform.startswith("win"):
         sufixo = "-windows-instalador.exe"
     elif sys.platform.startswith("linux"):
         sufixo = "-linux.tar.gz"
@@ -11998,31 +12047,49 @@ async def _baixar_e_abrir_instalador(page: ft.Page, url: str) -> None:
         entregar_arquivo(page, destino, abrir_arquivo)
 
 
+def _buscar_release() -> dict:
+    """Dados da última release publicada. Bloqueia: rodar fora da thread da UI."""
+    import json
+    import urllib.request
+
+    requisicao = urllib.request.Request(
+        URL_API_RELEASE, headers={"Accept": "application/vnd.github+json"}
+    )
+    with urllib.request.urlopen(requisicao, timeout=6) as resposta:  # noqa: S310
+        return json.load(resposta)
+
+
+def _baixar_atualizacao(page: ft.Page, url: str | None) -> None:
+    """Leva o usuário à nova versão: instalador no PC, navegador no celular.
+
+    No Android o aplicativo não instala a si mesmo — quem instala é o sistema,
+    a partir do APK que o navegador baixa. Sem asset para esta plataforma,
+    abre a página de releases.
+    """
+    if not url:
+        page.launch_url(URL_RELEASES)
+    elif eh_mobile():
+        page.launch_url(url)
+    else:
+        # run_task exige uma função corrotina de verdade: um lambda (mesmo
+        # devolvendo corrotina) é rejeitado com TypeError.
+        page.run_task(_baixar_e_abrir_instalador, page, url)
+
+
 def _verificar_atualizacao(page: ft.Page) -> None:
-    """Avisa e oferece baixar a nova versão do GitHub. Só no desktop.
+    """Na abertura, avisa se saiu versão nova; em silêncio quando não saiu.
 
     A rede roda fora da thread da UI (``asyncio.to_thread``) e o aviso é exibido
     pelo laço do Flet — mesmo padrão de ``entregar_arquivo``. Erros (offline,
-    timeout) são ignorados silenciosamente. O download só ocorre se o usuário
-    clicar, e vem da release oficial do projeto.
+    timeout) são ignorados: quem abriu o app quer usá-lo, não ler falha de rede.
+    O download só ocorre se o usuário clicar, e vem da release oficial.
     """
-    if eh_mobile():
-        return
 
     async def _checar():
         import asyncio
-        import json
-        import urllib.request
-
-        def _buscar() -> dict:
-            req = urllib.request.Request(
-                URL_API_RELEASE, headers={"Accept": "application/vnd.github+json"}
-            )
-            with urllib.request.urlopen(req, timeout=6) as resposta:  # noqa: S310
-                return json.load(resposta)
 
         try:
-            dados = await asyncio.to_thread(_buscar)
+            dados = await asyncio.to_thread(_buscar_release)
         except Exception:  # noqa: BLE001 — offline/erro de rede: ignora
             return
         tag = (dados.get("tag_name") or "").strip()
@@ -12030,15 +12097,6 @@ def _verificar_atualizacao(page: ft.Page) -> None:
             return
 
         url_instalador = _url_instalador_plataforma(dados.get("assets") or [])
-
-        def ao_clicar(_=None):
-            if url_instalador:
-                # run_task exige uma função corrotina de verdade: um lambda
-                # (mesmo devolvendo corrotina) é rejeitado com TypeError.
-                page.run_task(_baixar_e_abrir_instalador, page, url_instalador)
-            else:
-                webbrowser.open(URL_RELEASES)
-
         page.show_dialog(
             ft.SnackBar(
                 content=ft.Text(
@@ -12047,12 +12105,78 @@ def _verificar_atualizacao(page: ft.Page) -> None:
                     weight=ft.FontWeight.W_600,
                 ),
                 bgcolor=COR_DESTAQUE_CLARA,
-                action="Baixar e instalar" if url_instalador else "Abrir",
-                on_action=ao_clicar,
+                action="Baixar" if url_instalador else "Abrir",
+                on_action=lambda _=None: _baixar_atualizacao(page, url_instalador),
                 duration=10000,
             )
         )
         page.update()
+
+    page.run_task(_checar)
+
+
+def verificar_atualizacao_agora(page: ft.Page) -> None:
+    """Procura atualização a pedido do usuário (botão em Ajustes).
+
+    Ao contrário da verificação da abertura, esta sempre responde alguma coisa:
+    o usuário clicou e precisa saber se está em dia, se saiu versão nova ou se
+    a consulta falhou.
+    """
+
+    async def _checar():
+        import asyncio
+
+        try:
+            dados = await asyncio.to_thread(_buscar_release)
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao procurar atualizações")
+            mostrar_aviso(
+                page,
+                "Não foi possível verificar",
+                "O GitHub não respondeu. Confira a conexão e tente de novo.",
+            )
+            return
+
+        tag = (dados.get("tag_name") or "").strip()
+        if not ha_versao_mais_nova(tag, VERSAO_APP):
+            mostrar_aviso(
+                page,
+                "Aplicativo atualizado",
+                f"A versão {VERSAO_APP} é a mais recente publicada.",
+            )
+            return
+
+        url_instalador = _url_instalador_plataforma(dados.get("assets") or [])
+        if eh_mobile():
+            explicacao = (
+                "O download abre no navegador. Ao terminar, toque no arquivo para "
+                "instalar por cima desta versão — os dados continuam onde estão."
+            )
+        else:
+            explicacao = (
+                "O instalador é baixado e aberto para você concluir a atualização."
+            )
+
+        def baixar(_=None):
+            page.pop_dialog()
+            _baixar_atualizacao(page, url_instalador)
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text(f"Versão {tag.lstrip('v')} disponível"),
+                content=ft.Text(
+                    f"Você está na {VERSAO_APP}.\n\n{explicacao}", size=fonte(13)
+                ),
+                actions=[
+                    ft.TextButton("Agora não", on_click=lambda _: page.pop_dialog()),
+                    ft.FilledButton(
+                        "Baixar", icon=ft.Icons.DOWNLOAD, on_click=baixar
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
 
     page.run_task(_checar)
 
