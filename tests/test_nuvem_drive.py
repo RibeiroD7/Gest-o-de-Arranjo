@@ -357,3 +357,17 @@ class TestTrocaComRetentativa:
                 "id", "seg", "COD", "http://x", "V",
                 http=http, tentativas=3, dormir=lambda _: None,
             )
+
+
+def test_registrar_e_ler_o_ultimo_envio(tmp_path):
+    """A data do último envio fica junto das credenciais, sem consultar a rede."""
+    arquivo = tmp_path / "nuvem_google.json"
+    nd.salvar_credenciais({"refresh_token": "abc"}, arquivo)
+
+    assert nd.ultimo_envio({"refresh_token": "abc"}) == ""
+
+    nd.registrar_envio("2026-09-15T08:30:00", arquivo)
+    dados = nd.carregar_credenciais(arquivo)
+    assert dados["ultimo_envio"] == "2026-09-15T08:30:00"
+    assert dados["refresh_token"] == "abc", "o registro não pode perder o token"
+    assert nd.ultimo_envio(dados) == "2026-09-15T08:30:00"

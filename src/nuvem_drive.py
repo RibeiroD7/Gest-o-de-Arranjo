@@ -455,6 +455,25 @@ def esquecer_credenciais(caminho: Path | None = None) -> None:
     salvar_credenciais(dados, caminho)
 
 
+def registrar_envio(quando: str | None = None, caminho: Path | None = None) -> None:
+    """Anota que um backup acabou de subir.
+
+    Fica junto das credenciais para a tela de Ajustes dizer quando foi o
+    último envio sem precisar consultar o Drive só para isso.
+    """
+    from datetime import datetime
+
+    dados = carregar_credenciais(caminho)
+    dados["ultimo_envio"] = quando or datetime.now().isoformat(timespec="seconds")
+    salvar_credenciais(dados, caminho)
+
+
+def ultimo_envio(credenciais: dict | None = None) -> str:
+    """Quando o último backup subiu (ISO, hora do aparelho). Vazio se nunca subiu."""
+    credenciais = carregar_credenciais() if credenciais is None else credenciais
+    return str(credenciais.get("ultimo_envio") or "")
+
+
 def esta_conectado(credenciais: dict | None = None) -> bool:
     credenciais = carregar_credenciais() if credenciais is None else credenciais
     return bool(credenciais.get("refresh_token"))

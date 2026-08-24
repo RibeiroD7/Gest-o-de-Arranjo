@@ -1,8 +1,9 @@
 """Testes das funções puras de data e texto (src/util.py)."""
 
-from datetime import date
+from datetime import date, datetime
 
 from util import (
+    FUSO_SAO_PAULO,
     _datas_por_weekday_no_mes,
     _dia_semana_para_weekday,
     _formatar_data_arranjo,
@@ -13,6 +14,7 @@ from util import (
     _rotulo_weekday,
     _weekday_mais_usado,
     aviso_backup_antigo,
+    descrever_ultimo_envio,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
     rotulo_de_prazo,
@@ -229,3 +231,30 @@ class TestRotuloDePrazo:
     def test_mais_longe_conta_em_semanas(self):
         assert rotulo_de_prazo(date(2026, 9, 23), self.HOJE) == ("em 3 semanas", "tranquilo")
         assert rotulo_de_prazo(date(2026, 11, 30), self.HOJE) == ("em 12 semanas", "tranquilo")
+
+
+class TestDescreverUltimoEnvio:
+    """Um envio automático que parou de funcionar precisa aparecer na tela."""
+
+    AGORA = datetime(2026, 9, 20, 10, 0, tzinfo=FUSO_SAO_PAULO)
+
+    def test_nunca_enviou(self):
+        texto, nivel = descrever_ultimo_envio("", self.AGORA)
+        assert texto == "Nenhum backup enviado ainda."
+        assert nivel == "atencao"
+
+    def test_hoje_e_ontem(self):
+        texto, nivel = descrever_ultimo_envio("2026-09-20T08:30:00-03:00", self.AGORA)
+        assert texto.startswith("Último envio: hoje")
+        assert nivel == ""
+        texto, _ = descrever_ultimo_envio("2026-09-19T08:30:00-03:00", self.AGORA)
+        assert texto.startswith("Último envio: ontem")
+
+    def test_alguns_dias_mostra_a_contagem_e_a_data(self):
+        texto, nivel = descrever_ultimo_envio("2026-09-15T08:30:00-03:00", self.AGORA)
+        assert "há 5 dias" in texto and "15/09/2026" in texto
+        assert nivel == ""
+
+    def test_duas_semanas_paradas_chamam_atencao(self):
+        _, nivel = descrever_ultimo_envio("2026-09-06T08:30:00-03:00", self.AGORA)
+        assert nivel == "atencao"

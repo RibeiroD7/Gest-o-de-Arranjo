@@ -207,6 +207,34 @@ def aviso_backup_antigo(
     )
 
 
+# Depois de quantos dias sem enviar backup para a nuvem a tela chama atenção.
+# Duas semanas é tempo de o envio automático ter falhado várias vezes sem
+# ninguém notar, e ainda sobra margem para quem viajou.
+DIAS_BACKUP_ANTIGO = 14
+
+
+def descrever_ultimo_envio(iso: str | None, agora: datetime | None = None) -> tuple[str, str]:
+    """Frase do último envio à nuvem e se ela deve chamar atenção.
+
+    Devolve (texto, nível), com nível "atencao" quando já faz tempo demais.
+    """
+    momento = _momento(iso)
+    if momento is None:
+        return "Nenhum backup enviado ainda.", "atencao"
+    agora = agora or datetime.now().astimezone()
+    if agora.tzinfo is None:
+        agora = agora.astimezone()
+    dias = (agora - momento).days
+    quando = formatar_data_hora_sao_paulo(iso)
+    if dias <= 0:
+        texto = f"Último envio: hoje, {quando.split(' ')[-1]}."
+    elif dias == 1:
+        texto = f"Último envio: ontem, {quando.split(' ')[-1]}."
+    else:
+        texto = f"Último envio: há {dias} dias ({quando})."
+    return texto, "atencao" if dias >= DIAS_BACKUP_ANTIGO else ""
+
+
 # Uma pendência daqui a dez semanas e outra daqui a nove dias pediam a mesma
 # frase na tela do Início: "falta 1 orador". Estes rótulos existem para as
 # duas não se parecerem.

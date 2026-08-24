@@ -211,6 +211,7 @@ from util import (
     _rotulo_weekday,
     _weekday_mais_usado,
     aviso_backup_antigo,
+    descrever_ultimo_envio,
     formatar_data_hora_sao_paulo,
     nome_oradores,
     rotulo_de_prazo,
@@ -9270,6 +9271,23 @@ def _texto_de_confirmacao(base: str, aviso: str) -> ft.Control:
     return ft.Column(linhas, tight=True, spacing=0)
 
 
+def _linha_ultimo_envio(iso: str) -> ft.Control:
+    """Quando o backup subiu pela última vez.
+
+    Sem isso, um envio automático que parou de funcionar só aparece no dia em
+    que o backup faz falta.
+    """
+    texto, nivel = descrever_ultimo_envio(iso)
+    cor = COR_AVISO if nivel == "atencao" else TEXTO_SECUNDARIO
+    return ft.Row(
+        [
+            ft.Icon(ft.Icons.SCHEDULE, size=fonte(14), color=cor),
+            ft.Text(texto, size=fonte(12), color=cor, expand=True),
+        ],
+        spacing=6,
+    )
+
+
 def _cabecalho_card_ajustes(icone: str, titulo: str, descricao: str) -> ft.Control:
     """Título de um card de Ajustes: ícone, nome e uma linha do que ele faz.
 
@@ -10079,7 +10097,9 @@ def tela_ajustes(
                 return nuvem_drive.enviar_backup(token, caminho)
 
             executar_com_progresso(page, "Enviando para o Google Drive...", tarefa)
+            nuvem_drive.registrar_envio()
             mostrar_sucesso(page, "Backup enviado para o Google Drive.")
+            recarregar()
         except Exception as exc:  # noqa: BLE001
             logger.exception("Falha ao enviar backup para o Drive")
             mostrar_aviso(page, "Não foi possível enviar", str(exc))
@@ -10168,6 +10188,8 @@ def tela_ajustes(
                 ],
                 spacing=8,
             ),
+            ft.Container(height=6),
+            _linha_ultimo_envio(nuvem_drive.ultimo_envio(cred_nuvem)),
             ft.Container(height=10),
             ft.Row(
                 [
@@ -11598,6 +11620,7 @@ def _enviar_backup_nuvem_em_segundo_plano(page: ft.Page, caminho: str) -> None:
 
         try:
             await asyncio.to_thread(tarefa)
+            nuvem_drive.registrar_envio()
             logger.info("Backup do dia enviado ao Google Drive")
         except Exception:  # noqa: BLE001
             logger.exception("Falha ao enviar o backup automático para a nuvem")
