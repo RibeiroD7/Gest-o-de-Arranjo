@@ -1735,7 +1735,7 @@ def abrir_dialog_orador(
     lista_temas = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=220)
     texto_contagem_temas = ft.Text(size=fonte(12), color=TEXTO_SECUNDARIO)
     texto_qualquer_tema = ft.Text(
-        "Este orador pode fazer qualquer tema — não é preciso selecionar temas.",
+        "Este orador pode fazer qualquer tema. Não é preciso selecionar.",
         size=fonte(12),
         italic=True,
         color=TEXTO_SECUNDARIO,
@@ -3238,8 +3238,8 @@ def tela_inicio(
                     [
                         ft.Icon(ft.Icons.LOOKS_TWO_OUTLINED, size=fonte(18), color=COR_DESTAQUE_SUAVE),
                         ft.Text(
-                            "Cadastre congregações, oradores e presidentes — pela planilha-modelo "
-                            "em Ajustes ou restaurando um backup.",
+                            "Cadastre congregações, oradores e presidentes pela planilha-modelo "
+                            "em Ajustes, ou restaure um backup.",
                             size=fonte(13), color=TEXTO_PRIMARIO, expand=True,
                         ),
                         ft.TextButton("Abrir Ajustes", on_click=lambda _: ir_para(INDICE_AJUSTES)),
@@ -3513,7 +3513,7 @@ def _criar_lista_oradores(
             on_change=alternar_selecao,
             disabled=so_local,
             tooltip=(
-                "Faz apenas o discurso local — não entra no PDF de envio"
+                "Faz apenas o discurso local. Não entra no PDF de envio"
                 if so_local
                 else "Selecionar para o PDF de envio"
             ),
@@ -3940,7 +3940,7 @@ def abrir_dialog_tema(
         for ano, campo in campos_ano.items():
             if not _validar_mes_ano(campo.value or "", ano):
                 texto_erro.value = (
-                    f"Data inválida em {ano}. Use MM/{ano} — a coluna guarda "
+                    f"Data inválida em {ano}. Use MM/{ano}: a coluna guarda "
                     f"o uso daquele ano."
                 )
                 texto_erro.visible = True
@@ -4423,7 +4423,7 @@ def tela_temas(page: ft.Page, file_picker: ft.FilePicker) -> ft.Control:
         [
             criar_cabecalho_tela(
                 "Temas",
-                "Colunas por ano conforme a planilha — temas com observações aparecem destacados em azul",
+                "Colunas por ano conforme a planilha. Temas com observações aparecem em azul",
             ),
             ft.Container(height=28),
             criar_secao_titulo("Catálogo"),
@@ -6190,7 +6190,7 @@ def abrir_dialog_presidente_avulso(
                 content=ft.Column(
                     [
                         ft.Text(
-                            f"Sábado {data_str[:5]} — para quem não está no "
+                            f"Sábado {data_str[:5]}, para quem não está no "
                             "cadastro de presidentes (por exemplo, o irmão que "
                             "saiu da congregação).",
                             size=fonte(13),
@@ -6809,17 +6809,17 @@ async def _dialog_whatsapp_designacao_envio(
                 webbrowser.open(gerar_link_whatsapp(tel, "" if imagem_copiada else mensagem))
                 if imagem_copiada:
                     mostrar_sucesso(
-                        page, "Imagem copiada — cole (Ctrl+V) na conversa que abriu e envie."
+                        page, "Imagem copiada. Cole (Ctrl+V) na conversa que abriu e envie."
                     )
             elif imagem_copiada:
                 mostrar_sucesso(
                     page,
-                    "Imagem copiada — abra o WhatsApp, cole (Ctrl+V) na conversa e envie.",
+                    "Imagem copiada. Abra o WhatsApp, cole (Ctrl+V) na conversa e envie.",
                 )
             else:
                 copiar_texto(
                     page, mensagem,
-                    "Mensagem copiada — cole no WhatsApp e anexe a imagem.",
+                    "Mensagem copiada. Cole no WhatsApp e anexe a imagem.",
                 )
             fechar_dialog()
 
@@ -6986,7 +6986,7 @@ def abrir_dialog_mensagem_presidencia(
         fechar()
 
     aviso_sem_programacao = ft.Text(
-        "Ainda não há orador programado para esta data — confira antes de enviar.",
+        "Ainda não há orador programado para esta data. Confira antes de enviar.",
         size=fonte(12),
         color=COR_AVISO,
         italic=True,
@@ -7199,7 +7199,7 @@ def _linha_presidente_data_especial(
     acoes = [botao_editar]
     if presidente_solto:
         situacao.value = (
-            f"Presidente avulso: {presidente_solto['nome']} — a data virou especial"
+            f"Presidente avulso: {presidente_solto['nome']} (a data virou especial)"
         )
         situacao.color = COR_AVISO
         acoes.insert(
@@ -7930,7 +7930,7 @@ def abrir_dialog_oradores_mes(
                 page,
                 "Nada para preencher",
                 "Nenhuma data especial deste mês está esperando presidente. "
-                "Assembleia e congresso não pedem presidente — isso é marcado "
+                "Assembleia e congresso não pedem presidente. Isso é marcado "
                 "por tipo de evento, na engrenagem ao lado do campo Tipo."
                 "\n\n"
                 "O rodízio das datas especiais usa apenas anciãos.",
@@ -9093,7 +9093,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             ),
             _quadro_relatorio(
                 f"Datas especiais em {ano}",
-                "Assembleias, congressos, discursos especiais e visitas — e "
+                "Assembleias, congressos, discursos especiais e visitas, com "
                 "quem fez a presidência de cada um.",
                 _lista_datas_especiais_relatorio(dados["especiais_lista"], largura),
             ),
@@ -9632,7 +9632,7 @@ def tela_ajustes(
                 ft.Container(height=4),
                 ft.Text(
                     "Cadastre congregações, oradores e presidentes de uma vez por "
-                    "planilha. A importação só adiciona — nada é apagado. Os temas "
+                    "planilha. A importação só adiciona; nada é apagado. Os temas "
                     "vêm dos formulários S-99/S-99a, na aba Temas.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
@@ -10179,7 +10179,7 @@ def tela_ajustes(
         controles_nuvem = [
             ft.Text(
                 "Guarde o backup na sua conta do Google e restaure em outro "
-                "aparelho. O aplicativo só enxerga a pasta dele mesmo no Drive — "
+                "aparelho. O aplicativo só enxerga a pasta dele mesmo no Drive, "
                 "nunca o restante dos seus arquivos.",
                 size=fonte(13),
                 color=TEXTO_SECUNDARIO,
@@ -10805,7 +10805,7 @@ def abrir_dialog_presidente(
         value=(item.get("preside_especiais", False) if editando
                else (item.get("categoria") or "Ancião") == "Ancião"),
         tooltip="Entra no rodízio da Celebração, da visita do superintendente "
-                "e dos outros eventos — que é uma fila por tipo, à parte da semanal.",
+                "e dos outros eventos, numa fila por tipo, à parte da semanal.",
     )
 
     def acompanhar_privilegio(e=None):
@@ -11918,7 +11918,7 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         [
             criar_cabecalho_tela(
                 "Calendário",
-                "Recebidos, enviados e eventos do mês — clique num dia para os detalhes",
+                "Recebidos, enviados e eventos do mês. Clique num dia para ver os detalhes",
             ),
             barra,
             corpo,
@@ -11941,7 +11941,7 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
         ("1. Sua congregação", "Preencha os dados na tela Minha congregação."),
         ("2. Congregações", "Cadastre as congregações com que você faz arranjos."),
         ("3. Oradores e temas", "Adicione oradores e importe os temas (S-99/S-99a)."),
-        ("4. Programação", "Monte os arranjos do mês — ou importe tudo de uma planilha."),
+        ("4. Programação", "Monte os arranjos do mês, ou importe tudo de uma planilha."),
     ]
     linhas = [
         ft.Column(
@@ -12150,7 +12150,7 @@ def verificar_atualizacao_agora(page: ft.Page) -> None:
         if eh_mobile():
             explicacao = (
                 "O download abre no navegador. Ao terminar, toque no arquivo para "
-                "instalar por cima desta versão — os dados continuam onde estão."
+                "instalar por cima desta versão. Os dados continuam onde estão."
             )
         else:
             explicacao = (

@@ -34,7 +34,7 @@ CATEGORIAS_VALIDAS = ("Ancião", "Servo Ministerial")
 
 # Título provisório para temas citados na planilha antes do S-99 ser importado;
 # a importação do S-99 na aba Temas substitui pelo título oficial.
-TITULO_TEMA_PENDENTE = "(título pendente — importe o S-99 na aba Temas)"
+TITULO_TEMA_PENDENTE = "(título pendente: importe o S-99 na aba Temas)"
 
 INSTRUCOES = [
     "PLANILHA DE DADOS — GESTÃO DE ARRANJO",
@@ -46,7 +46,7 @@ INSTRUCOES = [
     "A importação apenas ADICIONA dados: nomes que já existem no aplicativo "
     "são ignorados e nada é apagado.",
     "",
-    "Aba Congregações — uma linha por congregação do circuito.",
+    "Aba Congregações: uma linha por congregação do circuito.",
     "   Exemplo: Jardim Primavera | João Silva | (11) 91234-5678 | "
     "Rua das Flores, 100 | Sábado | 19:30 |",
     "",
@@ -59,7 +59,7 @@ INSTRUCOES = [
     "Exemplo: 1, 5, 23, 110. Se o orador faz qualquer tema, deixe em branco "
     "e escreva \"Qualquer tema\" em Observações.",
     "",
-    "Aba Presidentes — quem pode presidir a reunião de fim de semana.",
+    "Aba Presidentes: quem pode presidir a reunião de fim de semana.",
     "",
     "Os temas (títulos dos discursos) NÃO entram nesta planilha: importe os "
     "formulários oficiais S-99/S-99a em PDF diretamente na aba Temas.",

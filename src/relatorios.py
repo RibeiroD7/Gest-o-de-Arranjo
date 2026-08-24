@@ -433,7 +433,7 @@ def secoes_resumo_ano(
         ),
         _secao(
             "DATAS ESPECIAIS",
-            "Assembleias, congressos, discursos especiais e visitas — e quem presidiu cada um.",
+            "Assembleias, congressos, discursos especiais e visitas, com quem presidiu cada um.",
             ["Data", "Evento", "Presidente"],
             [90, 240, 193],
             [
