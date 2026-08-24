@@ -264,10 +264,10 @@ jobs:
 
             | Sistema | Arquivo |
             |---|---|
-            | Windows | `GestaoArranjo-*-windows-instalador.exe` — execute e siga o instalador |
-            | Linux | `GestaoArranjo-*-linux.tar.gz` — descompacte e execute `GestaoArranjo` |
-            | Android | `GestaoArranjo-*-android.apk` — instale (celulares atuais). Aparelho antigo de 32 bits? Use `GestaoArranjo-*-android-32bits.apk` |
+            | Windows | `GestaoArranjo-*-windows-instalador.exe`, execute e siga o instalador |
+            | Linux | `GestaoArranjo-*-linux.tar.gz`, descompacte e execute `GestaoArranjo` |
+            | Android | `GestaoArranjo-*-android.apk`. Os aparelhos antigos, de 32 bits, usam `GestaoArranjo-*-android-32bits.apk` |
 
-            O app inicia vazio: preencha **Ajustes → Minha congregação** e cadastre
-            congregações, oradores e temas — ou importe tudo de uma planilha na tela
-            de Programação.
+            Comece preenchendo **Minha congregação** e cadastre congregações,
+            oradores e temas. Também dá para importar tudo de uma planilha, em
+            **Ajustes → Importar planilha**.
