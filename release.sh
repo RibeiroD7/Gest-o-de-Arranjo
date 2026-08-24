@@ -27,8 +27,8 @@ TAG="v$VERSAO"
 
 echo ">> Versão: $VERSAO   (tag $TAG)"
 
-# 2) Mantém a versão sincronizada: pyproject.toml e o VERSAO_APP mostrado
-#    dentro de cada app (PC e mobile).
+# 2) Mantém a versão sincronizada: pyproject.toml e o VERSAO_APP que o app
+#    mostra (src/versao.py, o arquivo que existe só para isso).
 sed -i -E "s/^version = \".*\"/version = \"$VERSAO\"/" "$PYPROJECT"
 sed -i -E "s|^VERSAO_APP = \".*\"|VERSAO_APP = \"$VERSAO\"|" src/versao.py
 # O CI sobrescreve build_version pela tag, mas deixá-lo parado no arquivo faz
@@ -59,8 +59,8 @@ sed -i -E "s/^build_number = .*/build_number = $BUILD_NOVO/" "$PYPROJECT"
 echo ">> versionCode do Android: $BUILD_ATUAL -> $BUILD_NOVO"
 
 # 5) Se a versão mudou em algum arquivo, commita ---------------------------
-if ! git diff --quiet -- "$PYPROJECT" src/main.py; then
-    git add "$PYPROJECT" src/main.py
+if ! git diff --quiet -- "$PYPROJECT" src/versao.py; then
+    git add "$PYPROJECT" src/versao.py
     git commit -m "Versão $VERSAO"
 fi
 
