@@ -19,8 +19,8 @@ Baixe a versão mais recente na página de
 | Linux | `GestaoArranjo-*-linux.tar.gz` | Descompacte e execute `GestaoArranjo` |
 | Android | `GestaoArranjo-*-android.apk` | Instale (celulares atuais). Aparelho antigo de 32 bits? Use `GestaoArranjo-*-android-32bits.apk` |
 
-O app começa **vazio**. Preencha *Minha congregação* com os seus dados e
-cadastre congregações, oradores e temas — ou importe tudo de uma planilha, em
+Comece preenchendo *Minha congregação* com os seus dados e cadastre
+congregações, oradores e temas — ou importe tudo de uma planilha, em
 *Ajustes → Importar planilha*. Os títulos dos discursos vêm dos formulários
 oficiais S-99/S-99a, em *Temas → Importar*.
 

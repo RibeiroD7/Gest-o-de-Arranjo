@@ -9487,8 +9487,8 @@ def tela_ajustes(
                     f"Todos os dados do aplicativo foram salvos:\n\n{resumo_contagens}\n\n"
                     f"Arquivo:\n{caminho}\n\n"
                     "Guarde este arquivo em um local seguro (nuvem, pendrive). "
-                    "Ele poderá ser importado neste aplicativo ou no futuro "
-                    "aplicativo para smartphone.",
+                    "Ele pode ser restaurado neste aplicativo, no computador "
+                    "ou no celular.",
                     size=fonte(13),
                 ),
                 actions=[
@@ -11923,7 +11923,7 @@ def _mostrar_onboarding(page: ft.Page, navegar: Callable[[int], None]) -> None:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "O app começa vazio. Estes são os primeiros passos:",
+                            "Estes são os primeiros passos:",
                             size=fonte(13),
                             color=TEXTO_PRIMARIO,
                         ),

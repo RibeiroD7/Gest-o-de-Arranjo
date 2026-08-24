@@ -2889,9 +2889,9 @@ def garantir_configuracao_inicial(conn):
 # Backup e restauração
 # ---------------------------------------------------------------------------
 #
-# O backup é um JSON versionado e autodescritivo, para que o futuro aplicativo
-# de smartphone (ou qualquer outra plataforma) consiga importar os dados sem
-# depender do arquivo SQLite: {"app", "versao_backup", "gerado_em", "tabelas"}.
+# O backup é um JSON versionado e autodescritivo, para que qualquer
+# plataforma (computador, celular) importe os dados sem depender do
+# arquivo SQLite: {"app", "versao_backup", "gerado_em", "tabelas"}.
 
 # BACKUPS_DIR vem de armazenamento (área gravável no mobile).
 VERSAO_BACKUP = 1
