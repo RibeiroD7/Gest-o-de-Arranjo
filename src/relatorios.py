@@ -276,10 +276,10 @@ def secoes_oradores(oradores: list[dict]) -> list[dict]:
 
 
 def secoes_congregacoes(congregacoes: list[dict]) -> list[dict]:
-    """Agenda das congregações do circuito: contato, reunião e endereço."""
+    """Agenda das congregações cadastradas: contato, reunião e endereço."""
     return [
         _secao(
-            "", f"{len(congregacoes)} congregação(ões) no circuito.",
+            "", f"{len(congregacoes)} congregação(ões) cadastrada(s).",
             ["Congregação", "Responsável", "Telefone", "Reunião", "Endereço"],
             [112, 100, 82, 79, 150],
             [

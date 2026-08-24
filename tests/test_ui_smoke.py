@@ -877,7 +877,7 @@ def test_datas_sem_reuniao_barram_orador_e_designacao():
     """Assembleia e congresso saem das sugestões de data do arranjo.
 
     Ninguém discursa aqui nem viaja para fora nesse fim de semana: a
-    congregação de destino é do mesmo circuito e está no mesmo evento.
+    congregação de destino costuma estar no mesmo evento.
     """
     import database
 

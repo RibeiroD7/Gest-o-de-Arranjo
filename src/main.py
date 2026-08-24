@@ -707,7 +707,7 @@ def datas_sem_reuniao(ano: int) -> dict[str, str]:
     São as datas especiais cujo tipo está marcado como sem presidente local —
     assembleia, congresso. Nelas a congregação está fora do salão: não há
     presidente, não se recebe orador e não se manda ninguém para fora, porque
-    a congregação de destino é do mesmo circuito e está no mesmo evento.
+    a congregação de destino costuma estar no mesmo evento.
     """
     sem_presidente = tipos_evento_sem_presidente()
     return {
@@ -4777,14 +4777,14 @@ def tela_congregacoes(page: ft.Page, recarregar: Callable[[], None]) -> ft.Contr
             lambda: secoes_congregacoes(
                 carregar_dados(SQL_CONGREGACOES).to_dict("records")
             ),
-            "Congregações do circuito",
+            "Congregações",
             "Congregacoes",
         )
 
     return criar_tela_padrao(
         page=page,
         titulo="Congregações",
-        descricao="Congregações do circuito, com os oradores de cada uma",
+        descricao="As congregações cadastradas, com os oradores de cada uma",
         df=_congregacoes_com_oradores(
             carregar_dados(SQL_CONGREGACOES), oradores_por_congregacao
         ),
@@ -5353,7 +5353,7 @@ def abrir_seletor_oradores(
     registros_mes = carregar_oradores_arranjo(arranjo_id)
     estado = {"modo": "existente", "checkboxes": [], "datas_checkbox": {}}
 
-    # Listas longas (oradores do circuito, 194 temas): digitar filtra a lista.
+    # Listas longas (todos os oradores, 194 temas): digitar filtra a lista.
     campo_orador = ft.Dropdown(
         label="Orador",
         hint_text="Digite para buscar pelo nome",
@@ -8550,7 +8550,7 @@ def tela_programacao(
         [
             criar_cabecalho_tela(
                 "Programação",
-                "Oradores, designações e presidentes de cada mês do circuito",
+                "Oradores, designações e presidentes de cada mês",
             ),
             ft.Container(height=24),
             ft.Row(
@@ -9151,7 +9151,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             secoes += secoes_programacao(ano)
             secoes.append(faixa("Oradores"))
             secoes += secoes_oradores(carregar_dados(SQL_ORADORES).to_dict("records"))
-            secoes.append(faixa("Congregações do circuito"))
+            secoes.append(faixa("Congregações"))
             secoes += secoes_congregacoes(
                 carregar_dados(SQL_CONGREGACOES).to_dict("records")
             )

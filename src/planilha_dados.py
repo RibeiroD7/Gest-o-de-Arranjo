@@ -46,7 +46,7 @@ INSTRUCOES = [
     "A importação apenas ADICIONA dados: nomes que já existem no aplicativo "
     "são ignorados e nada é apagado.",
     "",
-    "Aba Congregações: uma linha por congregação do circuito.",
+    "Aba Congregações: uma linha por congregação.",
     "   Exemplo: Jardim Primavera | João Silva | (11) 91234-5678 | "
     "Rua das Flores, 100 | Sábado | 19:30 |",
     "",

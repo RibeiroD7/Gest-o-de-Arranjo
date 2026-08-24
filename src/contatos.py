@@ -116,7 +116,7 @@ def mascara_telefone(texto: str, digitando: bool = True) -> str:
     DDD nenhum, e aí ``digitando=False`` evita o erro de transformar os dois
     primeiros dígitos de ``988887777`` num DDD "98" que não existe.
 
-    O ``+55`` é descartado (todo mundo do circuito é do Brasil e o link do
+    O ``+55`` é descartado (todo mundo aqui é do Brasil e o link do
     WhatsApp recoloca o país). O que não couber em formato brasileiro conhecido
     é devolvido só com os dígitos, sem separador inventado.
     """
@@ -126,7 +126,7 @@ def mascara_telefone(texto: str, digitando: bool = True) -> str:
 
     pais = ""
     digitos = re.sub(r"\D", "", texto)
-    # O 55 do Brasil é ruído aqui: todo mundo do circuito é daqui, e o link do
+    # O 55 do Brasil é ruído aqui: todo mundo é daqui, e o link do
     # WhatsApp recoloca o país sozinho. Some com ele e mostra só (11) 9…
     if digitos.startswith("55") and len(digitos) in (12, 13):
         digitos = digitos[2:]
