@@ -1347,3 +1347,69 @@ def test_rodape_do_mes_oferece_a_agenda(mobile):
         assert not any("genda" in r for r in rotulos_sem)
     finally:
         armazenamento.definir_layout_mobile(False)
+
+
+@pytest.mark.parametrize("mobile", [False, True])
+def test_colar_ficha_preenche_o_formulario_da_congregacao(mobile, monkeypatch):
+    """O texto colado entra nos campos sem a pessoa redigitar.
+
+    Constrói o diálogo de verdade, acha os controles pelo rótulo e simula a
+    colagem — é o caminho que o usuário faz.
+    """
+    import armazenamento
+
+    armazenamento.definir_layout_mobile(mobile)
+    capturado = {}
+    monkeypatch.setattr(main, "_largura_dialog", lambda page, largura: largura)
+
+    def espiao(dialog):
+        capturado["dialog"] = dialog
+
+    page = _page()
+    page.show_dialog = espiao
+    try:
+        main.abrir_dialog_congregacao(page, lambda: None)
+        controles = []
+
+        def varrer(no):
+            controles.append(no)
+            for atributo in ("content", "controls"):
+                valor = getattr(no, atributo, None)
+                if isinstance(valor, list):
+                    for filho in valor:
+                        varrer(filho)
+                elif valor is not None and not isinstance(valor, str):
+                    varrer(valor)
+
+        varrer(capturado["dialog"])
+        campos = {
+            c.label: c for c in controles
+            if isinstance(c, flet.TextField) and getattr(c, "label", None)
+        }
+        # O rótulo do botão vem em `content` nesta versão do Flet, não em `text`.
+        def rotulo(botao):
+            for atributo in ("text", "content"):
+                valor = getattr(botao, atributo, None)
+                if isinstance(valor, str) and valor:
+                    return valor
+            return ""
+
+        botoes = {
+            rotulo(c): c for c in controles
+            if isinstance(c, (flet.TextButton, flet.OutlinedButton)) and rotulo(c)
+        }
+
+        campos["Cole aqui a ficha da congregação"].value = (
+            "CONGREGAÇÃO\nJardim Novo - São Paulo SP\n"
+            "Reunião do meio de semana\nQuarta-feira, 19:45\n"
+            "Reunião do fim de semana\nDomingo, 09:30\n"
+            "Endereço\nR. das Acácias, 12\nJardim Novo\n"
+        )
+        botoes["Preencher campos"].on_click(None)
+
+        assert campos["Nome da congregação"].value == "Jardim Novo"
+        assert campos["Dia da reunião"].value == "Domingo"
+        assert campos["Horário da reunião"].value == "09:30"
+        assert "R. das Acácias, 12" in campos["Endereço"].value
+    finally:
+        armazenamento.definir_layout_mobile(False)

@@ -178,6 +178,7 @@ from tema import (
     ZOOM_PREVIEW_MIN,
     fonte,
 )
+from texto_congregacao import ler_congregacao_colada
 from ui_comuns import (
     _cor_fundo_item_menu,
     _estilo_campo_busca,
@@ -1983,6 +1984,71 @@ def abrir_dialog_congregacao(
     )
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
 
+    campo_colado = ft.TextField(
+        label="Cole aqui a ficha da congregação",
+        hint_text="Nome, dia e horário da reunião, endereço, telefone",
+        multiline=True,
+        min_lines=4,
+        max_lines=8,
+        visible=False,
+        expand=True,
+    )
+    aviso_colagem = ft.Text("", size=fonte(12), color=TEXTO_SECUNDARIO, visible=False)
+
+    def preencher_do_texto(_=None):
+        """Separa o texto colado nos campos do formulário."""
+        lido = ler_congregacao_colada(campo_colado.value or "")
+        preenchidos = []
+        # O nome só entra quando ainda não há um: renomear uma congregação já
+        # cadastrada por causa de um texto colado é como criar uma duplicata.
+        if lido["nome"] and not (campo_nome.value or "").strip():
+            campo_nome.value = lido["nome"]
+            preenchidos.append("nome")
+        for chave, campo, rotulo in (
+            ("dia_semana", campo_dia, "dia"),
+            ("horario", campo_horario, "horário"),
+            ("endereco", campo_endereco, "endereço"),
+            ("telefone", campo_telefone, "telefone"),
+        ):
+            if lido[chave]:
+                campo.value = lido[chave]
+                preenchidos.append(rotulo)
+        if preenchidos:
+            aviso_colagem.value = (
+                f"Preenchido: {', '.join(preenchidos)}. Confira antes de salvar."
+            )
+            if lido["nome"] and (campo_nome.value or "").strip() != lido["nome"]:
+                aviso_colagem.value += (
+                    f" O nome ficou como está; no texto veio \"{lido['nome']}\"."
+                )
+        else:
+            aviso_colagem.value = (
+                "Não reconheci nada nesse texto. Preencha os campos na mão."
+            )
+        aviso_colagem.visible = True
+        page.update()
+
+    botao_preencher = ft.OutlinedButton(
+        "Preencher campos",
+        icon=ft.Icons.AUTO_FIX_HIGH_OUTLINED,
+        on_click=preencher_do_texto,
+        visible=False,
+    )
+
+    def alternar_colagem(_=None):
+        """Mostra ou esconde a área de colagem, sem sair do formulário."""
+        campo_colado.visible = not campo_colado.visible
+        botao_preencher.visible = campo_colado.visible
+        aviso_colagem.visible = campo_colado.visible and bool(aviso_colagem.value)
+        page.update()
+
+    botao_colar = ft.TextButton(
+        "Colar dados de uma ficha",
+        icon=ft.Icons.CONTENT_PASTE_OUTLINED,
+        tooltip="Cole um texto com os dados da congregação e o app separa nos campos",
+        on_click=alternar_colagem,
+    )
+
     def fechar(_=None):
         page.pop_dialog()
 
@@ -2051,6 +2117,10 @@ def abrir_dialog_congregacao(
                         linha_campos(campo_responsavel, campo_telefone),
                         campo_endereco,
                         linha_campos(campo_dia, campo_horario),
+                        ft.Row([botao_colar], alignment=ft.MainAxisAlignment.START),
+                        campo_colado,
+                        botao_preencher,
+                        aviso_colagem,
                         texto_erro,
                     ],
                     spacing=12,
