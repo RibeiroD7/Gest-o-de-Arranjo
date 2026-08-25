@@ -9755,11 +9755,14 @@ def tela_ajustes(
     def _resumir_importacao_planilha(resumo: dict) -> str:
         linhas = [
             f"Congregações: {resumo['congregacoes']['novas']} nova(s), "
-            f"{resumo['congregacoes']['ja_existiam']} já existia(m).",
+            f"{resumo['congregacoes']['atualizadas']} atualizada(s), "
+            f"{resumo['congregacoes']['sem_mudanca']} sem mudança.",
             f"Oradores: {resumo['oradores']['novos']} novo(s), "
-            f"{resumo['oradores']['ja_existiam']} já existia(m).",
+            f"{resumo['oradores']['atualizados']} atualizado(s), "
+            f"{resumo['oradores']['sem_mudanca']} sem mudança.",
             f"Presidentes: {resumo['presidentes']['novos']} novo(s), "
-            f"{resumo['presidentes']['ja_existiam']} já existia(m).",
+            f"{resumo['presidentes']['atualizados']} atualizado(s), "
+            f"{resumo['presidentes']['sem_mudanca']} sem mudança.",
         ]
         avisos = resumo.get("avisos") or []
         if avisos:
@@ -9806,7 +9809,8 @@ def tela_ajustes(
                 ft.Container(height=4),
                 ft.Text(
                     "Cadastre congregações, oradores e presidentes de uma vez por "
-                    "planilha. A importação só adiciona; nada é apagado. Os temas "
+                    "planilha. A importação cria o que falta e completa o que já "
+                    "existe; nada é apagado. Os temas "
                     "vêm dos formulários S-99/S-99a, na aba Temas.",
                     size=fonte(13),
                     color=TEXTO_SECUNDARIO,
