@@ -116,6 +116,14 @@ TIPOS_SEM_PRESIDENTE_LOCAL = {
     "Reunião Especial",
 }
 
+# Estes têm reunião normal no salão, com o presidente da semana: são datas
+# marcadas para lembrar o que acontece ali, não eventos com fila própria. O
+# "Arranjo Local" é o caso: o discurso é de um orador daqui, e quem preside é
+# quem já estava escalado para aquele fim de semana.
+TIPOS_FORA_DO_RODIZIO_ESPECIAIS = {
+    "Arranjo Local",
+}
+
 
 def _recuperar_presidente_avulso_especiais(cursor) -> None:
     """Traz para a data especial o nome que já estava na semana comum.
@@ -159,6 +167,49 @@ def _aplicar_padrao_escala_especiais(cursor) -> None:
         "UPDATE presidentes_cadastro SET preside_especiais = 1 "
         "WHERE categoria = 'Ancião'"
     )
+
+
+def _migracao_3_rodizio_por_tipo(conn) -> None:
+    """Separa "tem presidente local" de "entra no rodízio das datas especiais".
+
+    Eram a mesma coisa, e não são: o Arranjo Local tem reunião normal, com o
+    presidente da semana, mas não é um evento com fila própria de anciãos.
+    Aparecia como uma fila na aba de datas especiais e podia gastar a vez de
+    alguém.
+    """
+    colunas = [
+        linha[1] for linha in conn.execute("PRAGMA table_info(tipos_evento_especial)")
+    ]
+    if "entra_rodizio" not in colunas:
+        conn.execute(
+            "ALTER TABLE tipos_evento_especial "
+            "ADD COLUMN entra_rodizio INTEGER NOT NULL DEFAULT 1"
+        )
+    marcadores = ",".join("?" * len(TIPOS_FORA_DO_RODIZIO_ESPECIAIS))
+    conn.execute(
+        f"UPDATE tipos_evento_especial SET entra_rodizio = 0 WHERE nome IN ({marcadores})",  # noqa: S608
+        sorted(TIPOS_FORA_DO_RODIZIO_ESPECIAIS),
+    )
+    conn.commit()
+
+
+def _migracao_4_presidente_arquivado(conn) -> None:
+    """Presidente sai da escala sem apagar o que ele presidiu.
+
+    Quem se muda de congregação precisa sumir do rodízio e das listas, mas o
+    nome dele fica no histórico das semanas e das datas especiais — que é a
+    memória de onde o próprio rodízio tira a vez de cada um. Excluir apagava
+    as semanas atribuídas e batia em erro quando havia data especial.
+    """
+    colunas = [
+        linha[1] for linha in conn.execute("PRAGMA table_info(presidentes_cadastro)")
+    ]
+    if "ativo" not in colunas:
+        conn.execute(
+            "ALTER TABLE presidentes_cadastro "
+            "ADD COLUMN ativo INTEGER NOT NULL DEFAULT 1"
+        )
+    conn.commit()
 
 
 def _aplicar_padrao_presidente_por_tipo(cursor) -> None:
@@ -343,6 +394,8 @@ def _migracao_2_convite_enviado(conn) -> None:
 
 MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (2, _migracao_2_convite_enviado),
+    (3, _migracao_3_rodizio_por_tipo),
+    (4, _migracao_4_presidente_arquivado),
 ]
 
 ESQUEMA_ATUAL = MIGRACOES[-1][0] if MIGRACOES else 1
@@ -1259,6 +1312,7 @@ def relatorio_frequencia_oradores(congregacao_id: int | None = None) -> list[dic
 
     resultado = [
         {
+            "id": _id,
             "nome": nome,
             "quantidade": int(quantidade or 0),
             "ultima_data": _data_de_chave(ultima_chave),
@@ -1374,7 +1428,7 @@ def relatorio_presidencias(ano: int | None = None) -> list[dict]:
         params = [str(ano)] if ano is not None else []
         linhas = conn.execute(
             f"""
-            SELECT c.nome, c.categoria,
+            SELECT c.id, c.nome, c.categoria,
                    COUNT(p.data) AS quantidade,
                    MAX(
                        substr(p.data, 7, 4) || substr(p.data, 4, 2)
@@ -1396,13 +1450,14 @@ def relatorio_presidencias(ano: int | None = None) -> list[dict]:
 
     resultado = [
         {
+            "id": _id,
             "nome": nome,
             "categoria": categoria or "",
             "quantidade": int(quantidade or 0),
             "ultima_data": _data_de_chave_ordenavel(ultima_chave),
             "_ordem": ultima_chave or "",
         }
-        for nome, categoria, quantidade, ultima_chave in linhas
+        for _id, nome, categoria, quantidade, ultima_chave in linhas
     ]
     resultado.sort(key=lambda r: (r["quantidade"], r["_ordem"], r["nome"]))
     for item in resultado:
@@ -1985,24 +2040,35 @@ def excluir_presidente(data: str) -> None:
         conn.close()
 
 
-def listar_presidentes_cadastro(escala: str | None = None) -> list[dict]:
+def listar_presidentes_cadastro(
+    escala: str | None = None, incluir_arquivados: bool = False
+) -> list[dict]:
     """Lista o cadastro de presidentes na ordem da rotação.
 
     ``escala`` filtra por quem serve para quê: ``"normais"`` traz quem preside
     a reunião de todo fim de semana, ``"especiais"`` traz quem preside a
     Celebração, a visita do superintendente e afins. Sem ``escala``, traz o
     cadastro inteiro — é o que a tela de Presidentes mostra.
+
+    Quem foi arquivado (mudou de congregação, por exemplo) fica de fora, a não
+    ser que ``incluir_arquivados`` peça o contrário. O histórico dele continua
+    intacto: os nomes das semanas e das datas especiais vêm por junção, não
+    desta lista.
     """
-    onde = {
-        "normais": " WHERE COALESCE(preside_normais, 1) = 1",
-        "especiais": " WHERE COALESCE(preside_especiais, 0) = 1",
-    }.get(escala or "", "")
+    filtros = {
+        "normais": "COALESCE(preside_normais, 1) = 1",
+        "especiais": "COALESCE(preside_especiais, 0) = 1",
+    }
+    condicoes = [filtros[escala]] if escala in filtros else []
+    if not incluir_arquivados:
+        condicoes.append("COALESCE(ativo, 1) = 1")
+    onde = f" WHERE {' AND '.join(condicoes)}" if condicoes else ""
     conn = get_connection()
     try:
         linhas = conn.execute(
             "SELECT id, nome, categoria, ordem, COALESCE(telefone, ''), "
             "COALESCE(contato_id, ''), COALESCE(preside_normais, 1), "
-            "COALESCE(preside_especiais, 0) "
+            "COALESCE(preside_especiais, 0), COALESCE(ativo, 1) "
             f"FROM presidentes_cadastro{onde} "  # noqa: S608 — literal fixo
             "ORDER BY COALESCE(ordem, 999999), nome"
         ).fetchall()
@@ -2016,6 +2082,7 @@ def listar_presidentes_cadastro(escala: str | None = None) -> list[dict]:
                 "contato_id": linha[5],
                 "preside_normais": bool(linha[6]),
                 "preside_especiais": bool(linha[7]),
+                "ativo": bool(linha[8]),
             }
             for linha in linhas
         ]
@@ -2075,6 +2142,79 @@ def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
             }
         )
         return designacoes
+    finally:
+        conn.close()
+
+
+def historico_discursos_do_orador(orador_id: int) -> list[dict]:
+    """Tudo que este orador fez, do mais recente para trás.
+
+    Traz os discursos enviados (ele foi a outra congregação) e os locais, com
+    a data, o tema e para onde foi. É o detalhe por trás do número do
+    relatório: "5 discursos" não diz quando, nem onde.
+
+    Um simpósio conta para os dois oradores, por isso a busca olha as duas
+    colunas de orador.
+    """
+    conn = get_connection()
+    try:
+        linhas = conn.execute(
+            """
+            SELECT ao.data,
+                   ao.tipo,
+                   COALESCE(c.nome, '') AS congregacao,
+                   ao.tema_nr,
+                   COALESCE(t.titulo, '') AS tema,
+                   COALESCE(ao.status, 'pendente') AS status
+            FROM arranjo_oradores ao
+            LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
+            LEFT JOIN temas t ON ao.tema_nr = t.nr
+            WHERE (ao.orador_id = ? OR ao.orador_2_id = ?)
+              AND ao.data IS NOT NULL AND ao.data <> ''
+            ORDER BY substr(ao.data, 7, 4) || substr(ao.data, 4, 2)
+                     || substr(ao.data, 1, 2) DESC
+            """,
+            (orador_id, orador_id),
+        ).fetchall()
+        return [
+            {
+                "data": linha[0],
+                "tipo": linha[1],
+                "congregacao": linha[2],
+                "tema_nr": linha[3],
+                "tema": linha[4],
+                "status": linha[5],
+            }
+            for linha in linhas
+        ]
+    finally:
+        conn.close()
+
+
+def historico_presidencias_da_pessoa(presidente_id: int) -> list[dict]:
+    """Todas as vezes que esta pessoa presidiu, do mais recente para trás.
+
+    Junta as semanas comuns e as datas especiais, que é como o rodízio conta:
+    quem presidiu o discurso especial de setembro presidiu naquele mês.
+    """
+    conn = get_connection()
+    try:
+        linhas = conn.execute(
+            """
+            -- O ORDER BY com expressão não enxerga as colunas de um UNION;
+            -- por isso a união vem primeiro, como subconsulta.
+            SELECT data, tipo FROM (
+                SELECT data, 'Reunião de fim de semana' AS tipo FROM presidentes
+                WHERE presidente_id = ?
+                UNION ALL
+                SELECT data, tipo FROM datas_especiais WHERE presidente_id = ?
+            )
+            ORDER BY substr(data, 7, 4) || substr(data, 4, 2)
+                     || substr(data, 1, 2) DESC
+            """,
+            (presidente_id, presidente_id),
+        ).fetchall()
+        return [{"data": linha[0], "tipo": linha[1]} for linha in linhas]
     finally:
         conn.close()
 
@@ -2186,8 +2326,44 @@ def salvar_presidente_cadastro(
         conn.close()
 
 
+def presidente_tem_historico(cadastro_id: int) -> bool:
+    """Se este presidente já presidiu (ou está escalado para) alguma coisa."""
+    conn = get_connection()
+    try:
+        for consulta in (
+            "SELECT 1 FROM presidentes WHERE presidente_id = ? LIMIT 1",
+            "SELECT 1 FROM datas_especiais WHERE presidente_id = ? LIMIT 1",
+        ):
+            if conn.execute(consulta, (cadastro_id,)).fetchone():
+                return True
+        return False
+    finally:
+        conn.close()
+
+
+def arquivar_presidente_cadastro(cadastro_id: int, arquivar: bool = True) -> None:
+    """Tira (ou devolve) um presidente da escala, sem tocar no histórico.
+
+    É o caminho para quem se mudou de congregação: some do rodízio e das
+    listas, e continua com o nome nas semanas e nas datas que presidiu.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE presidentes_cadastro SET ativo = ? WHERE id = ?",
+            (0 if arquivar else 1, cadastro_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def excluir_presidente_cadastro(cadastro_id: int) -> None:
-    """Remove um presidente do cadastro e as semanas atribuídas a ele."""
+    """Remove um presidente do cadastro e as semanas atribuídas a ele.
+
+    Só serve para quem nunca presidiu nada (um cadastro digitado errado). Com
+    histórico, o caminho é ``arquivar_presidente_cadastro``.
+    """
     conn = get_connection()
     try:
         conn.execute("DELETE FROM presidentes WHERE presidente_id = ?", (cadastro_id,))
@@ -2483,9 +2659,14 @@ def listar_tipos_evento() -> list[dict]:
     conn = get_connection()
     try:
         return [
-            {"id": linha[0], "nome": linha[1], "tem_presidente": bool(linha[2])}
+            {
+                "id": linha[0],
+                "nome": linha[1],
+                "tem_presidente": bool(linha[2]),
+                "entra_rodizio": bool(linha[3]),
+            }
             for linha in conn.execute(
-                "SELECT id, nome, COALESCE(tem_presidente, 1) "
+                "SELECT id, nome, COALESCE(tem_presidente, 1), COALESCE(entra_rodizio, 1) "
                 "FROM tipos_evento_especial ORDER BY nome"
             )
         ]
@@ -2511,6 +2692,37 @@ def tipos_evento_sem_presidente() -> set[str]:
                 "WHERE COALESCE(tem_presidente, 1) = 0"
             )
         }
+    finally:
+        conn.close()
+
+
+def tipos_fora_do_rodizio_especiais() -> set[str]:
+    """Nomes dos tipos que não entram na fila dos presidentes de datas especiais.
+
+    Pergunta pelo avesso, como ``tipos_evento_sem_presidente``: tipo novo ou
+    desconhecido entra no rodízio, que é o caso comum.
+    """
+    conn = get_connection()
+    try:
+        return {
+            nome
+            for (nome,) in conn.execute(
+                "SELECT nome FROM tipos_evento_especial WHERE COALESCE(entra_rodizio, 1) = 0"
+            )
+        }
+    finally:
+        conn.close()
+
+
+def definir_tipo_evento_entra_rodizio(tipo_id: int, entra: bool) -> None:
+    """Liga/desliga a participação do tipo no rodízio das datas especiais."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE tipos_evento_especial SET entra_rodizio = ? WHERE id = ?",
+            (1 if entra else 0, tipo_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 

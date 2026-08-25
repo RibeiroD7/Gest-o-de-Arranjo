@@ -49,6 +49,7 @@ from database import (
     adicionar_orador_arranjo,
     adicionar_tipo_evento,
     alterado_em_local,
+    arquivar_presidente_cadastro,
     atualizar_data_designacao,
     atualizar_orador_arranjo,
     atualizar_status_orador_arranjo,
@@ -72,6 +73,7 @@ from database import (
     create_tables,
     definir_presidente_data_especial,
     definir_tema_prioritario,
+    definir_tipo_evento_entra_rodizio,
     definir_tipo_evento_tem_presidente,
     definir_visibilidade_ano_coluna,
     excluir_ano_coluna,
@@ -86,6 +88,8 @@ from database import (
     exportar_backup,
     garantir_configuracao_inicial,
     get_connection,
+    historico_discursos_do_orador,
+    historico_presidencias_da_pessoa,
     historico_presidentes_por_tipo_de_evento,
     importar_temas_pdf,
     listar_anos_arranjos,
@@ -97,6 +101,7 @@ from database import (
     listar_tipos_evento,
     listar_vinculos_de_contato,
     oradores_com_temas_da_congregacao,
+    presidente_tem_historico,
     realocar_uso_para_ano_da_data,
     registrar_convite_enviado,
     relatorio_frequencia_oradores,
@@ -117,6 +122,7 @@ from database import (
     salvar_tema,
     sincronizar_uso_temas,
     tipos_evento_sem_presidente,
+    tipos_fora_do_rodizio_especiais,
     trocar_datas_designacoes,
     ultima_data_discurso_por_orador,
 )
@@ -6437,6 +6443,7 @@ def preencher_presidentes_especiais_rodizio(
         return 0
 
     sem_presidente = tipos_evento_sem_presidente()
+    fora_do_rodizio = tipos_fora_do_rodizio_especiais()
     especiais = listar_datas_especiais_por_ano(ano)
     historico_por_tipo = historico_presidentes_por_tipo_de_evento()
 
@@ -6453,6 +6460,9 @@ def preencher_presidentes_especiais_rodizio(
             # pode passar por cima de quem já está registrado ali.
             and not registro.get("presidente_avulso")
             and registro["tipo"] not in sem_presidente
+            # Arranjo Local e afins têm reunião normal, com o presidente da
+            # semana: não são evento com fila própria de anciãos.
+            and registro["tipo"] not in fora_do_rodizio
         ):
             por_tipo.setdefault(registro["tipo"], []).append(data_str)
 
@@ -6508,6 +6518,9 @@ def abrir_dialog_gerenciar_tipos_evento(
             def alternar_presidente(e, item=item):
                 definir_tipo_evento_tem_presidente(item["id"], bool(e.control.value))
 
+            def alternar_rodizio(e, item=item):
+                definir_tipo_evento_entra_rodizio(item["id"], bool(e.control.value))
+
             return ft.Row(
                 [
                     ft.Text(item["nome"], size=fonte(14), expand=True),
@@ -6518,9 +6531,19 @@ def abrir_dialog_gerenciar_tipos_evento(
                         label="Presidente",
                         value=item.get("tem_presidente", True),
                         tooltip="Marque se esse evento tem reunião no salão, com "
-                                "presidente. Só os marcados entram no rodízio "
-                                "das datas especiais.",
+                                "alguém presidindo.",
                         on_change=alternar_presidente,
+                    ),
+                    # Ter presidente e ter fila própria são coisas diferentes:
+                    # no Arranjo Local quem preside é o presidente da semana,
+                    # já escalado, e não um ancião chamado por rodízio.
+                    ft.Checkbox(
+                        label="Rodízio",
+                        value=item.get("entra_rodizio", True),
+                        tooltip="Marque se esse evento tem a sua própria fila de "
+                                "presidentes, na aba Datas especiais. Desmarque "
+                                "quando quem preside é o presidente da semana.",
+                        on_change=alternar_rodizio,
                     ),
                     ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
@@ -8636,6 +8659,158 @@ def _criar_card_mes_programacao(
     )
 
 
+def abrir_dialog_buscar_datas_especiais(
+    page: ft.Page, ao_concluir: Callable[[], None]
+) -> None:
+    """Procura uma data especial em qualquer ano e abre para editar.
+
+    As datas especiais moram dentro do mês, na aba do diálogo da Programação.
+    Achar a Celebração de 2027 significava lembrar em que mês ela caiu e abrir
+    aquele mês. Aqui elas aparecem todas juntas, com busca por tipo, orador,
+    tema, presidente ou data.
+    """
+    registros = [
+        r for r in listar_datas_especiais_por_ano().values()
+        if len(r.get("data") or "") == 10
+    ]
+    hoje = date.today()
+
+    def chave(registro: dict) -> tuple:
+        data = registro["data"]
+        return (data[6:10], data[3:5], data[0:2])
+
+    futuras = sorted(
+        [r for r in registros if (_parse_data_arranjo(r["data"]) or date.min) >= hoje],
+        key=chave,
+    )
+    passadas = sorted(
+        [r for r in registros if (_parse_data_arranjo(r["data"]) or date.max) < hoje],
+        key=chave,
+        reverse=True,
+    )
+    # Primeiro o que ainda vem, depois o que já foi, do mais recente para trás:
+    # a pergunta comum é sobre o que está por vir.
+    em_ordem = futuras + passadas
+
+    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=340)
+    contagem = ft.Text("", size=fonte(12), color=TEXTO_SECUNDARIO)
+    campo_busca = ft.TextField(
+        label="Procurar",
+        hint_text="Tipo, orador, tema, presidente ou data",
+        prefix_icon=ft.Icons.SEARCH,
+        expand=True,
+        **_estilo_campo_busca(),
+    )
+
+    def abrir_edicao(registro: dict):
+        data = registro["data"]
+        page.pop_dialog()
+        abrir_dialog_data_especial(
+            page, int(data[6:10]), int(data[3:5]), ao_concluir, registro
+        )
+
+    def linha(registro: dict) -> ft.Control:
+        passada = (_parse_data_arranjo(registro["data"]) or date.max) < hoje
+        detalhes = " · ".join(
+            parte for parte in (
+                (registro.get("presidente_nome") or "").strip(),
+                (registro.get("orador") or "").strip(),
+            ) if parte
+        )
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text(
+                        registro["data"],
+                        size=fonte(12),
+                        weight=ft.FontWeight.W_600,
+                        color=TEXTO_SECUNDARIO if passada else TEXTO_PRIMARIO,
+                        width=fonte(80),
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                registro.get("tipo") or "—",
+                                size=fonte(13),
+                                color=TEXTO_PRIMARIO,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            *(
+                                [ft.Text(detalhes, size=fonte(11), color=TEXTO_SECUNDARIO,
+                                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)]
+                                if detalhes else []
+                            ),
+                        ],
+                        spacing=1,
+                        tight=True,
+                        expand=True,
+                    ),
+                    ft.Icon(ft.Icons.EDIT_OUTLINED, size=fonte(16), color=COR_DESTAQUE),
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=10, vertical=9),
+            border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+            on_click=lambda e, r=dict(registro): abrir_edicao(r),
+            ink=True,
+        )
+
+    def filtrar(_=None):
+        procurado = _normalizar_texto_busca(campo_busca.value or "")
+        achados = [
+            r for r in em_ordem
+            if not procurado or procurado in _normalizar_texto_busca(
+                " ".join(
+                    str(r.get(campo) or "")
+                    for campo in ("data", "tipo", "orador", "tema", "presidente_nome")
+                )
+            )
+        ]
+        lista.controls = [linha(r) for r in achados] or [
+            ft.Container(
+                content=ft.Text(
+                    "Nenhuma data especial encontrada.",
+                    size=fonte(13), color=TEXTO_SECUNDARIO, italic=True,
+                ),
+                padding=16,
+            )
+        ]
+        pendentes = sum(
+            1 for r in achados
+            if not (r.get("presidente_nome") or "").strip()
+            and (_parse_data_arranjo(r["data"]) or date.min) >= hoje
+        )
+        contagem.value = f"{len(achados)} data(s)" + (
+            f" · {pendentes} sem presidente" if pendentes else ""
+        )
+        page.update()
+
+    campo_busca.on_change = filtrar
+    filtrar()
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Datas especiais"),
+            content=ft.Container(
+                content=ft.Column(
+                    [campo_busca, ft.Container(height=8), contagem,
+                     ft.Container(height=8), lista],
+                    spacing=0,
+                    tight=True,
+                    width=_largura_dialog(page, 560),
+                ),
+                padding=ft.Padding.only(top=8),
+            ),
+            actions=[ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def tela_programacao(
     page: ft.Page,
     recarregar: Callable[[], None],
@@ -8749,6 +8924,9 @@ def tela_programacao(
     def abrir_adicionar_ano(_=None):
         abrir_dialog_adicionar_ano(page, ao_adicionar_ano)
 
+    def buscar_especiais(_=None):
+        abrir_dialog_buscar_datas_especiais(page, recarregar_view)
+
     def exportar_relatorio(_=None):
         from relatorios import secoes_programacao
 
@@ -8778,6 +8956,12 @@ def tela_programacao(
                         on_click=abrir_adicionar_ano,
                     ),
                     ft.Container(expand=True),
+                    ft.OutlinedButton(
+                        content="Datas especiais" if not eh_mobile() else "Especiais",
+                        icon=ft.Icons.EVENT_OUTLINED,
+                        tooltip="Procurar uma data especial em qualquer ano",
+                        on_click=buscar_especiais,
+                    ),
                     botao_relatorio_tela(exportar_relatorio),
                 ],
                 spacing=12,
@@ -8902,17 +9086,101 @@ def _quadro_relatorio(titulo: str, descricao: str, corpo: list[ft.Control]) -> f
     )
 
 
+def abrir_dialog_historico_pessoa(
+    page: ft.Page, titulo: str, subtitulo: str, linhas: list[dict]
+) -> None:
+    """Mostra o que uma pessoa fez e quando.
+
+    É o detalhe por trás do número do relatório: "5 discursos" não diz quando,
+    nem onde, e era justamente o que faltava para conferir se a conta bate.
+    ``linhas``: ``[{data, principal, detalhe}]``, já em ordem.
+    """
+    if not linhas:
+        mostrar_aviso(page, titulo, "Nada registrado ainda.")
+        return
+
+    conteudo = ft.Column(
+        [
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Text(
+                            item["data"],
+                            size=fonte(12),
+                            weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO,
+                            width=fonte(80),
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    item["principal"],
+                                    size=fonte(13),
+                                    color=TEXTO_PRIMARIO,
+                                    max_lines=2,
+                                ),
+                                *(
+                                    [ft.Text(item["detalhe"], size=fonte(11),
+                                             color=TEXTO_SECUNDARIO, max_lines=2)]
+                                    if item.get("detalhe") else []
+                                ),
+                            ],
+                            spacing=1,
+                            tight=True,
+                            expand=True,
+                        ),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+                padding=ft.Padding.symmetric(horizontal=4, vertical=8),
+                border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+            )
+            for item in linhas
+        ],
+        spacing=0,
+        tight=True,
+        scroll=ft.ScrollMode.AUTO,
+        height=min(380, 68 * len(linhas) + 20),
+    )
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Column(
+                [
+                    ft.Text(titulo, size=fonte(18), weight=ft.FontWeight.W_600),
+                    ft.Text(subtitulo, size=fonte(12), color=TEXTO_SECUNDARIO),
+                ],
+                spacing=2,
+                tight=True,
+            ),
+            content=ft.Container(
+                content=conteudo,
+                width=_largura_dialog(page, 520),
+                padding=ft.Padding.only(top=4),
+            ),
+            actions=[ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def _lista_ranking_relatorio(
     itens: list[dict],
     largura: int,
     cor: str,
     vazio: str,
+    ao_clicar: Callable[[dict], None] | None = None,
 ) -> list[ft.Control]:
     """Ranking nome + número + barra + detalhe, em larguras fixas.
 
     ``itens``: ``[{nome, valor, detalhe}]``. No celular a linha é empilhada
     (nome e número em cima, barra e detalhe embaixo) porque lado a lado sobram
     poucos pixels para o nome.
+
+    Com ``ao_clicar``, cada linha abre o histórico daquela pessoa.
     """
     if not itens:
         return [ft.Text(vazio, size=fonte(13), color=TEXTO_SECUNDARIO, italic=True)]
@@ -8968,6 +9236,9 @@ def _lista_ranking_relatorio(
             content=conteudo,
             padding=ft.Padding.symmetric(horizontal=12, vertical=9),
             border=None if ultima else ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+            on_click=(lambda e, i=dict(item): ao_clicar(i)) if ao_clicar else None,
+            ink=bool(ao_clicar),
+            tooltip="Ver o que fez e quando" if ao_clicar else None,
         )
 
     return [
@@ -9216,6 +9487,45 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
             page, montar_secoes, f"Resumo de {ano}", "Resumo"
         )
 
+    def abrir_historico_orador(item: dict):
+        """O que este orador fez: cada discurso, quando e para onde foi."""
+        if not item.get("id"):
+            return
+        registros = historico_discursos_do_orador(int(item["id"]))
+        linhas = [
+            {
+                "data": r["data"],
+                "principal": (
+                    f"{r['tema_nr']} - {r['tema']}" if r.get("tema_nr") and r.get("tema")
+                    else (f"Tema {r['tema_nr']}" if r.get("tema_nr") else "Sem tema")
+                ),
+                "detalhe": " · ".join(
+                    parte for parte in (
+                        "enviado" if r["tipo"] == "enviado" else "aqui",
+                        r.get("congregacao") or "",
+                        "aguardando confirmação" if r.get("status") == "pendente" else "",
+                    ) if parte
+                ),
+            }
+            for r in registros
+        ]
+        abrir_dialog_historico_pessoa(
+            page, item["nome"], f"{len(linhas)} discurso(s) registrado(s)", linhas
+        )
+
+    def abrir_historico_presidente(item: dict):
+        """Todas as vezes que esta pessoa presidiu, semana comum ou data especial."""
+        if not item.get("id"):
+            return
+        registros = historico_presidencias_da_pessoa(int(item["id"]))
+        linhas = [
+            {"data": r["data"], "principal": r["tipo"], "detalhe": ""}
+            for r in registros
+        ]
+        abrir_dialog_historico_pessoa(
+            page, item["nome"], f"{len(linhas)} vez(es) presidindo", linhas
+        )
+
     def montar():
         ano = estado_rel["ano"]
         largura = _largura_conteudo_relatorio(page)
@@ -9266,6 +9576,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
 
         itens_freq = [
             {
+                "id": o.get("id"),
                 "nome": o["nome"],
                 "valor": o["quantidade"],
                 "detalhe": o["ultima_data"] or "nunca",
@@ -9274,6 +9585,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
         ]
         itens_pres = [
             {
+                "id": p.get("id"),
                 "nome": p["nome"],
                 "valor": p["quantidade"],
                 "detalhe": p["ultima_data"] or "nunca",
@@ -9296,6 +9608,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 _lista_ranking_relatorio(
                     itens_freq, largura, COR_DESTAQUE_CLARA,
                     "Nenhum orador cadastrado na sua congregação.",
+                    ao_clicar=abrir_historico_orador,
                 ),
             ),
             _quadro_relatorio(
@@ -9305,6 +9618,7 @@ def tela_relatorios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                 _lista_ranking_relatorio(
                     itens_pres, largura, COR_SUCESSO,
                     "Nenhum presidente cadastrado.",
+                    ao_clicar=abrir_historico_presidente,
                 ),
             ),
             _quadro_relatorio(
@@ -11273,10 +11587,10 @@ def _linha_presidente(
         on_click=lambda e, i=dict(item): on_editar(i),
     )
     botao_excluir = ft.IconButton(
-        icon=ft.Icons.DELETE_OUTLINE,
+        icon=ft.Icons.ARCHIVE_OUTLINED,
         icon_size=fonte(17),
-        icon_color=COR_ERRO,
-        tooltip="Excluir (remove também as semanas atribuídas)",
+        icon_color=COR_AVISO,
+        tooltip="Tirar da escala (quem já presidiu fica no histórico)",
         on_click=lambda e, i=dict(item): on_excluir(i),
     )
     borda_linha = ft.Border(
@@ -11312,8 +11626,8 @@ def _linha_presidente(
                                     lambda e, i=dict(item): on_editar(i),
                                 ),
                                 (
-                                    "Excluir",
-                                    ft.Icons.DELETE_OUTLINE,
+                                    "Tirar da escala",
+                                    ft.Icons.ARCHIVE_OUTLINED,
                                     lambda e, i=dict(item): on_excluir(i),
                                 ),
                             ]
@@ -11434,41 +11748,66 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         abrir_dialog_presidente(page, None, ao_mudar)
 
     def excluir(item: dict):
+        """Tira alguém da escala: arquiva quem já presidiu, exclui quem não.
+
+        Quem se mudou de congregação precisa sumir do rodízio, mas o que ele
+        presidiu não pode sumir junto: é a memória de onde os rodízios tiram a
+        vez de cada um, e o nome dele está no quadro daqueles meses.
+        """
+        tem_historico = presidente_tem_historico(item["id"])
+
         def fechar(_=None):
             page.pop_dialog()
 
         def confirmar(_=None):
             fechar()
             try:
-                excluir_presidente_cadastro(item["id"])
+                if tem_historico:
+                    arquivar_presidente_cadastro(item["id"])
+                else:
+                    excluir_presidente_cadastro(item["id"])
             except Exception:  # noqa: BLE001
-                logger.exception("Falha ao excluir presidente")
-                mostrar_aviso(page, "Erro", "Não foi possível excluir este presidente.")
+                logger.exception("Falha ao tirar presidente da escala")
+                mostrar_aviso(page, "Erro", "Não foi possível tirar da escala.")
                 return
             ao_mudar()
+
+        if tem_historico:
+            titulo = "Tirar da escala"
+            explicacao = (
+                f"{item['nome']} sai dos rodízios e das listas. As semanas e as "
+                "datas especiais que ele presidiu continuam no histórico, com o "
+                "nome dele.\n\nDá para trazer de volta quando quiser, na seção "
+                "Fora da escala."
+            )
+            rotulo, icone, estilo = "Arquivar", ft.Icons.ARCHIVE_OUTLINED, None
+        else:
+            titulo = "Excluir presidente"
+            explicacao = (
+                f"{item['nome']} nunca presidiu nada, então sai do cadastro sem "
+                "deixar rastro."
+            )
+            rotulo, icone = "Excluir", ft.Icons.DELETE_OUTLINE
+            estilo = ft.ButtonStyle(bgcolor=COR_ERRO, color="#FFFFFF")
 
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
-                title=ft.Text("Excluir presidente"),
-                content=ft.Text(
-                    f"Remover {item['nome']} do cadastro? As semanas já "
-                    "atribuídas a ele também são apagadas.",
-                    size=fonte(13),
-                ),
+                title=ft.Text(titulo),
+                content=ft.Text(explicacao, size=fonte(13)),
                 actions=[
                     ft.TextButton("Cancelar", on_click=fechar),
-                    ft.FilledButton(
-                        "Excluir",
-                        icon=ft.Icons.DELETE_OUTLINE,
-                        style=ft.ButtonStyle(bgcolor=COR_ERRO, color="#FFFFFF"),
-                        on_click=confirmar,
-                    ),
+                    ft.FilledButton(rotulo, icon=icone, style=estilo, on_click=confirmar),
                 ],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
         )
         page.update()
+
+    def reativar(item: dict):
+        arquivar_presidente_cadastro(item["id"], arquivar=False)
+        mostrar_sucesso(page, f"{item['nome']} voltou para a escala.")
+        ao_mudar()
 
     def conversar(item: dict):
         """WhatsApp do presidente direto da lista, como na tela de Oradores."""
@@ -11544,6 +11883,60 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         ]
     else:
         corpo = [_lista_presidentes(cadastro, mover, editar, excluir, conversar)]
+
+    arquivados = [
+        item for item in listar_presidentes_cadastro(incluir_arquivados=True)
+        if not item.get("ativo", True)
+    ]
+    if arquivados:
+        corpo += [
+            ft.Container(height=20),
+            ft.Text(
+                f"Fora da escala ({len(arquivados)})",
+                size=fonte(13),
+                weight=ft.FontWeight.W_600,
+                color=TEXTO_SECUNDARIO,
+            ),
+            ft.Text(
+                "Não entram em rodízio nenhum. O que já presidiram continua no "
+                "histórico.",
+                size=fonte(11),
+                color=TEXTO_SECUNDARIO,
+            ),
+            ft.Container(height=8),
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    item["nome"],
+                                    size=fonte(13),
+                                    color=TEXTO_SECUNDARIO,
+                                    expand=True,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                                ft.TextButton(
+                                    "Voltar para a escala",
+                                    icon=ft.Icons.UNARCHIVE_OUTLINED,
+                                    on_click=lambda e, i=dict(item): reativar(i),
+                                ),
+                            ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        )
+                        for item in arquivados
+                    ],
+                    spacing=0,
+                    tight=True,
+                ),
+                bgcolor=FUNDO_CARD,
+                border=ft.Border.all(1, BORDA_SUAVE),
+                border_radius=12,
+                padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+            ),
+        ]
 
     return ft.Column(
         [cabecalho, ft.Container(height=12), *corpo],
@@ -11699,10 +12092,12 @@ def _secao_presidentes_especiais(page: ft.Page, ao_mudar: Callable[[], None]) ->
     todas = [r for r in especiais.values() if len(r.get("data") or "") == 10]
     futuras = em_ordem([r for r in todas if (data_de(r) or date.min) >= hoje])
     passadas = em_ordem([r for r in todas if (data_de(r) or date.max) < hoje], recentes_primeiro=True)
+    fora_do_rodizio = tipos_fora_do_rodizio_especiais()
     pendentes = [
         r for r in futuras
         if not (r.get("presidente_nome") or "").strip()
         and r.get("tipo") not in sem_presidente_local
+        and r.get("tipo") not in fora_do_rodizio
     ]
 
     def preencher(_=None):
@@ -11743,13 +12138,17 @@ def _secao_presidentes_especiais(page: ft.Page, ao_mudar: Callable[[], None]) ->
         ft.Container(height=16),
     ]
 
-    tipos = [t["nome"] for t in listar_tipos_evento() if t["tem_presidente"]]
+    tipos = [
+        t["nome"] for t in listar_tipos_evento()
+        if t["tem_presidente"] and t["entra_rodizio"]
+    ]
     # Um tipo que saiu do cadastro mas ainda tem data marcada continua valendo.
     tipos += sorted(
         {
             r["tipo"] for r in todas
             if r.get("tipo") and r["tipo"] not in tipos
             and r["tipo"] not in sem_presidente_local
+            and r["tipo"] not in fora_do_rodizio
         }
     )
     for tipo in tipos:
@@ -11792,7 +12191,12 @@ def _secao_presidentes_especiais(page: ft.Page, ao_mudar: Callable[[], None]) ->
 
     def card_datas(titulo: str, registros: list[dict], passada: bool, vazio: str) -> ft.Control:
         linhas = [
-            _linha_data_especial(r, passada, r.get("tipo") not in sem_presidente_local)
+            _linha_data_especial(
+                r,
+                passada,
+                r.get("tipo") not in sem_presidente_local
+                and r.get("tipo") not in fora_do_rodizio,
+            )
             for r in registros
         ] or [
             ft.Text(vazio, size=fonte(12), color=TEXTO_SECUNDARIO, italic=True)
