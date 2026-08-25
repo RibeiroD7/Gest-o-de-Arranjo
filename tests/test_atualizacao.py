@@ -61,3 +61,39 @@ class TestUrlInstaladorPlataforma:
 
     def test_release_sem_arquivo_para_a_plataforma(self):
         assert atualizacao._url_instalador_plataforma([]) is None
+
+
+def test_baixar_no_celular_usa_o_abrir_url_que_espera_a_corrotina(celular, monkeypatch):
+    """No Android, page.launch_url sem await não faz nada — em silêncio.
+
+    Foi o bug do botão "Baixar" que não respondia: a chamada estava direta,
+    fora do abrir_url, que é quem embrulha a corrotina no run_task.
+    """
+    celular("aarch64")
+    chamadas = []
+    monkeypatch.setattr(atualizacao, "abrir_url", lambda page, url: chamadas.append(url))
+
+    atualizacao._baixar_atualizacao(object(), "https://exemplo/app.apk")
+    assert chamadas == ["https://exemplo/app.apk"]
+
+    atualizacao._baixar_atualizacao(object(), None)
+    assert chamadas[-1] == atualizacao.URL_RELEASES
+
+
+def test_ninguem_chama_launch_url_por_fora_do_ui_comuns():
+    """Guarda a regra: quem abre URL usa abrir_url, que trata o celular."""
+    import ast
+    import pathlib
+
+    problemas = []
+    for arquivo in sorted(pathlib.Path("src").rglob("*.py")):
+        if arquivo.name == "ui_comuns.py":
+            continue
+        for no in ast.walk(ast.parse(arquivo.read_text(encoding="utf-8"))):
+            if (isinstance(no, ast.Attribute) and no.attr == "launch_url"
+                    and isinstance(no.value, ast.Name) and no.value.id == "page"):
+                problemas.append(f"{arquivo.name}:{no.lineno}")
+    assert not problemas, (
+        "page.launch_url fora do ui_comuns: no celular ela é assíncrona e "
+        "sem await não abre nada — " + ", ".join(problemas)
+    )

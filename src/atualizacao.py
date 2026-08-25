@@ -14,7 +14,7 @@ import flet as ft
 from armazenamento import eh_mobile
 from log_app import logger
 from tema import COR_DESTAQUE_CLARA, fonte
-from ui_comuns import mostrar_aviso, mostrar_sucesso
+from ui_comuns import abrir_url, mostrar_aviso, mostrar_sucesso
 from util import ha_versao_mais_nova
 from versao import URL_API_RELEASE, URL_RELEASES, VERSAO_APP
 
@@ -103,9 +103,12 @@ def _baixar_atualizacao(page: ft.Page, url: str | None) -> None:
     abre a página de releases.
     """
     if not url:
-        page.launch_url(URL_RELEASES)
+        abrir_url(page, URL_RELEASES)
     elif eh_mobile():
-        page.launch_url(url)
+        # abrir_url, e não page.launch_url direto: no celular ela é assíncrona
+        # e, chamada sem await, não faz nada — em silêncio. Era o botão
+        # "Baixar" que não respondia no Android.
+        abrir_url(page, url)
     else:
         # run_task exige uma função corrotina de verdade: um lambda (mesmo
         # devolvendo corrotina) é rejeitado com TypeError.
