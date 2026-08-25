@@ -2207,8 +2207,13 @@ def listar_anos_planejamento() -> list[int]:
         conn.close()
 
 
-def listar_datas_especiais_por_ano(ano: int) -> dict[str, dict]:
-    """Datas especiais do ano (Assembleia, Congresso…), indexadas por data."""
+def listar_datas_especiais_por_ano(ano: int | None = None) -> dict[str, dict]:
+    """Datas especiais indexadas por data (Assembleia, Congresso…).
+
+    Sem ``ano``, traz as de todos os anos — é o que a aba de presidentes de
+    datas especiais mostra, porque a fila de cada tipo é medida contra o
+    histórico inteiro, não contra um ano.
+    """
     conn = get_connection()
     try:
         linhas = conn.execute(
@@ -2225,9 +2230,9 @@ def listar_datas_especiais_por_ano(ano: int) -> dict[str, dict]:
             FROM datas_especiais e
             LEFT JOIN presidentes_cadastro c ON e.presidente_id = c.id
             LEFT JOIN congregacoes cong ON e.congregacao_id = cong.id
-            WHERE substr(e.data, 7, 4) = ?
+            WHERE (? IS NULL OR substr(e.data, 7, 4) = ?)
             """,
-            (str(ano),),
+            (None if ano is None else str(ano), None if ano is None else str(ano)),
         ).fetchall()
         return {
             linha[1]: {

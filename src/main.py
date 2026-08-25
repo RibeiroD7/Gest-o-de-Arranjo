@@ -6410,7 +6410,9 @@ def preencher_presidentes_rodizio(ano: int, mes: int) -> int:
     return len(escolhas)
 
 
-def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
+def preencher_presidentes_especiais_rodizio(
+    ano: int, mes: int | None = None, a_partir_de: date | None = None
+) -> int:
     """Preenche por rodízio os presidentes das datas especiais do mês.
 
     Cada TIPO de evento tem a sua fila: uma para a Celebração, outra para a
@@ -6424,6 +6426,9 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
     presidir). Cada fila é medida contra as datas daquele tipo em TODOS os
     anos, não só as do mês: são uma ou duas por ano, e olhar um mês de cada
     vez daria sempre o primeiro do cadastro.
+
+    Sem ``mes``, cobre o ano inteiro. ``a_partir_de`` corta o que é passado:
+    preencher por rodízio uma data que já aconteceu seria inventar histórico.
 
     Retorna quantas datas foram preenchidas.
     """
@@ -6441,7 +6446,8 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
         data_str = registro["data"]
         if (
             len(data_str) == 10
-            and int(data_str[3:5]) == mes
+            and (mes is None or int(data_str[3:5]) == mes)
+            and (a_partir_de is None or (_parse_data_arranjo(data_str) or date.max) >= a_partir_de)
             and not registro.get("presidente_id")
             # Nome digitado à mão também é presidente definido: o rodízio não
             # pode passar por cima de quem já está registrado ali.
@@ -6460,10 +6466,11 @@ def preencher_presidentes_especiais_rodizio(ano: int, mes: int) -> int:
 
     preenchidas = 0
     for tipo, datas in por_tipo.items():
-        # Todas do mesmo mês e ano: DD/MM/AAAA já ordena por dia como texto
-        # (é o mesmo critério que a lista da tela usa).
+        # A fila anda em ordem de calendário. DD/MM/AAAA como texto ordenaria
+        # 05/12 antes de 11/04, então a chave reordena para AAAAMMDD.
+        em_ordem = sorted(datas, key=lambda d: (d[6:10], d[3:5], d[0:2]))
         escolhas = escolher_rodizio_datas_especiais(
-            elegiveis, sorted(datas), historico_por_tipo.get(tipo, {}), historico_geral
+            elegiveis, em_ordem, historico_por_tipo.get(tipo, {}), historico_geral
         )
         for data_str, presidente_id in escolhas:
             definir_presidente_data_especial(especiais[data_str]["id"], presidente_id)
@@ -11545,6 +11552,300 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
     )
 
 
+def _fila_do_tipo(
+    tipo: str,
+    elegiveis: list[dict],
+    historico_por_tipo: dict[str, dict[str, int]],
+    historico_geral: dict[str, int],
+) -> list[int]:
+    """De quem é a vez neste tipo de evento, do primeiro ao último.
+
+    Em vez de repetir aqui a regra do rodízio (fila do tipo, desempate por
+    quem está há mais tempo sem qualquer data especial, ordem do cadastro por
+    último), pergunta ao próprio rodízio: dá a ele datas fictícias, bem no
+    futuro e espaçadas, e lê a ordem em que ele distribui. Assim a tela nunca
+    mostra uma fila diferente da que o botão vai seguir.
+    """
+    if not elegiveis:
+        return []
+    ids = [p["id"] for p in elegiveis]
+    fantasia = [f"01/01/{2100 + i}" for i in range(len(ids))]
+    escolhas = escolher_rodizio_datas_especiais(
+        ids, fantasia, historico_por_tipo.get(tipo, {}), dict(historico_geral)
+    )
+    ordem = [pid for _, pid in escolhas]
+    # Quem sobrar (o rodízio para quando acaba a fila) entra no fim, na ordem
+    # do cadastro, para a lista da tela mostrar todo mundo.
+    return ordem + [pid for pid in ids if pid not in ordem]
+
+
+def _ultima_vez_no_tipo(
+    presidente_id: int, historico_do_tipo: dict[str, int]
+) -> str:
+    """A data mais recente em que esta pessoa presidiu este tipo. Vazio se nunca."""
+    datas = [d for d, pid in historico_do_tipo.items() if pid == presidente_id]
+    if not datas:
+        return ""
+    return max(datas, key=lambda d: (d[6:10], d[3:5], d[0:2]))
+
+
+def _linha_fila(posicao: int, nome: str, ultima: str) -> ft.Control:
+    """Uma pessoa na fila de um tipo de evento."""
+    proximo = posicao == 0
+    return ft.Row(
+        [
+            ft.Container(
+                content=ft.Text(
+                    str(posicao + 1),
+                    size=fonte(11),
+                    weight=ft.FontWeight.W_700,
+                    color="#04342C" if proximo else TEXTO_SECUNDARIO,
+                ),
+                width=fonte(22),
+                height=fonte(22),
+                border_radius=fonte(11),
+                bgcolor=COR_DESTAQUE_CLARA if proximo else ft.Colors.TRANSPARENT,
+                border=None if proximo else ft.Border.all(1, BORDA_SUAVE),
+                alignment=ft.Alignment.CENTER,
+            ),
+            ft.Text(
+                nome,
+                size=fonte(13),
+                color=TEXTO_PRIMARIO,
+                weight=ft.FontWeight.W_600 if proximo else ft.FontWeight.W_400,
+                expand=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            ft.Text(
+                f"última: {ultima}" if ultima else "nunca presidiu este",
+                size=fonte(12),
+                color=COR_DESTAQUE_SUAVE if not ultima else TEXTO_SECUNDARIO,
+            ),
+        ],
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+def _linha_data_especial(registro: dict, passada: bool, pede_presidente: bool = True) -> ft.Control:
+    """Uma data especial na lista: quando, o que é e quem presidiu.
+
+    Assembleia e congresso não pedem presidente local — marcá-las como "sem
+    presidente" seria cobrar o que não existe.
+    """
+    nome = (registro.get("presidente_nome") or "").strip()
+    sem_presidente = not nome and pede_presidente
+    return ft.Row(
+        [
+            ft.Text(
+                registro["data"],
+                size=fonte(12),
+                weight=ft.FontWeight.W_600,
+                color=TEXTO_SECUNDARIO if passada else TEXTO_PRIMARIO,
+                width=fonte(78),
+            ),
+            ft.Text(
+                registro.get("tipo") or "—",
+                size=fonte(12),
+                color=TEXTO_SECUNDARIO,
+                expand=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            ft.Text(
+                nome or ("sem presidente" if pede_presidente else "não pede presidente"),
+                size=fonte(12),
+                color=COR_AVISO if sem_presidente else TEXTO_SECUNDARIO if not nome
+                else TEXTO_PRIMARIO,
+                weight=ft.FontWeight.W_600 if sem_presidente else ft.FontWeight.W_400,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+                width=fonte(140),
+            ),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+def _secao_presidentes_especiais(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Control:
+    """Aba de Minha congregação: quem preside as datas especiais.
+
+    Três coisas na mesma tela, porque são a mesma pergunta vista de ângulos
+    diferentes: de quem é a vez em cada tipo de evento, o que já aconteceu, e
+    o que ainda está sem presidente.
+    """
+    hoje = date.today()
+    elegiveis = listar_presidentes_cadastro(escala="especiais")
+    historico_por_tipo = historico_presidentes_por_tipo_de_evento()
+    historico_geral = {
+        data: pid for datas in historico_por_tipo.values() for data, pid in datas.items()
+    }
+    nomes = {p["id"]: p["nome"] for p in elegiveis}
+    especiais = listar_datas_especiais_por_ano()
+    sem_presidente_local = tipos_evento_sem_presidente()
+
+    def em_ordem(registros, recentes_primeiro=False):
+        return sorted(
+            registros,
+            key=lambda r: (r["data"][6:10], r["data"][3:5], r["data"][0:2]),
+            reverse=recentes_primeiro,
+        )
+
+    def data_de(registro) -> date | None:
+        return _parse_data_arranjo(registro["data"])
+
+    todas = [r for r in especiais.values() if len(r.get("data") or "") == 10]
+    futuras = em_ordem([r for r in todas if (data_de(r) or date.min) >= hoje])
+    passadas = em_ordem([r for r in todas if (data_de(r) or date.max) < hoje], recentes_primeiro=True)
+    pendentes = [
+        r for r in futuras
+        if not (r.get("presidente_nome") or "").strip()
+        and r.get("tipo") not in sem_presidente_local
+    ]
+
+    def preencher(_=None):
+        """Preenche as datas que ainda estão sem presidente, daqui para frente."""
+        anos = sorted({int(r["data"][6:10]) for r in pendentes})
+        preenchidas = sum(
+            preencher_presidentes_especiais_rodizio(ano, a_partir_de=hoje) for ano in anos
+        )
+        if preenchidas:
+            mostrar_sucesso(page, f"{preenchidas} data(s) preenchida(s) pelo rodízio.")
+            ao_mudar()
+        else:
+            mostrar_aviso(
+                page,
+                "Nada para preencher",
+                "Todas as datas especiais daqui para frente já têm presidente, "
+                "ou são de tipos que não pedem presidente local (Assembleia, "
+                "Congresso).",
+            )
+
+    if not elegiveis:
+        return criar_painel_informativo(
+            "Ninguém marcado ainda",
+            "Na aba Presidentes, marque quem pode presidir as datas especiais. "
+            "É uma escala à parte da reunião de todo fim de semana: aqui entram "
+            "a Celebração, a visita do superintendente e o discurso especial.",
+        )
+
+    blocos: list[ft.Control] = [
+        criar_painel_informativo(
+            "Como a vez anda",
+            "Cada tipo de evento tem a sua fila. Presidir a Celebração não faz "
+            "ninguém perder a vez na visita do superintendente. Dentro de um "
+            "tipo, vai quem está há mais tempo sem fazer aquele evento; entre "
+            "os que nunca fizeram, vai quem está há mais tempo sem qualquer "
+            "data especial.",
+        ),
+        ft.Container(height=16),
+    ]
+
+    tipos = [t["nome"] for t in listar_tipos_evento() if t["tem_presidente"]]
+    # Um tipo que saiu do cadastro mas ainda tem data marcada continua valendo.
+    tipos += sorted(
+        {
+            r["tipo"] for r in todas
+            if r.get("tipo") and r["tipo"] not in tipos
+            and r["tipo"] not in sem_presidente_local
+        }
+    )
+    for tipo in tipos:
+        historico_do_tipo = historico_por_tipo.get(tipo, {})
+        fila = _fila_do_tipo(tipo, elegiveis, historico_por_tipo, historico_geral)
+        proxima = next((r for r in futuras if r.get("tipo") == tipo), None)
+        legenda = f"próxima: {proxima['data']}" if proxima else "sem data marcada"
+        blocos.append(
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(tipo, size=fonte(14), weight=ft.FontWeight.W_600,
+                                        color=TEXTO_PRIMARIO, expand=True),
+                                ft.Text(legenda, size=fonte(12), color=TEXTO_SECUNDARIO),
+                            ],
+                            spacing=8,
+                        ),
+                        ft.Container(height=8),
+                        *[
+                            _linha_fila(
+                                posicao,
+                                nomes.get(pid, "—"),
+                                _ultima_vez_no_tipo(pid, historico_do_tipo),
+                            )
+                            for posicao, pid in enumerate(fila)
+                        ],
+                    ],
+                    spacing=6,
+                    tight=True,
+                ),
+                bgcolor=FUNDO_CARD,
+                border=ft.Border.all(1, BORDA_SUAVE),
+                border_radius=12,
+                padding=16,
+            )
+        )
+        blocos.append(ft.Container(height=12))
+
+    def card_datas(titulo: str, registros: list[dict], passada: bool, vazio: str) -> ft.Control:
+        linhas = [
+            _linha_data_especial(r, passada, r.get("tipo") not in sem_presidente_local)
+            for r in registros
+        ] or [
+            ft.Text(vazio, size=fonte(12), color=TEXTO_SECUNDARIO, italic=True)
+        ]
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(titulo, size=fonte(14), weight=ft.FontWeight.W_600,
+                            color=TEXTO_PRIMARIO),
+                    ft.Container(height=8),
+                    *linhas,
+                ],
+                spacing=6,
+                tight=True,
+            ),
+            bgcolor=FUNDO_CARD,
+            border=ft.Border.all(1, BORDA_SUAVE),
+            border_radius=12,
+            padding=16,
+        )
+
+    blocos += [
+        ft.Row(
+            [
+                ft.FilledButton(
+                    "Preencher em rodízio",
+                    icon=ft.Icons.AUTORENEW,
+                    tooltip="Distribui quem preside as datas especiais que ainda "
+                            "estão sem presidente, daqui para frente",
+                    on_click=preencher,
+                    disabled=not pendentes,
+                ),
+                ft.Text(
+                    f"{len(pendentes)} data(s) sem presidente" if pendentes
+                    else "nenhuma data pendente",
+                    size=fonte(12),
+                    color=COR_AVISO if pendentes else TEXTO_SECUNDARIO,
+                ),
+            ],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+        ),
+        ft.Container(height=16),
+        card_datas("Próximas datas especiais", futuras, False,
+                   "Nenhuma data especial marcada daqui para frente."),
+        ft.Container(height=12),
+        card_datas("Já realizadas", passadas[:12], True,
+                   "Nenhuma data especial registrada ainda."),
+    ]
+    return ft.Column(blocos, spacing=0, tight=True)
+
+
 def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control:
     """Tudo que é da própria congregação: os dados dela e quem preside.
 
@@ -11560,6 +11861,8 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
             area.controls = [_secao_dados_congregacao(page)]
         elif estado_aba["atual"] == "oradores":
             area.controls = [_secao_oradores(page, recarregar)]
+        elif estado_aba["atual"] == "especiais":
+            area.controls = [_secao_presidentes_especiais(page, atualizar)]
         else:
             area.controls = [_secao_presidentes(page, atualizar)]
 
@@ -11615,9 +11918,11 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
             _chip("dados", "Dados", ft.Icons.HOME_WORK_OUTLINED),
             _chip("oradores", "Oradores", ft.Icons.PEOPLE_OUTLINE),
             _chip("presidentes", "Presidentes", ft.Icons.MANAGE_ACCOUNTS),
+            _chip("especiais", "Datas especiais", ft.Icons.CELEBRATION_OUTLINED),
         ],
         spacing=8,
         tight=True,
+        wrap=True,
     )
 
     montar()
@@ -11625,7 +11930,8 @@ def tela_minha_congregacao(page: ft.Page, recarregar: Callable[[], None]) -> ft.
         [
             criar_cabecalho_tela(
                 "Minha congregação",
-                "Os dados da congregação, os oradores e quem preside a reunião.",
+                "Os dados da congregação, os oradores e quem preside as reuniões "
+                "e as datas especiais.",
             ),
             ft.Container(height=12),
             alternador,
