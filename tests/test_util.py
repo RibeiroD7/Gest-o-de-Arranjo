@@ -16,6 +16,7 @@ from util import (
     aviso_backup_antigo,
     descrever_ultimo_envio,
     espera_de_resposta,
+    formatar_data_hora_local,
     formatar_data_hora_sao_paulo,
     ha_versao_mais_nova,
     rotulo_de_prazo,
@@ -287,3 +288,31 @@ class TestEsperaDeResposta:
         texto, nivel = espera_de_resposta("2026-09-15T09:00:00", self.HOJE)
         assert texto == "5 dias sem resposta"
         assert nivel == "atencao"
+
+
+class TestCarimboLocalVersusUtc:
+    """Carimbo sem fuso: do aparelho é hora local; do Drive é UTC.
+
+    Tratar um como o outro tira três horas do relógio — foi o que fez o
+    "Último envio: hoje, 13:03" aparecer para um backup enviado às 16:03.
+    """
+
+    def test_carimbo_do_aparelho_mantem_a_hora(self):
+        assert formatar_data_hora_local("2026-08-25T16:03:00") == "25/08/2026 16:03"
+
+    def test_carimbo_do_drive_continua_convertendo_de_utc(self):
+        assert formatar_data_hora_sao_paulo("2026-08-25T19:03:00Z") == "25/08/2026 16:03"
+
+    def test_com_fuso_explicito_os_dois_concordam(self):
+        com_fuso = "2026-08-25T16:03:00-03:00"
+        assert formatar_data_hora_local(com_fuso) == formatar_data_hora_sao_paulo(com_fuso)
+
+    def test_ultimo_envio_sem_fuso_mostra_a_hora_do_aparelho(self):
+        agora = datetime(2026, 8, 25, 16, 30, tzinfo=FUSO_SAO_PAULO)
+        texto, _ = descrever_ultimo_envio("2026-08-25T16:03:00", agora)
+        assert texto == "Último envio: hoje, 16:03."
+
+    def test_aviso_de_restauracao_mostra_as_horas_do_aparelho(self):
+        aviso = aviso_backup_antigo("2026-08-20T09:00:00", "2026-08-24T21:45:00")
+        assert "20/08/2026 09:00" in aviso
+        assert "24/08/2026 21:45" in aviso

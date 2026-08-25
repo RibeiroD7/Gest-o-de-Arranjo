@@ -185,6 +185,21 @@ def _momento(iso: str | None) -> datetime | None:
     return momento.astimezone() if momento.tzinfo is None else momento
 
 
+def formatar_data_hora_local(iso: str | None) -> str:
+    """Data/hora de um carimbo gravado NESTE aparelho, no formato brasileiro.
+
+    Difere de ``formatar_data_hora_sao_paulo`` no que fazer quando o texto vem
+    sem fuso: aqui significa a hora do próprio aparelho, que é o que o
+    ``datetime.now()`` grava; lá significa UTC, que é o que o Drive devolve.
+    Trocar um pelo outro tira três horas do relógio, e foi o que aconteceu com
+    o "último envio" da tela de Ajustes.
+    """
+    momento = _momento(iso)
+    if momento is None:
+        return (iso or "").strip() or "—"
+    return momento.astimezone(FUSO_SAO_PAULO).strftime("%d/%m/%Y %H:%M")
+
+
 def aviso_backup_antigo(
     gerado_em: str | None, alterado_em: str | None, aparelho: str = ""
 ) -> str:
@@ -200,9 +215,9 @@ def aviso_backup_antigo(
         return ""
     origem = f", gerado em {aparelho}" if aparelho else ""
     return (
-        f"Atenção: este backup é de {formatar_data_hora_sao_paulo(gerado_em)}"
+        f"Atenção: este backup é de {formatar_data_hora_local(gerado_em)}"
         f"{origem}, e os dados deste aparelho foram alterados depois, em "
-        f"{formatar_data_hora_sao_paulo(alterado_em)}. Restaurar descarta o que "
+        f"{formatar_data_hora_local(alterado_em)}. Restaurar descarta o que "
         "foi feito aqui desde então."
     )
 
@@ -253,7 +268,7 @@ def descrever_ultimo_envio(iso: str | None, agora: datetime | None = None) -> tu
     if agora.tzinfo is None:
         agora = agora.astimezone()
     dias = (agora - momento).days
-    quando = formatar_data_hora_sao_paulo(iso)
+    quando = formatar_data_hora_local(iso)
     if dias <= 0:
         texto = f"Último envio: hoje, {quando.split(' ')[-1]}."
     elif dias == 1:

@@ -464,7 +464,8 @@ def registrar_envio(quando: str | None = None, caminho: Path | None = None) -> N
     from datetime import datetime
 
     dados = carregar_credenciais(caminho)
-    dados["ultimo_envio"] = quando or datetime.now().isoformat(timespec="seconds")
+    # Com fuso: sem ele, quem lê não sabe se a hora é daqui ou de Greenwich.
+    dados["ultimo_envio"] = quando or datetime.now().astimezone().isoformat(timespec="seconds")
     salvar_credenciais(dados, caminho)
 
 
