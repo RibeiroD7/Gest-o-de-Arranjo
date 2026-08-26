@@ -226,7 +226,10 @@ from util import (
     descrever_ultimo_envio,
     espera_de_resposta,
     formatar_data_hora_sao_paulo,
+    formatar_periodo_reuniao,
+    mes_seguinte,
     nome_oradores,
+    periodos_de_reuniao,
     rotulo_de_prazo,
 )
 from versao import VERSAO_APP
@@ -3222,10 +3225,14 @@ def tela_inicio(
         )
     ]
 
+    ano_quadro, par_inicio, par_fim = _proximo_par_quadro(ano, mes)
+
     def exportar_quadro_atual(_=None):
         try:
             caminho, erro = executar_com_progresso(
-                page, "Gerando PDF...", lambda: gerar_quadro_anuncios(ano, mes)
+                page,
+                "Gerando PDF...",
+                lambda: gerar_quadro_anuncios(ano_quadro, par_inicio),
             )
             if erro:
                 mostrar_aviso(page, "Não foi possível exportar", erro)
@@ -3237,7 +3244,6 @@ def tela_inicio(
             logger.exception("Falha ao exportar o quadro do mês")
             mostrar_aviso(page, "Erro", f"Não foi possível gerar o PDF: {exc}")
 
-    par_inicio, par_fim = par_meses_do_mes_quadro(mes)
     card_pendencias = ft.Container(
         content=ft.Column(
             [
@@ -8659,6 +8665,26 @@ def _criar_card_mes_programacao(
     )
 
 
+def _altura_dialog_lista(page: ft.Page) -> int:
+    """Altura de um diálogo que é quase só lista, sem estourar a janela."""
+    altura_janela = getattr(getattr(page, "window", None), "height", None) or 800
+    return max(320, min(560, int(altura_janela) - 260))
+
+
+def _proximo_par_quadro(ano: int, mes: int) -> tuple[int, int, int]:
+    """Ano e par de meses do quadro SEGUINTE ao que vale agora.
+
+    O quadro sai de dois em dois meses e é preparado com antecedência: em
+    agosto, o que falta montar é o de setembro-outubro, não o de julho-agosto,
+    que já está no mural.
+    """
+    _, fim = par_meses_do_mes_quadro(mes)
+    if fim == 12:
+        return ano + 1, 1, 2
+    inicio_seguinte, fim_seguinte = par_meses_do_mes_quadro(fim + 1)
+    return ano, inicio_seguinte, fim_seguinte
+
+
 def abrir_dialog_buscar_datas_especiais(
     page: ft.Page, ao_concluir: Callable[[], None]
 ) -> None:
@@ -8692,7 +8718,7 @@ def abrir_dialog_buscar_datas_especiais(
     # a pergunta comum é sobre o que está por vir.
     em_ordem = futuras + passadas
 
-    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, height=340)
+    lista = ft.Column(spacing=0, tight=True, scroll=ft.ScrollMode.AUTO, expand=True)
     contagem = ft.Text("", size=fonte(12), color=TEXTO_SECUNDARIO)
     campo_busca = ft.TextField(
         label="Procurar",
@@ -8796,12 +8822,15 @@ def abrir_dialog_buscar_datas_especiais(
             title=ft.Text("Datas especiais"),
             content=ft.Container(
                 content=ft.Column(
-                    [campo_busca, ft.Container(height=8), contagem,
-                     ft.Container(height=8), lista],
+                    [campo_busca, ft.Container(height=6), contagem,
+                     ft.Container(height=6), lista],
                     spacing=0,
-                    tight=True,
+                    expand=True,
                     width=_largura_dialog(page, 560),
                 ),
+                # Altura fixa: sem ela a lista fica espremida embaixo e sobra
+                # um vão entre a busca e a primeira data.
+                height=_altura_dialog_lista(page),
                 padding=ft.Padding.only(top=8),
             ),
             actions=[ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())],
@@ -9871,12 +9900,21 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
     # Linha do tempo do dia de reunião: a congregação muda de dia de tempos em
     # tempos, e os meses antigos precisam ser montados no dia que valia neles.
     lista_periodos = ft.Column(spacing=0, tight=True)
-    campo_inicio = ft.TextField(label="A partir de", hint_text="MM/AAAA", expand=True)
-    campo_novo_dia = ft.TextField(label="Dia", hint_text="Ex: Domingo", expand=True)
+    campo_inicio = ft.TextField(label="De", hint_text="MM/AAAA", expand=True)
+    campo_fim = ft.TextField(
+        label="Até (opcional)", hint_text="MM/AAAA", expand=True
+    )
+    campo_novo_dia = ft.Dropdown(
+        label="Dia",
+        expand=True,
+        options=[ft.dropdown.Option("Sábado"), ft.dropdown.Option("Domingo")],
+        border_color=BORDA_SUAVE,
+        focused_border_color=COR_DESTAQUE,
+    )
     erro_periodo = ft.Text("", size=fonte(12), color=COR_ERRO, visible=False)
 
     def montar_periodos():
-        periodos = listar_reuniao_historico()
+        periodos = periodos_de_reuniao(listar_reuniao_historico())
         if not periodos:
             lista_periodos.controls = [
                 ft.Text("Sem mudanças registradas: vale o dia acima em todos os meses.",
@@ -9890,11 +9928,11 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                 montar_periodos()
                 page.update()
 
-            mes, ano = item["inicio"][5:7], item["inicio"][0:4]
             return ft.Container(
                 content=ft.Row(
                     [
-                        ft.Text(f"{mes}/{ano}", size=fonte(13), width=76,
+                        ft.Text(formatar_periodo_reuniao(item), size=fonte(13),
+                                width=fonte(126),
                                 weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO),
                         ft.Text(item["dia_semana"], size=fonte(13),
                                 color=TEXTO_SECUNDARIO, expand=True),
@@ -9915,23 +9953,52 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
             linha(item, i == len(periodos) - 1) for i, item in enumerate(periodos)
         ]
 
-    def adicionar_periodo(_=None):
-        texto = (campo_inicio.value or "").strip()
-        dia = (campo_novo_dia.value or "").strip()
-        casou = re.fullmatch(r"(\d{1,2})/(\d{4})", texto)
+    def _mes_do_campo(texto: str) -> str:
+        """"MM/AAAA" como "AAAA-MM"; vazio quando não dá para ler."""
+        casou = re.fullmatch(r"(\d{1,2})/(\d{4})", (texto or "").strip())
         if not casou or not 1 <= int(casou.group(1)) <= 12:
-            erro_periodo.value = "Informe o mês no formato MM/AAAA."
+            return ""
+        return f"{int(casou.group(2)):04d}-{int(casou.group(1)):02d}"
+
+    def adicionar_periodo(_=None):
+        """Grava um período: deste mês em diante, a reunião é neste dia.
+
+        O "até" é opcional e serve para quem lembra a faixa inteira. Como o
+        banco guarda pontos de virada, informar o fim significa que, no mês
+        seguinte a ele, volta a valer o dia de hoje da congregação — e é isso
+        que fica gravado.
+        """
+        dia = (campo_novo_dia.value or "").strip()
+        inicio = _mes_do_campo(campo_inicio.value)
+        fim = _mes_do_campo(campo_fim.value)
+
+        def reclamar(mensagem: str):
+            erro_periodo.value = mensagem
             erro_periodo.visible = True
             page.update()
-            return
+
+        if not inicio:
+            return reclamar("Informe o mês inicial no formato MM/AAAA.")
+        if (campo_fim.value or "").strip() and not fim:
+            return reclamar("Informe o mês final no formato MM/AAAA.")
+        if fim and fim < inicio:
+            return reclamar("O mês final não pode ser antes do inicial.")
         if _dia_semana_para_weekday(dia) is None:
-            erro_periodo.value = "Informe um dia da semana (ex: Domingo)."
-            erro_periodo.visible = True
-            page.update()
-            return
-        salvar_reuniao_historico(f"{int(casou.group(2)):04d}-{int(casou.group(1)):02d}", dia)
+            return reclamar("Escolha o dia da reunião.")
+
+        salvar_reuniao_historico(inicio, dia)
+        if fim:
+            depois = mes_seguinte(fim)
+            ja_existe = any(
+                p["inicio"] == depois for p in listar_reuniao_historico()
+            )
+            dia_atual = (campo_dia.value or "").strip()
+            if not ja_existe and _dia_semana_para_weekday(dia_atual) is not None:
+                salvar_reuniao_historico(depois, dia_atual)
+
         campo_inicio.value = ""
-        campo_novo_dia.value = ""
+        campo_fim.value = ""
+        campo_novo_dia.value = None
         erro_periodo.visible = False
         montar_periodos()
         page.update()
@@ -9954,10 +10021,12 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                 linha_campos(campo_dia, campo_horario),
                 campo_circuito,
                 ft.Container(height=8),
-                criar_secao_titulo("Quando o dia da reunião mudou"),
+                criar_secao_titulo("Dia das Reuniões"),
                 ft.Text(
-                    "A Programação monta cada mês no dia que valia nele. O dia "
-                    "acima vale do último período em diante.",
+                    "A Programação monta cada mês no dia que valia nele: um mês "
+                    "de 2021 procura domingos se a reunião era no domingo. "
+                    "Registre aqui as faixas em que o dia foi outro; o dia "
+                    "acima vale da última faixa em diante.",
                     size=fonte(12), color=TEXTO_SECUNDARIO,
                 ),
                 ft.Container(
@@ -9966,7 +10035,8 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                     border_radius=10,
                     padding=ft.Padding.symmetric(vertical=6),
                 ),
-                linha_campos(campo_inicio, campo_novo_dia),
+                linha_campos(campo_inicio, campo_fim),
+                campo_novo_dia,
                 ft.Row(
                     [
                         ft.OutlinedButton("Adicionar período", icon=ft.Icons.ADD,
@@ -11030,8 +11100,9 @@ def tela_quadro_anuncios(page: ft.Page, recarregar: Callable[[], None]) -> ft.Co
     estado = {
         "ano": hoje.year if str(hoje.year) in anos_disponiveis else ANO_PADRAO_ARRANJOS,
         "mes_inicial": par_meses_do_mes_quadro(hoje.month)[0],
-        # Prévia do PC: qual dos dois meses está na tela e o zoom aplicado.
-        "mes_preview": par_meses_do_mes_quadro(hoje.month)[0],
+        # Prévia do PC: começa no mês de hoje, não no primeiro do par — em
+        # agosto a pergunta é sobre agosto, não sobre julho.
+        "mes_preview": hoje.month,
         "zoom": 1.0,
     }
     area_preview = ft.Container(expand=True)
@@ -11805,9 +11876,66 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         page.update()
 
     def reativar(item: dict):
+        page.pop_dialog()
         arquivar_presidente_cadastro(item["id"], arquivar=False)
         mostrar_sucesso(page, f"{item['nome']} voltou para a escala.")
         ao_mudar()
+
+    def abrir_arquivados():
+        """Quem está fora da escala, para trazer de volta."""
+        fora = [
+            item for item in listar_presidentes_cadastro(incluir_arquivados=True)
+            if not item.get("ativo", True)
+        ]
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Fora da escala"),
+                content=ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                "Não entram em rodízio nenhum. O que já presidiram "
+                                "continua no histórico.",
+                                size=fonte(12),
+                                color=TEXTO_SECUNDARIO,
+                            ),
+                            ft.Container(height=10),
+                            *[
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            item["nome"],
+                                            size=fonte(13),
+                                            color=TEXTO_PRIMARIO,
+                                            expand=True,
+                                            max_lines=1,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                        ),
+                                        ft.TextButton(
+                                            "Voltar para a escala",
+                                            icon=ft.Icons.UNARCHIVE_OUTLINED,
+                                            on_click=lambda e, i=dict(item): reativar(i),
+                                        ),
+                                    ],
+                                    spacing=8,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                )
+                                for item in fora
+                            ],
+                        ],
+                        spacing=0,
+                        tight=True,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                    width=_largura_dialog(page, 420),
+                    padding=ft.Padding.only(top=4),
+                ),
+                actions=[ft.TextButton("Fechar", on_click=lambda _: page.pop_dialog())],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+        page.update()
 
     def conversar(item: dict):
         """WhatsApp do presidente direto da lista, como na tela de Oradores."""
@@ -11889,52 +12017,21 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         if not item.get("ativo", True)
     ]
     if arquivados:
+        # Fora da lista de propósito: quem saiu da congregação não deve ficar à
+        # vista todo dia. Fica guardado atrás do botão, para quando voltar.
         corpo += [
-            ft.Container(height=20),
-            ft.Text(
-                f"Fora da escala ({len(arquivados)})",
-                size=fonte(13),
-                weight=ft.FontWeight.W_600,
-                color=TEXTO_SECUNDARIO,
-            ),
-            ft.Text(
-                "Não entram em rodízio nenhum. O que já presidiram continua no "
-                "histórico.",
-                size=fonte(11),
-                color=TEXTO_SECUNDARIO,
-            ),
-            ft.Container(height=8),
-            ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Text(
-                                    item["nome"],
-                                    size=fonte(13),
-                                    color=TEXTO_SECUNDARIO,
-                                    expand=True,
-                                    max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                                ft.TextButton(
-                                    "Voltar para a escala",
-                                    icon=ft.Icons.UNARCHIVE_OUTLINED,
-                                    on_click=lambda e, i=dict(item): reativar(i),
-                                ),
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        )
-                        for item in arquivados
-                    ],
-                    spacing=0,
-                    tight=True,
-                ),
-                bgcolor=FUNDO_CARD,
-                border=ft.Border.all(1, BORDA_SUAVE),
-                border_radius=12,
-                padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+            ft.Container(height=12),
+            ft.Row(
+                [
+                    ft.TextButton(
+                        f"Fora da escala ({len(arquivados)})",
+                        icon=ft.Icons.INVENTORY_2_OUTLINED,
+                        tooltip="Quem foi arquivado. O histórico deles continua "
+                                "no lugar.",
+                        on_click=lambda _: abrir_arquivados(),
+                    )
+                ],
+                alignment=ft.MainAxisAlignment.START,
             ),
         ]
 

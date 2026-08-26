@@ -278,6 +278,65 @@ def descrever_ultimo_envio(iso: str | None, agora: datetime | None = None) -> tu
     return texto, "atencao" if dias >= DIAS_BACKUP_ANTIGO else ""
 
 
+def mes_anterior(aaaa_mm: str) -> str:
+    """O mês anterior a "AAAA-MM"; vazio se o texto não for um mês."""
+    texto = (aaaa_mm or "").strip()
+    if len(texto) != 7 or texto[4] != "-":
+        return ""
+    try:
+        ano, mes = int(texto[:4]), int(texto[5:])
+    except ValueError:
+        return ""
+    if mes == 1:
+        return f"{ano - 1:04d}-12"
+    return f"{ano:04d}-{mes - 1:02d}"
+
+
+def mes_seguinte(aaaa_mm: str) -> str:
+    """O mês seguinte a "AAAA-MM"; vazio se o texto não for um mês."""
+    texto = (aaaa_mm or "").strip()
+    if len(texto) != 7 or texto[4] != "-":
+        return ""
+    try:
+        ano, mes = int(texto[:4]), int(texto[5:])
+    except ValueError:
+        return ""
+    if mes == 12:
+        return f"{ano + 1:04d}-01"
+    return f"{ano:04d}-{mes + 1:02d}"
+
+
+def periodos_de_reuniao(entradas: list[dict]) -> list[dict]:
+    """Transforma a linha do tempo em períodos com começo e fim.
+
+    O banco guarda "a partir de tal mês, a reunião é em tal dia" — é o que a
+    Programação precisa para montar cada mês no dia que valia nele. Só que
+    quem lê a tela pensa em faixas: "de 2020 a 2023 era domingo". O fim de um
+    período é o mês anterior ao começo do próximo; o último fica em aberto.
+    """
+    em_ordem = sorted(entradas, key=lambda e: e.get("inicio") or "")
+    periodos = []
+    for indice, entrada in enumerate(em_ordem):
+        seguinte = em_ordem[indice + 1] if indice + 1 < len(em_ordem) else None
+        periodos.append({
+            **entrada,
+            "fim": mes_anterior(seguinte["inicio"]) if seguinte else "",
+        })
+    return periodos
+
+
+def formatar_periodo_reuniao(periodo: dict) -> str:
+    """A faixa de um período como ela aparece na tela: "05/2020 até 12/2023"."""
+    def por_extenso(aaaa_mm: str) -> str:
+        return f"{aaaa_mm[5:7]}/{aaaa_mm[0:4]}" if len(aaaa_mm or "") == 7 else ""
+
+    inicio = por_extenso(periodo.get("inicio", ""))
+    fim = por_extenso(periodo.get("fim", ""))
+    if not inicio:
+        return ""
+    return f"{inicio} até {fim}" if fim else f"{inicio} até hoje"
+
+
 # Uma pendência daqui a dez semanas e outra daqui a nove dias pediam a mesma
 # frase na tela do Início: "falta 1 orador". Estes rótulos existem para as
 # duas não se parecerem.
