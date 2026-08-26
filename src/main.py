@@ -49,6 +49,7 @@ from database import (
     adicionar_orador_arranjo,
     adicionar_tipo_evento,
     alterado_em_local,
+    anotacoes_ate,
     arquivar_presidente_cadastro,
     atualizar_data_designacao,
     atualizar_orador_arranjo,
@@ -3185,6 +3186,14 @@ def tela_inicio(
             ))
 
     # Designações aguardando confirmação do orador (status "pendente").
+    # Anotações do calendário que já venceram: "ligar para o Fulano" marcado
+    # para ontem é pendência tanto quanto uma semana sem orador.
+    for anotacao in anotacoes_ate(_formatar_data_arranjo(hoje)):
+        pendencias.append((
+            _parse_data_arranjo(anotacao["data"]),
+            f"Anotação: {_resumir_texto_tabela(anotacao['texto'], 60)}",
+        ))
+
     # Ordem por proximidade: o que acontece antes cobra antes. Sem data (as
     # que esperam resposta) fica no fim do bloco datado.
     pendencias.sort(key=lambda item: item[0] or date.max)

@@ -19,7 +19,11 @@ from database import (
     carregar_enviados_por_ano,
     carregar_presidentes_por_ano,
     carregar_recebidos_por_ano,
+    excluir_anotacao,
+    listar_anotacoes,
     listar_datas_especiais_por_ano,
+    marcar_anotacao,
+    salvar_anotacao,
 )
 from tema import (
     BORDA_SUAVE,
@@ -138,6 +142,105 @@ def tela_calendario(page: ft.Page, recarregar: Callable[[], None]) -> ft.Control
                         italic=True,
                     )
                 ]
+
+
+            # Anotações do dia: o que você quer lembrar de fazer nesta data,
+            # que não é orador nem presidente — "ligar para o Fulano".
+            lista_anotacoes = ft.Column(spacing=0, tight=True)
+            campo_anotacao = ft.TextField(
+                hint_text="Anotar para este dia",
+                expand=True,
+                dense=True,
+                border_color=BORDA_SUAVE,
+                focused_border_color=COR_DESTAQUE,
+            )
+
+            def montar_anotacoes():
+                anotadas = listar_anotacoes(data_str)
+                if not anotadas:
+                    lista_anotacoes.controls = [
+                        ft.Text(
+                            "Nenhuma anotação para este dia.",
+                            size=fonte(12), color=TEXTO_SECUNDARIO, italic=True,
+                        )
+                    ]
+                    return
+
+                def linha_anotacao(item: dict) -> ft.Control:
+                    def alternar(e, anotacao=item):
+                        marcar_anotacao(anotacao["id"], bool(e.control.value))
+                        montar_anotacoes()
+                        recarregar()
+                        page.update()
+
+                    def apagar(_=None, anotacao=item):
+                        excluir_anotacao(anotacao["id"])
+                        montar_anotacoes()
+                        recarregar()
+                        page.update()
+
+                    return ft.Row(
+                        [
+                            ft.Checkbox(
+                                value=item["feita"],
+                                on_change=alternar,
+                                tooltip="Marcar como feita",
+                            ),
+                            ft.Text(
+                                item["texto"],
+                                size=fonte(13),
+                                color=TEXTO_SECUNDARIO if item["feita"] else TEXTO_PRIMARIO,
+                                italic=item["feita"],
+                                expand=True,
+                                max_lines=3,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                icon_size=fonte(16),
+                                icon_color=TEXTO_SECUNDARIO,
+                                tooltip="Apagar anotação",
+                                on_click=apagar,
+                            ),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    )
+
+                lista_anotacoes.controls = [linha_anotacao(item) for item in anotadas]
+
+            def anotar(_=None):
+                texto = (campo_anotacao.value or "").strip()
+                if not texto:
+                    return
+                salvar_anotacao(data_str, texto)
+                campo_anotacao.value = ""
+                montar_anotacoes()
+                recarregar()
+                page.update()
+
+            campo_anotacao.on_submit = anotar
+            montar_anotacoes()
+
+            detalhes += [
+                ft.Container(height=4),
+                ft.Divider(height=1, color=BORDA_SUAVE),
+                ft.Text("Anotações", size=fonte(12), color=TEXTO_SECUNDARIO,
+                        weight=ft.FontWeight.W_600),
+                lista_anotacoes,
+                ft.Row(
+                    [
+                        campo_anotacao,
+                        ft.IconButton(
+                            icon=ft.Icons.ADD,
+                            icon_color=COR_DESTAQUE,
+                            tooltip="Anotar",
+                            on_click=anotar,
+                        ),
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ]
 
             page.show_dialog(
                 ft.AlertDialog(

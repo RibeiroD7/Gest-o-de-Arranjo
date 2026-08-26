@@ -579,6 +579,18 @@ def _criar_e_migrar(conn):
     # (a cada dois anos, mais ou menos). A configuração guarda só o vigente, e
     # com isso os meses antigos eram montados no dia de hoje: 2021 era domingo,
     # e a Programação daquele ano procurava sábados. Aqui fica a linha do tempo.
+    # Anotações de um dia: "ligar para o Fulano", "confirmar o orador". São do
+    # calendário, e aparecem nas pendências do Início quando a data chega.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS anotacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL,
+            texto TEXT NOT NULL,
+            feita INTEGER NOT NULL DEFAULT 0,
+            criada_em TEXT
+        )
+    """)
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS reuniao_historico (
             inicio TEXT PRIMARY KEY,          -- 'AAAA-MM' a partir do qual vale
@@ -2146,6 +2158,94 @@ def carregar_todas_designacoes_presidente() -> dict[str, int | None]:
         conn.close()
 
 
+def listar_anotacoes(data: str | None = None, incluir_feitas: bool = True) -> list[dict]:
+    """Anotações de um dia (DD/MM/AAAA) ou de todos, em ordem de calendário."""
+    condicoes, params = [], []
+    if data:
+        condicoes.append("data = ?")
+        params.append(data)
+    if not incluir_feitas:
+        condicoes.append("COALESCE(feita, 0) = 0")
+    onde = f" WHERE {' AND '.join(condicoes)}" if condicoes else ""
+    conn = get_connection()
+    try:
+        return [
+            {"id": linha[0], "data": linha[1], "texto": linha[2], "feita": bool(linha[3])}
+            for linha in conn.execute(
+                "SELECT id, data, texto, COALESCE(feita, 0) FROM anotacoes"  # noqa: S608
+                f"{onde} ORDER BY substr(data, 7, 4) || substr(data, 4, 2) "
+                "|| substr(data, 1, 2), id",
+                params,
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def anotacoes_ate(data_limite: str) -> list[dict]:
+    """Anotações ainda não feitas cuja data já chegou (ou passou).
+
+    ``data_limite`` em DD/MM/AAAA. É o que o Início cobra: uma anotação para
+    ontem que ninguém marcou como feita continua sendo uma pendência.
+    """
+    chave = data_limite[6:10] + data_limite[3:5] + data_limite[0:2]
+    conn = get_connection()
+    try:
+        return [
+            {"id": linha[0], "data": linha[1], "texto": linha[2], "feita": False}
+            for linha in conn.execute(
+                """
+                SELECT id, data, texto FROM anotacoes
+                WHERE COALESCE(feita, 0) = 0
+                  AND substr(data, 7, 4) || substr(data, 4, 2)
+                      || substr(data, 1, 2) <= ?
+                ORDER BY substr(data, 7, 4) || substr(data, 4, 2)
+                         || substr(data, 1, 2), id
+                """,
+                (chave,),
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def salvar_anotacao(data: str, texto: str) -> int:
+    """Cria uma anotação para um dia. Retorna o id."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO anotacoes (data, texto, feita, criada_em) VALUES (?, ?, 0, ?)",
+            (data, texto.strip(), datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def marcar_anotacao(anotacao_id: int, feita: bool = True) -> None:
+    """Marca (ou desmarca) uma anotação como feita."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE anotacoes SET feita = ? WHERE id = ?",
+            (1 if feita else 0, anotacao_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def excluir_anotacao(anotacao_id: int) -> None:
+    """Apaga uma anotação."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM anotacoes WHERE id = ?", (anotacao_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def historico_discursos_do_orador(orador_id: int) -> list[dict]:
     """Tudo que este orador fez, do mais recente para trás.
 
@@ -3235,6 +3335,7 @@ TABELAS_BACKUP = [
     "datas_especiais",
     "tipos_evento_especial",
     "reuniao_historico",
+    "anotacoes",
 ]
 
 
