@@ -6,7 +6,7 @@ uma linha previsível, num arquivo que não muda por outro motivo.
 
 from __future__ import annotations
 
-VERSAO_APP = "2.13.0"
+VERSAO_APP = "2.14.0"
 
 URL_API_RELEASE = (
     "https://api.github.com/repos/RibeiroD7/Gest-o-de-Arranjo/releases/latest"
