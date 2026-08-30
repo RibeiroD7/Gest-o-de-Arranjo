@@ -392,10 +392,30 @@ def _migracao_2_convite_enviado(conn) -> None:
     conn.commit()
 
 
+def _migracao_5_visita_superintendente(conn) -> None:
+    """A visita do superintendente: o nome dele e o discurso final.
+
+    O superintendente é sempre o mesmo orador durante a visita, e digitar o
+    nome de novo a cada data era trabalho repetido. E a visita tem dois
+    discursos — o público e o final —, que o quadro precisa mostrar.
+    """
+    colunas_config = [linha[1] for linha in conn.execute("PRAGMA table_info(configuracoes)")]
+    if "superintendente_circuito" not in colunas_config:
+        conn.execute(
+            "ALTER TABLE configuracoes "
+            "ADD COLUMN superintendente_circuito TEXT DEFAULT ''"
+        )
+    colunas_especiais = [linha[1] for linha in conn.execute("PRAGMA table_info(datas_especiais)")]
+    if "tema_final" not in colunas_especiais:
+        conn.execute("ALTER TABLE datas_especiais ADD COLUMN tema_final TEXT")
+    conn.commit()
+
+
 MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (2, _migracao_2_convite_enviado),
     (3, _migracao_3_rodizio_por_tipo),
     (4, _migracao_4_presidente_arquivado),
+    (5, _migracao_5_visita_superintendente),
 ]
 
 ESQUEMA_ATUAL = MIGRACOES[-1][0] if MIGRACOES else 1
@@ -566,6 +586,9 @@ def _criar_e_migrar(conn):
             tipo TEXT NOT NULL,
             orador TEXT,
             tema TEXT,
+            -- Na visita do superintendente há dois discursos: o público (o
+            -- `tema` acima) e o final. Só a visita usa esta coluna.
+            tema_final TEXT,
             presidente_id INTEGER,
             -- Quem presidiu sem estar no cadastro (saiu da congregação, ou
             -- nunca entrou na escala). Mesmo papel do nome_avulso da semana
@@ -706,7 +729,8 @@ def _criar_e_migrar(conn):
             telefone_coordenador TEXT,
             dia_reuniao TEXT,
             horario_reuniao TEXT,
-            circuito TEXT DEFAULT ''
+            circuito TEXT DEFAULT '',
+            superintendente_circuito TEXT DEFAULT ''
         )
     """)
 
@@ -2497,6 +2521,7 @@ def listar_datas_especiais_por_ano(ano: int | None = None) -> dict[str, dict]:
             SELECT e.id, e.data, e.tipo,
                    COALESCE(e.orador, '') AS orador,
                    COALESCE(e.tema, '') AS tema,
+                   COALESCE(e.tema_final, '') AS tema_final,
                    e.presidente_id,
                    -- Do cadastro, ou o nome digitado à mão.
                    COALESCE(c.nome, e.presidente_avulso, '') AS presidente_nome,
@@ -2517,11 +2542,12 @@ def listar_datas_especiais_por_ano(ano: int | None = None) -> dict[str, dict]:
                 "tipo": linha[2],
                 "orador": linha[3],
                 "tema": linha[4],
-                "presidente_id": linha[5],
-                "presidente_nome": linha[6],
-                "congregacao_id": linha[7],
-                "congregacao_nome": linha[8],
-                "presidente_avulso": linha[9],
+                "tema_final": linha[5],
+                "presidente_id": linha[6],
+                "presidente_nome": linha[7],
+                "congregacao_id": linha[8],
+                "congregacao_nome": linha[9],
+                "presidente_avulso": linha[10],
             }
             for linha in linhas
         }
@@ -2574,11 +2600,15 @@ def salvar_data_especial(
     registro_id: int | None = None,
     congregacao_id: int | None = None,
     presidente_avulso: str = "",
+    tema_final: str = "",
 ) -> None:
     """Cria ou atualiza uma data especial (substitui se a data já existir).
 
     ``presidente_avulso`` é o nome de quem presidiu sem estar no cadastro; os
     dois se excluem, e quem está no cadastro tem preferência.
+
+    ``tema_final`` é o discurso final da visita do superintendente, que tem
+    dois discursos na mesma reunião.
     """
     avulso = (presidente_avulso or "").strip() or None
     if presidente_id:
@@ -2589,29 +2619,32 @@ def salvar_data_especial(
             conn.execute(
                 """
                 UPDATE datas_especiais
-                SET data = ?, tipo = ?, orador = ?, tema = ?,
+                SET data = ?, tipo = ?, orador = ?, tema = ?, tema_final = ?,
                     presidente_id = ?, congregacao_id = ?, presidente_avulso = ?
                 WHERE id = ?
                 """,
-                (data, tipo, orador or None, tema or None, presidente_id,
+                (data, tipo, orador or None, tema or None,
+                 (tema_final or "").strip() or None, presidente_id,
                  congregacao_id, avulso, registro_id),
             )
         else:
             conn.execute(
                 """
                 INSERT INTO datas_especiais
-                    (data, tipo, orador, tema, presidente_id, congregacao_id,
-                     presidente_avulso)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (data, tipo, orador, tema, tema_final, presidente_id,
+                     congregacao_id, presidente_avulso)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(data) DO UPDATE SET
                     tipo = excluded.tipo,
                     orador = excluded.orador,
                     tema = excluded.tema,
+                    tema_final = excluded.tema_final,
                     presidente_id = excluded.presidente_id,
                     congregacao_id = excluded.congregacao_id,
                     presidente_avulso = excluded.presidente_avulso
                 """,
-                (data, tipo, orador or None, tema or None, presidente_id,
+                (data, tipo, orador or None, tema or None,
+                 (tema_final or "").strip() or None, presidente_id,
                  congregacao_id, avulso),
             )
         conn.commit()

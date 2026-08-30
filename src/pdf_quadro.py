@@ -28,7 +28,7 @@ from reportlab.platypus import (
 )
 
 from database import get_connection, reuniao_em
-from util import NOMES_MESES, SEPARADOR_SIMPOSIO
+from util import NOMES_MESES, SEPARADOR_SIMPOSIO, eh_visita_superintendente
 
 EXPORTS_DIR = os.path.join("exports")
 
@@ -45,6 +45,10 @@ ALTURA_TITULO = 31
 ALTURA_MES = 23
 ALTURA_DATA = 18
 ALTURAS_CORPO = [31, 30, 31]
+# Linha extra do discurso final, só nas datas que têm dois discursos (a visita
+# do superintendente). Mais baixa que as outras para o mês de cinco semanas
+# continuar cabendo na página.
+ALTURA_DISCURSO_FINAL = 26
 ALTURA_DIVISOR = 16
 ALTURA_RODAPE = 15
 FONTE_NEGRITO = "Helvetica-Bold"
@@ -177,12 +181,14 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
                 "tema": linha[3],
                 "presidente": linha[4],
                 "congregacao": linha[5],
+                "tema_final": linha[6],
             }
             for linha in conn.execute(
                 """
                 SELECT e.data, e.tipo,
                        COALESCE(e.orador, ''), COALESCE(e.tema, ''),
-                       COALESCE(c.nome, ''), COALESCE(cong.nome, '')
+                       COALESCE(c.nome, ''), COALESCE(cong.nome, ''),
+                       COALESCE(e.tema_final, '')
                 FROM datas_especiais e
                 LEFT JOIN presidentes_cadastro c ON e.presidente_id = c.id
                 LEFT JOIN congregacoes cong ON e.congregacao_id = cong.id
@@ -205,6 +211,12 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
             # congregação de origem do orador (nunca o tipo do evento).
             orador_txt = (especial["orador"] or "").strip()
             tema_txt = (especial["tema"] or "").strip()
+            # Na visita do superintendente a reunião tem dois discursos, e o
+            # quadro mostra os dois: o final ganha uma linha própria, anunciada
+            # mesmo quando o tema ainda não chegou.
+            final_txt = (especial.get("tema_final") or "").strip()
+            if not final_txt and eh_visita_superintendente(especial["tipo"]):
+                final_txt = "—"
             linhas.append(
                 {
                     "data": data_ref,
@@ -212,6 +224,7 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
                     "orador": orador_txt or especial["tipo"],
                     "tema": tema_txt or "—",
                     "congregacao": especial["congregacao"] or "—",
+                    "tema_final": final_txt,
                 }
             )
             continue
@@ -223,6 +236,7 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
                 "orador": info.get("orador") or "—",
                 "tema": info.get("tema") or "—",
                 "congregacao": info.get("congregacao") or "—",
+                "tema_final": "",
             }
         )
     return linhas
@@ -328,14 +342,24 @@ def _construir_tabela_mes(ano: int, mes: int, nome_congregacao: str) -> Table:
         ]
 
         # Larguras úteis dos valores: Orador/Tema começam em x=63; Congregação em x=112
+        largura_valor_curto = LARGURA_TABELA - LARGURAS_COLUNAS[0] - 4
+        largura_valor_longo = LARGURA_TABELA - sum(LARGURAS_COLUNAS[:2]) - 4
         campos = [
-            ("Orador:", item["orador"], 0, 1, LARGURA_TABELA - LARGURAS_COLUNAS[0] - 4),
-            ("Tema:", item["tema"], 0, 1, LARGURA_TABELA - LARGURAS_COLUNAS[0] - 4),
-            ("Congregação:", item["congregacao"], 1, 2, LARGURA_TABELA - sum(LARGURAS_COLUNAS[:2]) - 4),
+            ("Orador:", item["orador"], 0, 1, largura_valor_curto, ALTURAS_CORPO[0]),
+            ("Tema:", item["tema"], 0, 1, largura_valor_curto, ALTURAS_CORPO[1]),
         ]
-        for altura, (rotulo, valor, fim_rotulo, inicio_valor, largura_valor) in zip(ALTURAS_CORPO, campos):
+        if item.get("tema_final"):
+            campos.append(
+                ("Discurso final:", item["tema_final"], 1, 2, largura_valor_longo,
+                 ALTURA_DISCURSO_FINAL)
+            )
+        campos.append(
+            ("Congregação:", item["congregacao"], 1, 2, largura_valor_longo, ALTURAS_CORPO[2])
+        )
+        for rotulo, valor, fim_rotulo, inicio_valor, largura_valor, altura in campos:
             celulas: list = ["", "", "", ""]
-            celulas[0] = _paragrafo(rotulo, 14)
+            largura_rotulo = sum(LARGURAS_COLUNAS[: fim_rotulo + 1]) - 4
+            celulas[0] = _paragrafo(rotulo, _tamanho_ajustado(rotulo, largura_rotulo, 14))
             celulas[inicio_valor] = _paragrafo(valor, _tamanho_ajustado(valor, largura_valor, 14))
             r = adicionar_linha(celulas, altura)
             if fim_rotulo > 0:

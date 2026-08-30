@@ -734,6 +734,9 @@ _QUADRO_ALTURA_TITULO = 31
 _QUADRO_ALTURA_MES = 23
 _QUADRO_ALTURA_DATA = 18
 _QUADRO_ALTURAS_CORPO = (31, 30, 31)
+# Linha do discurso final, só nas datas com dois discursos (a visita do
+# superintendente). Igual à do PDF.
+_QUADRO_ALTURA_DISCURSO_FINAL = 26
 _QUADRO_ALTURA_DIVISOR = 16
 _QUADRO_ALTURA_RODAPE = 15
 _QUADRO_X_VALOR = 63
@@ -802,10 +805,12 @@ def gerar_preview_quadro_mes(
             fonte = fonte_pt(tamanho)
         return fonte
 
+    com_discurso_final = sum(1 for item in dados if item.get("tema_final"))
     altura_total = (
         _QUADRO_ALTURA_TITULO
         + _QUADRO_ALTURA_MES
         + len(dados) * (_QUADRO_ALTURA_DATA + sum(_QUADRO_ALTURAS_CORPO))
+        + com_discurso_final * _QUADRO_ALTURA_DISCURSO_FINAL
         + max(len(dados) - 1, 0) * _QUADRO_ALTURA_DIVISOR
         + _QUADRO_ALTURA_RODAPE
         + (len(dados) + 1) * 2
@@ -876,13 +881,25 @@ def gerar_preview_quadro_mes(
 
         # Linhas do corpo
         campos = [
-            ("Orador:", item["orador"], _QUADRO_X_VALOR),
-            ("Tema:", item["tema"], _QUADRO_X_VALOR),
-            ("Congregação:", item["congregacao"], _QUADRO_X_VALOR_CONG),
+            ("Orador:", item["orador"], _QUADRO_X_VALOR, _QUADRO_ALTURAS_CORPO[0]),
+            ("Tema:", item["tema"], _QUADRO_X_VALOR, _QUADRO_ALTURAS_CORPO[1]),
         ]
-        for altura_pt, (rotulo, valor, x_valor_pt) in zip(_QUADRO_ALTURAS_CORPO, campos):
+        if item.get("tema_final"):
+            campos.append(
+                ("Discurso final:", item["tema_final"], _QUADRO_X_VALOR_CONG,
+                 _QUADRO_ALTURA_DISCURSO_FINAL)
+            )
+        campos.append(
+            ("Congregação:", item["congregacao"], _QUADRO_X_VALOR_CONG,
+             _QUADRO_ALTURAS_CORPO[2])
+        )
+        for rotulo, valor, x_valor_pt, altura_pt in campos:
             altura = pt(altura_pt)
-            _texto_centrado(draw, x0 + pt(2), y, altura, rotulo, fonte_pt(14), "#000000")
+            _texto_centrado(
+                draw, x0 + pt(2), y, altura, rotulo,
+                fonte_ajustada(rotulo, pt(x_valor_pt - 4), 14),
+                "#000000",
+            )
             _texto_centrado(
                 draw, x0 + pt(x_valor_pt), y, altura, valor,
                 fonte_ajustada(valor, x1 - x0 - pt(x_valor_pt) - pt(4), 14),

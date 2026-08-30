@@ -225,6 +225,7 @@ from util import (
     _weekday_mais_usado,
     aviso_backup_antigo,
     descrever_ultimo_envio,
+    eh_visita_superintendente,
     espera_de_resposta,
     formatar_data_hora_sao_paulo,
     formatar_periodo_reuniao,
@@ -468,8 +469,8 @@ def carregar_configuracao() -> dict:
     """Carrega as configurações da congregação principal (linha única)."""
     df = carregar_dados(
         "SELECT nome_congregacao, endereco, cidade, cep, coordenador_discursos, "
-        "telefone_coordenador, dia_reuniao, horario_reuniao, circuito "
-        "FROM configuracoes WHERE id = 1"
+        "telefone_coordenador, dia_reuniao, horario_reuniao, circuito, "
+        "superintendente_circuito FROM configuracoes WHERE id = 1"
     )
     if df.empty:
         return {
@@ -482,6 +483,7 @@ def carregar_configuracao() -> dict:
             "dia_reuniao": "",
             "horario_reuniao": "",
             "circuito": "",
+            "superintendente_circuito": "",
         }
     row = df.iloc[0]
     return {
@@ -494,6 +496,7 @@ def carregar_configuracao() -> dict:
         "dia_reuniao": row["dia_reuniao"] or "",
         "horario_reuniao": row["horario_reuniao"] or "",
         "circuito": row["circuito"] or "",
+        "superintendente_circuito": row.get("superintendente_circuito", "") or "",
     }
 
 
@@ -506,8 +509,9 @@ def salvar_configuracao(dados: dict) -> None:
         """
         INSERT INTO configuracoes (
             id, nome_congregacao, endereco, cidade, cep, coordenador_discursos,
-            telefone_coordenador, dia_reuniao, horario_reuniao, circuito
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            telefone_coordenador, dia_reuniao, horario_reuniao, circuito,
+            superintendente_circuito
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             nome_congregacao = excluded.nome_congregacao,
             endereco = excluded.endereco,
@@ -517,7 +521,8 @@ def salvar_configuracao(dados: dict) -> None:
             telefone_coordenador = excluded.telefone_coordenador,
             dia_reuniao = excluded.dia_reuniao,
             horario_reuniao = excluded.horario_reuniao,
-            circuito = excluded.circuito
+            circuito = excluded.circuito,
+            superintendente_circuito = excluded.superintendente_circuito
         """,
         (
             nome_novo,
@@ -529,6 +534,7 @@ def salvar_configuracao(dados: dict) -> None:
             dados["dia_reuniao"],
             dados["horario_reuniao"],
             dados["circuito"],
+            dados.get("superintendente_circuito", ""),
         ),
     )
 
@@ -6536,38 +6542,62 @@ def abrir_dialog_gerenciar_tipos_evento(
             def alternar_rodizio(e, item=item):
                 definir_tipo_evento_entra_rodizio(item["id"], bool(e.control.value))
 
+            nome = ft.Text(
+                item["nome"], size=fonte(14), expand=True,
+                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+            )
+            # Numa Assembleia a congregação está fora do salão: não há o que
+            # presidir, e o rodízio não pode gastar a vez de um ancião ali.
+            # Quem sabe disso é quem monta o arranjo.
+            caixa_presidente = ft.Checkbox(
+                label="Presidente",
+                value=item.get("tem_presidente", True),
+                tooltip="Marque se esse evento tem reunião no salão, com "
+                        "alguém presidindo.",
+                on_change=alternar_presidente,
+            )
+            # Ter presidente e ter fila própria são coisas diferentes: no
+            # Arranjo Local quem preside é o presidente da semana, já
+            # escalado, e não um ancião chamado por rodízio.
+            caixa_rodizio = ft.Checkbox(
+                label="Rodízio",
+                value=item.get("entra_rodizio", True),
+                tooltip="Marque se esse evento tem a sua própria fila de "
+                        "presidentes, na aba Datas especiais. Desmarque "
+                        "quando quem preside é o presidente da semana.",
+                on_change=alternar_rodizio,
+            )
+            botao_excluir = ft.IconButton(
+                icon=ft.Icons.DELETE_OUTLINE,
+                icon_size=fonte(18),
+                icon_color=COR_ERRO,
+                tooltip="Remover (datas já cadastradas não mudam)",
+                on_click=excluir,
+            )
+            if eh_mobile():
+                # Tudo numa linha só não cabe na largura do celular: sobrava
+                # um filete para o nome, que quebrava letra a letra.
+                return ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [nome, botao_excluir],
+                                spacing=4,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Row(
+                                [caixa_presidente, caixa_rodizio],
+                                spacing=4,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                        ],
+                        spacing=0,
+                        tight=True,
+                    ),
+                    padding=ft.Padding.only(bottom=6),
+                )
             return ft.Row(
-                [
-                    ft.Text(item["nome"], size=fonte(14), expand=True),
-                    # Numa Assembleia a congregação está fora do salão: não há
-                    # o que presidir, e o rodízio não pode gastar a vez de um
-                    # ancião ali. Quem sabe disso é quem monta o arranjo.
-                    ft.Checkbox(
-                        label="Presidente",
-                        value=item.get("tem_presidente", True),
-                        tooltip="Marque se esse evento tem reunião no salão, com "
-                                "alguém presidindo.",
-                        on_change=alternar_presidente,
-                    ),
-                    # Ter presidente e ter fila própria são coisas diferentes:
-                    # no Arranjo Local quem preside é o presidente da semana,
-                    # já escalado, e não um ancião chamado por rodízio.
-                    ft.Checkbox(
-                        label="Rodízio",
-                        value=item.get("entra_rodizio", True),
-                        tooltip="Marque se esse evento tem a sua própria fila de "
-                                "presidentes, na aba Datas especiais. Desmarque "
-                                "quando quem preside é o presidente da semana.",
-                        on_change=alternar_rodizio,
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE_OUTLINE,
-                        icon_size=fonte(18),
-                        icon_color=COR_ERRO,
-                        tooltip="Remover (datas já cadastradas não mudam)",
-                        on_click=excluir,
-                    ),
-                ],
+                [nome, caixa_presidente, caixa_rodizio, botao_excluir],
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
@@ -6637,11 +6667,16 @@ def abrir_dialog_data_especial(
     if fora_do_fim_de_semana:
         datas_mes.insert(0, registro["data"])
 
+    # `text_size` menor que o padrão: no celular, com a escala de fonte
+    # aumentada, o valor do dropdown era cortado embaixo (o "ç" de
+    # "congregação" sumia) e nomes longos de tipo não cabiam na linha.
+    tamanho_valor = fonte(13)
     campo_data = ft.Dropdown(
         label="Data",
         options=[ft.dropdown.Option(d) for d in datas_mes],
         value=registro["data"] if editando else None,
         expand=True,
+        text_size=tamanho_valor,
     )
     # Nem toda data especial cai no fim de semana: a Celebração é sempre em
     # 14 de nisã e anda pelos dias da semana (em 2026 foi numa quinta). Sem
@@ -6661,6 +6696,7 @@ def abrir_dialog_data_especial(
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
         value=registro["tipo"] if editando else (tipos[0] if tipos else None),
         expand=True,
+        text_size=tamanho_valor,
     )
 
     def atualizar_tipos():
@@ -6668,6 +6704,32 @@ def abrir_dialog_data_especial(
         campo_tipo.options = [ft.dropdown.Option(tipo) for tipo in atuais]
         if campo_tipo.value not in atuais and atuais:
             campo_tipo.value = atuais[0]
+        # Excluir o tipo escolhido troca a seleção: o formulário acompanha.
+        aplicar_tipo()
+
+    nome_superintendente = (
+        carregar_configuracao().get("superintendente_circuito") or ""
+    ).strip()
+
+    def aplicar_tipo(_=None):
+        """Ajusta o formulário ao tipo escolhido.
+
+        Na visita, o orador é sempre o superintendente (o nome vem do cadastro
+        da congregação, sem digitar de novo a cada visita) e há um segundo
+        discurso, o final. Trocar o tipo desfaz o preenchimento automático,
+        mas nunca um nome que o usuário tenha digitado.
+        """
+        visita = eh_visita_superintendente(campo_tipo.value or "")
+        digitado = (campo_orador.value or "").strip()
+        if visita and nome_superintendente and not digitado:
+            campo_orador.value = nome_superintendente
+        elif not visita and nome_superintendente and digitado == nome_superintendente:
+            campo_orador.value = ""
+        campo_tema.label = (
+            "Tema do discurso público (opcional)" if visita else "Tema (opcional)"
+        )
+        campo_tema_final.visible = visita
+        aviso_superintendente.visible = visita and not nome_superintendente
         page.update()
 
     def abrir_gerenciar_tipos(_=None):
@@ -6680,9 +6742,25 @@ def abrir_dialog_data_especial(
     )
     campo_tema = ft.TextField(
         label="Tema (opcional)",
-        hint_text="Ex: tema do discurso do superintendente",
+        hint_text="Ex: tema do discurso público",
         value=registro["tema"] if editando else "",
         expand=True,
+    )
+    # Na visita do superintendente a reunião tem dois discursos: o público e o
+    # final. Só a visita mostra este campo — nas outras datas ele não existe.
+    campo_tema_final = ft.TextField(
+        label="Tema do discurso final (opcional)",
+        hint_text="O segundo discurso da visita",
+        value=(registro.get("tema_final") or "") if editando else "",
+        expand=True,
+        visible=False,
+    )
+    aviso_superintendente = ft.Text(
+        "Cadastre o superintendente de circuito em Minha congregação para o "
+        "nome dele já vir preenchido aqui.",
+        size=fonte(12),
+        color=TEXTO_SECUNDARIO,
+        visible=False,
     )
     campo_congregacao = ft.Dropdown(
         label="Congregação do orador (opcional)",
@@ -6693,6 +6771,7 @@ def abrir_dialog_data_especial(
         ],
         value=str(registro["congregacao_id"]) if editando and registro.get("congregacao_id") else "",
         expand=True,
+        text_size=tamanho_valor,
     )
 
     df_oradores_cong = carregar_dados(
@@ -6715,6 +6794,7 @@ def abrir_dialog_data_especial(
             page.update()
 
     campo_orador.on_change = ao_mudar_orador
+    campo_tipo.on_select = aplicar_tipo
 
     # Quem presidiu sem estar no cadastro (saiu da congregação, ou nunca
     # entrou na escala) precisa caber aqui: era o furo que fazia a Celebração
@@ -6739,6 +6819,7 @@ def abrir_dialog_data_especial(
             else (CHAVE_AVULSO if avulso_atual else "")
         ),
         expand=True,
+        text_size=tamanho_valor,
     )
     campo_presidente_avulso = ft.TextField(
         label="Nome de quem presidiu",
@@ -6798,6 +6879,10 @@ def abrir_dialog_data_especial(
                 ),
                 registro_id=registro["id"] if editando else None,
                 congregacao_id=int(campo_congregacao.value) if campo_congregacao.value else None,
+                tema_final=(
+                    (campo_tema_final.value or "").strip()
+                    if campo_tema_final.visible else ""
+                ),
                 presidente_avulso=(
                     (campo_presidente_avulso.value or "").strip()
                     if campo_presidente.value == CHAVE_AVULSO else ""
@@ -6812,6 +6897,7 @@ def abrir_dialog_data_especial(
         fechar()
         ao_concluir()
 
+    aplicar_tipo()
     page.show_dialog(
         ft.AlertDialog(
             modal=True,
@@ -6830,6 +6916,8 @@ def abrir_dialog_data_especial(
                                         campo_tipo,
                                         ft.IconButton(
                                             icon=ft.Icons.SETTINGS_OUTLINED,
+                                            icon_size=fonte(18),
+                                            width=fonte(38),
                                             tooltip="Gerenciar tipos de evento",
                                             on_click=abrir_gerenciar_tipos,
                                         ),
@@ -6857,7 +6945,9 @@ def abrir_dialog_data_especial(
                             ]
                         ),
                         campo_orador,
+                        aviso_superintendente,
                         campo_tema,
+                        campo_tema_final,
                         campo_congregacao,
                         campo_presidente,
                         campo_presidente_avulso,
@@ -9882,6 +9972,14 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
         value=config["circuito"],
         expand=True,
     )
+    # Na visita, o orador é sempre ele. Guardar o nome aqui evita digitá-lo
+    # de novo a cada visita: a data especial já vem preenchida.
+    campo_superintendente = ft.TextField(
+        label="Superintendente de circuito",
+        hint_text="Entra como orador nas visitas",
+        value=config["superintendente_circuito"],
+        expand=True,
+    )
     texto_sucesso = ft.Text(
         "Informações salvas com sucesso.",
         color=COR_SUCESSO,
@@ -9901,6 +9999,9 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                 "dia_reuniao": (campo_dia.value or "").strip(),
                 "horario_reuniao": (campo_horario.value or "").strip(),
                 "circuito": (campo_circuito.value or "").strip(),
+                "superintendente_circuito": (
+                    campo_superintendente.value or ""
+                ).strip(),
             }
         )
         texto_sucesso.visible = True
@@ -10028,7 +10129,7 @@ def _secao_dados_congregacao(page: ft.Page) -> ft.Control:
                 linha_campos(campo_cidade, campo_cep),
                 linha_campos(campo_coordenador, campo_telefone),
                 linha_campos(campo_dia, campo_horario),
-                campo_circuito,
+                linha_campos(campo_circuito, campo_superintendente),
                 ft.Container(height=8),
                 criar_secao_titulo("Dia das Reuniões"),
                 ft.Text(
@@ -11087,6 +11188,9 @@ def _preview_quadro_mobile(
         )
         itens.append(linha_campo("Orador:", item.get("orador")))
         itens.append(linha_campo("Tema:", item.get("tema")))
+        # A visita do superintendente tem dois discursos: o público e o final.
+        if item.get("tema_final"):
+            itens.append(linha_campo("Discurso final:", item.get("tema_final")))
         itens.append(linha_campo("Congregação:", item.get("congregacao")))
         if indice < len(dados) - 1:
             # Faixa cinza separando as semanas, como no PDF.

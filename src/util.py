@@ -368,6 +368,15 @@ def rotulo_de_prazo(data: date | None, hoje: date) -> tuple[str, str]:
 
 # Os meses por extenso, como aparecem nas telas, nos PDFs e nas imagens. O
 # índice é o número do mês (1 a 12), por isso a primeira posição é vazia.
+# Na visita do superintendente de circuito a reunião tem DOIS discursos: o
+# público e o final. O tipo do evento é o que diz que aquela data é a visita,
+# e o nome dele pode ter sido escrito de vários jeitos ("Visita do
+# Superintendente", "Visita do SC de circuito") — o que não muda é a palavra.
+def eh_visita_superintendente(tipo: str) -> bool:
+    """Se este tipo de evento especial é a visita do superintendente."""
+    return "superintendente" in _normalizar_texto_busca(tipo or "")
+
+
 NOMES_MESES = [
     "",
     "Janeiro",
