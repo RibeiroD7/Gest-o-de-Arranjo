@@ -6729,6 +6729,10 @@ def abrir_dialog_data_especial(
             "Tema do discurso público (opcional)" if visita else "Tema (opcional)"
         )
         campo_tema_final.visible = visita
+        # O superintendente não vem de uma congregação, e o quadro não mostra
+        # esse campo na visita: perguntar por ele aqui seria pedir o que não
+        # vai a lugar nenhum.
+        campo_congregacao.visible = not visita
         aviso_superintendente.visible = visita and not nome_superintendente
         page.update()
 
@@ -6785,7 +6789,7 @@ def abrir_dialog_data_especial(
     def ao_mudar_orador(_=None):
         # Auto-preenche a congregação se o orador digitado for um cadastrado
         # e nenhuma congregação tiver sido escolhida ainda.
-        if campo_congregacao.value:
+        if campo_congregacao.value or not campo_congregacao.visible:
             return
         chave = _normalizar_texto_busca(campo_orador.value or "")
         cong_id = mapa_orador_cong.get(chave)
@@ -6878,7 +6882,11 @@ def abrir_dialog_data_especial(
                     else None
                 ),
                 registro_id=registro["id"] if editando else None,
-                congregacao_id=int(campo_congregacao.value) if campo_congregacao.value else None,
+                congregacao_id=(
+                    int(campo_congregacao.value)
+                    if campo_congregacao.value and campo_congregacao.visible
+                    else None
+                ),
                 tema_final=(
                     (campo_tema_final.value or "").strip()
                     if campo_tema_final.visible else ""
@@ -11191,7 +11199,9 @@ def _preview_quadro_mobile(
         # A visita do superintendente tem dois discursos: o público e o final.
         if item.get("tema_final"):
             itens.append(linha_campo("Discurso final:", item.get("tema_final")))
-        itens.append(linha_campo("Congregação:", item.get("congregacao")))
+        # Na visita não há congregação de origem: a linha some, como no PDF.
+        if item.get("congregacao"):
+            itens.append(linha_campo("Congregação:", item.get("congregacao")))
         if indice < len(dados) - 1:
             # Faixa cinza separando as semanas, como no PDF.
             itens.append(ft.Container(bgcolor=COR_GRAY, height=10))

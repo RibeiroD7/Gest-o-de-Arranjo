@@ -806,11 +806,13 @@ def gerar_preview_quadro_mes(
         return fonte
 
     com_discurso_final = sum(1 for item in dados if item.get("tema_final"))
+    sem_congregacao = sum(1 for item in dados if not item.get("congregacao"))
     altura_total = (
         _QUADRO_ALTURA_TITULO
         + _QUADRO_ALTURA_MES
         + len(dados) * (_QUADRO_ALTURA_DATA + sum(_QUADRO_ALTURAS_CORPO))
         + com_discurso_final * _QUADRO_ALTURA_DISCURSO_FINAL
+        - sem_congregacao * _QUADRO_ALTURAS_CORPO[2]
         + max(len(dados) - 1, 0) * _QUADRO_ALTURA_DIVISOR
         + _QUADRO_ALTURA_RODAPE
         + (len(dados) + 1) * 2
@@ -889,10 +891,12 @@ def gerar_preview_quadro_mes(
                 ("Discurso final:", item["tema_final"], _QUADRO_X_VALOR_CONG,
                  _QUADRO_ALTURA_DISCURSO_FINAL)
             )
-        campos.append(
-            ("Congregação:", item["congregacao"], _QUADRO_X_VALOR_CONG,
-             _QUADRO_ALTURAS_CORPO[2])
-        )
+        # Vazio (a visita do superintendente): a linha não existe.
+        if item["congregacao"]:
+            campos.append(
+                ("Congregação:", item["congregacao"], _QUADRO_X_VALOR_CONG,
+                 _QUADRO_ALTURAS_CORPO[2])
+            )
         for rotulo, valor, x_valor_pt, altura_pt in campos:
             altura = pt(altura_pt)
             _texto_centrado(

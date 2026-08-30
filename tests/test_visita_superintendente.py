@@ -154,11 +154,23 @@ class TestOFormularioDaVisita:
         dialog = self._abrir("Visita do Superintendente")
         assert self._campo(dialog, "Tema do discurso final").visible
 
+    def test_o_campo_da_congregacao_some_na_visita(self, banco_limpo):
+        dialog = self._abrir("Visita do Superintendente")
+        congregacao = [
+            c for c in _controles(dialog)
+            if isinstance(c, flet.Dropdown) and (c.label or "").startswith("Congregação")
+        ]
+        assert congregacao and not congregacao[0].visible
+
     def test_nos_outros_eventos_nada_disso_aparece(self, banco_limpo):
         main.salvar_configuracao({**CONFIG_BASE, "superintendente_circuito": "Wagner Mendes"})
         dialog = self._abrir("Celebração")
         assert self._campo(dialog, "Orador").value == ""
         assert not self._campo(dialog, "Tema do discurso final").visible
+        assert all(
+            c.visible for c in _controles(dialog)
+            if isinstance(c, flet.Dropdown) and (c.label or "").startswith("Congregação")
+        )
 
     def test_sem_o_nome_cadastrado_a_tela_diz_onde_cadastrar(self, banco_limpo):
         dialog = self._abrir("Visita do Superintendente")
@@ -187,6 +199,10 @@ class TestOsDoisDiscursosNoQuadro:
         """A reunião tem dois discursos; o tema do segundo pode não ter chegado."""
         assert self._visita(tema_final="")["tema_final"] == "—"
 
+    def test_a_congregacao_nao_aparece_na_visita(self, banco_limpo):
+        """O superintendente não vem de uma congregação: a linha não existe."""
+        assert self._visita()["congregacao"] == ""
+
     def test_semana_comum_nao_ganha_a_linha(self, banco_limpo):
         linhas = carregar_dados_mes(2026, 9)
         assert all(not linha["tema_final"] for linha in linhas)
@@ -195,6 +211,7 @@ class TestOsDoisDiscursosNoQuadro:
         database.salvar_data_especial("05/09/2026", "Celebração", "", "Tema", None)
         linhas = {li["data"]: li for li in carregar_dados_mes(2026, 9)}
         assert linhas[date(2026, 9, 5)]["tema_final"] == ""
+        assert linhas[date(2026, 9, 5)]["congregacao"] == "—", "as outras mantêm a linha"
 
     def test_o_pdf_do_par_continua_com_uma_pagina_por_mes(self, banco_limpo):
         """A linha extra não pode empurrar o mês de cinco semanas para outra página."""

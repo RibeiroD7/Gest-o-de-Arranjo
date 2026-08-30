@@ -214,16 +214,20 @@ def carregar_dados_mes(ano: int, mes: int) -> list[dict]:
             # Na visita do superintendente a reunião tem dois discursos, e o
             # quadro mostra os dois: o final ganha uma linha própria, anunciada
             # mesmo quando o tema ainda não chegou.
+            visita = eh_visita_superintendente(especial["tipo"])
             final_txt = (especial.get("tema_final") or "").strip()
-            if not final_txt and eh_visita_superintendente(especial["tipo"]):
+            if not final_txt and visita:
                 final_txt = "—"
+            # O superintendente não vem de uma congregação: na visita a linha
+            # da congregação não existe (vazio = a linha não é desenhada).
+            congregacao_txt = "" if visita else (especial["congregacao"] or "—")
             linhas.append(
                 {
                     "data": data_ref,
                     "presidente": especial["presidente"] or "—",
                     "orador": orador_txt or especial["tipo"],
                     "tema": tema_txt or "—",
-                    "congregacao": especial["congregacao"] or "—",
+                    "congregacao": congregacao_txt,
                     "tema_final": final_txt,
                 }
             )
@@ -353,9 +357,11 @@ def _construir_tabela_mes(ano: int, mes: int, nome_congregacao: str) -> Table:
                 ("Discurso final:", item["tema_final"], 1, 2, largura_valor_longo,
                  ALTURA_DISCURSO_FINAL)
             )
-        campos.append(
-            ("Congregação:", item["congregacao"], 1, 2, largura_valor_longo, ALTURAS_CORPO[2])
-        )
+        if item["congregacao"]:
+            campos.append(
+                ("Congregação:", item["congregacao"], 1, 2, largura_valor_longo,
+                 ALTURAS_CORPO[2])
+            )
         for rotulo, valor, fim_rotulo, inicio_valor, largura_valor, altura in campos:
             celulas: list = ["", "", "", ""]
             largura_rotulo = sum(LARGURAS_COLUNAS[: fim_rotulo + 1]) - 4
