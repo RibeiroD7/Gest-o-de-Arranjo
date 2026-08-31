@@ -869,10 +869,8 @@ def gerar_preview_quadro_mes(
             fonte_ajustada(rotulo_data, pt(_QUADRO_X_DIVISAO_DATA - 6), 14),
             "#000000", largura_area=x_divisao - x0,
         )
-        presidente = item["presidente"]
-        texto_presidente = (
-            f"PRESIDENTE:      {presidente}" if presidente and presidente != "—" else "PRESIDENTE:"
-        )
+        # Traço quando não há presidente, como nos outros campos.
+        texto_presidente = f"PRESIDENTE:      {item['presidente'] or '—'}"
         _texto_centrado(
             draw, x_divisao + pt(21), y, altura, texto_presidente,
             fonte_ajustada(texto_presidente, x1 - x_divisao - pt(23), 14),

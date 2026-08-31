@@ -11137,7 +11137,9 @@ def _preview_quadro_mobile(
     def linha_data_presidente(rotulo_data: str, presidente: str):
         # Data (vermelho) à esquerda e Presidente (cinza) à direita, ~50/50,
         # exatamente como a primeira linha de cada semana no PDF.
-        texto_pres = f"PRESIDENTE:  {presidente}" if presidente else "PRESIDENTE:"
+        # Sem presidente vai o traço, como no Orador e no Tema: campo vazio
+        # no quadro impresso parece esquecimento, não "ainda não definido".
+        texto_pres = f"PRESIDENTE:  {presidente or '—'}"
         # Altura fixa nas duas células para elas ficarem do mesmo tamanho SEM
         # usar CrossAxisAlignment.STRETCH (que, num Row dentro de coluna
         # rolável, gera erro de layout e deixa a prévia em branco). Presidente
@@ -11941,8 +11943,56 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
     def adicionar(_=None):
         abrir_dialog_presidente(page, None, ao_mudar)
 
+    def apagar_de_vez(item: dict, ao_terminar: Callable[[], None] | None = None):
+        """Tira do cadastro para sempre, deixando o nome onde ele presidiu.
+
+        É o caminho de quem não volta. O nome é gravado nas semanas e nas
+        datas especiais que ele presidiu antes de sair, então o quadro
+        daqueles meses continua certo — só não é mais uma pessoa do cadastro.
+        """
+        def fechar(_=None):
+            page.pop_dialog()
+
+        def confirmar(_=None):
+            fechar()
+            try:
+                excluir_presidente_cadastro(item["id"])
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao excluir presidente")
+                mostrar_aviso(page, "Erro", "Não foi possível excluir este presidente.")
+                return
+            if ao_terminar:
+                ao_terminar()
+            ao_mudar()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Excluir presidente"),
+                content=ft.Text(
+                    f"{item['nome']} sai do cadastro de vez, e não dá para "
+                    "desfazer.\n\nAs semanas e as datas especiais que ele "
+                    "presidiu continuam no histórico com o nome dele, fora dos "
+                    "rodízios — como acontece com quem presidiu sem estar no "
+                    "cadastro.",
+                    size=fonte(13),
+                ),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=fechar),
+                    ft.FilledButton(
+                        "Excluir",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        style=ft.ButtonStyle(bgcolor=COR_ERRO, color="#FFFFFF"),
+                        on_click=confirmar,
+                    ),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
+        page.update()
+
     def excluir(item: dict):
-        """Tira alguém da escala: arquiva quem já presidiu, exclui quem não.
+        """Tira alguém da escala: arquivar guarda, excluir tira de vez.
 
         Quem se mudou de congregação precisa sumir do rodízio, mas o que ele
         presidiu não pode sumir junto: é a memória de onde os rodízios tiram a
@@ -11966,13 +12016,26 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
                 return
             ao_mudar()
 
+        def excluir_agora(_=None):
+            fechar()
+            apagar_de_vez(item)
+
+        acoes = [ft.TextButton("Cancelar", on_click=fechar)]
         if tem_historico:
             titulo = "Tirar da escala"
             explicacao = (
                 f"{item['nome']} sai dos rodízios e das listas. As semanas e as "
                 "datas especiais que ele presidiu continuam no histórico, com o "
-                "nome dele.\n\nDá para trazer de volta quando quiser, na seção "
-                "Fora da escala."
+                "nome dele.\n\nArquivar dá para desfazer em Fora da escala. "
+                "Excluir tira do cadastro de vez, e o histórico fica igual."
+            )
+            acoes.append(
+                ft.TextButton(
+                    "Excluir",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    style=ft.ButtonStyle(color=COR_ERRO),
+                    on_click=excluir_agora,
+                )
             )
             rotulo, icone, estilo = "Arquivar", ft.Icons.ARCHIVE_OUTLINED, None
         else:
@@ -11984,15 +12047,15 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
             rotulo, icone = "Excluir", ft.Icons.DELETE_OUTLINE
             estilo = ft.ButtonStyle(bgcolor=COR_ERRO, color="#FFFFFF")
 
+        acoes.append(
+            ft.FilledButton(rotulo, icon=icone, style=estilo, on_click=confirmar)
+        )
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
                 title=ft.Text(titulo),
                 content=ft.Text(explicacao, size=fonte(13)),
-                actions=[
-                    ft.TextButton("Cancelar", on_click=fechar),
-                    ft.FilledButton(rotulo, icon=icone, style=estilo, on_click=confirmar),
-                ],
+                actions=acoes,
                 actions_alignment=ft.MainAxisAlignment.END,
             )
         )
@@ -12039,6 +12102,17 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
                                             "Voltar para a escala",
                                             icon=ft.Icons.UNARCHIVE_OUTLINED,
                                             on_click=lambda e, i=dict(item): reativar(i),
+                                        ),
+                                        # Quem não volta mais sai daqui: é onde
+                                        # ele está visível.
+                                        ft.IconButton(
+                                            icon=ft.Icons.DELETE_OUTLINE,
+                                            icon_size=fonte(18),
+                                            icon_color=COR_ERRO,
+                                            tooltip="Excluir do cadastro",
+                                            on_click=lambda e, i=dict(item): apagar_de_vez(
+                                                i, ao_terminar=page.pop_dialog
+                                            ),
                                         ),
                                     ],
                                     spacing=8,
@@ -12362,7 +12436,9 @@ def _secao_presidentes_especiais(page: ft.Page, ao_mudar: Callable[[], None]) ->
         t["nome"] for t in listar_tipos_evento()
         if t["tem_presidente"] and t["entra_rodizio"]
     ]
-    # Um tipo que saiu do cadastro mas ainda tem data marcada continua valendo.
+    # Um tipo que saiu do cadastro mas ainda tem data marcada continua valendo
+    # — a não ser que tenha sido removido de propósito (aí está em
+    # `fora_do_rodizio`, que já conta os removidos).
     tipos += sorted(
         {
             r["tipo"] for r in todas

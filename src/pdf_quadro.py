@@ -320,11 +320,10 @@ def _construir_tabela_mes(ano: int, mes: int, nome_congregacao: str) -> Table:
         nome_dia = NOMES_DIA_SEMANA[item["data"].weekday()]
         rotulo_data = f"{nome_dia}, {dia} DE {NOMES_MESES[mes].upper()}"
         largura_vermelha = sum(LARGURAS_COLUNAS[:3])
-        presidente = item["presidente"]
-        texto_presidente = (
-            "PRESIDENTE:" + "&nbsp;" * 6 + presidente if presidente and presidente != "—"
-            else "PRESIDENTE:"
-        )
+        # O traço entra como nos outros campos: linha vazia no quadro impresso
+        # parece esquecimento, não "ainda não definido".
+        presidente = item["presidente"] or "—"
+        texto_presidente = "PRESIDENTE:" + "&nbsp;" * 6 + presidente
         tamanho_pres = _tamanho_ajustado(
             f"PRESIDENTE:      {presidente}", LARGURAS_COLUNAS[3] - 23, 14
         )

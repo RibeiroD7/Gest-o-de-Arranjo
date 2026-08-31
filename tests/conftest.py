@@ -13,3 +13,13 @@ from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="ga-testes-"))
 os.environ["FLET_APP_STORAGE_DATA"] = str(_TMP)
+
+# Importar `main` executa `flet.run(...)`, que abriria a janela do app e
+# travaria a suíte. Neutralizar aqui vale para qualquer arquivo de teste,
+# inclusive quando ele é rodado sozinho.
+try:
+    import flet
+
+    flet.run = lambda *a, **k: None
+except ImportError:  # sem flet instalado, os testes que precisam dele são pulados
+    pass

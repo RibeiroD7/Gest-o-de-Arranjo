@@ -104,7 +104,6 @@ TIPOS_EVENTO_PADRAO = [
     "Visita do Superintendente",
     "Celebração",
     "Reunião Especial",
-    "Arranjo Local",
 ]
 
 # Nesses eventos a congregação não se reúne no salão: ninguém preside, e o
@@ -222,11 +221,18 @@ def _aplicar_padrao_presidente_por_tipo(cursor) -> None:
 
 
 def _semear_tipos_evento(conn) -> None:
-    """Garante os tipos padrão e os já usados em datas especiais."""
+    """Garante os tipos padrão e os já usados em datas especiais.
+
+    O que o usuário removeu não volta: a data antiga continua com o nome do
+    evento gravado, mas o tipo não é recriado como opção.
+    """
     cursor = conn.cursor()
     usados = [linha[0] for linha in cursor.execute("SELECT DISTINCT tipo FROM datas_especiais")]
+    removidos = {
+        linha[0] for linha in cursor.execute("SELECT nome FROM tipos_evento_removidos")
+    }
     for nome in [*TIPOS_EVENTO_PADRAO, *usados]:
-        if nome:
+        if nome and nome not in removidos:
             cursor.execute(
                 "INSERT OR IGNORE INTO tipos_evento_especial (nome, tem_presidente) "
                 "VALUES (?, ?)",
@@ -411,11 +417,30 @@ def _migracao_5_visita_superintendente(conn) -> None:
     conn.commit()
 
 
+def _migracao_6_sem_arranjo_local(conn) -> None:
+    """"Arranjo Local" deixa de ser um tipo de evento especial.
+
+    Não é um evento à parte: é a reunião normal, com o discurso de um orador
+    daqui e o presidente da semana já escalado. Como tipo, só rendia uma fila
+    vazia na aba de datas especiais. As datas já cadastradas continuam onde
+    estão, com o nome gravado.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tipos_evento_removidos (nome TEXT PRIMARY KEY)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO tipos_evento_removidos (nome) VALUES ('Arranjo Local')"
+    )
+    conn.execute("DELETE FROM tipos_evento_especial WHERE nome = 'Arranjo Local'")
+    conn.commit()
+
+
 MIGRACOES: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (2, _migracao_2_convite_enviado),
     (3, _migracao_3_rodizio_por_tipo),
     (4, _migracao_4_presidente_arquivado),
     (5, _migracao_5_visita_superintendente),
+    (6, _migracao_6_sem_arranjo_local),
 ]
 
 ESQUEMA_ATUAL = MIGRACOES[-1][0] if MIGRACOES else 1
@@ -598,10 +623,15 @@ def _criar_e_migrar(conn):
         )
     """)
 
-    # A congregação muda de dia e/ou horário de reunião de tempos em tempos
-    # (a cada dois anos, mais ou menos). A configuração guarda só o vigente, e
-    # com isso os meses antigos eram montados no dia de hoje: 2021 era domingo,
-    # e a Programação daquele ano procurava sábados. Aqui fica a linha do tempo.
+    # Tipo de evento que o usuário removeu. Sem esta lista ele voltava sozinho
+    # na abertura seguinte: a semeadura recria os tipos padrão e todos os que
+    # ainda aparecem em alguma data especial já cadastrada.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tipos_evento_removidos (
+            nome TEXT PRIMARY KEY
+        )
+    """)
+
     # Anotações de um dia: "ligar para o Fulano", "confirmar o orador". São do
     # calendário, e aparecem nas pendências do Início quando a data chega.
     cursor.execute("""
@@ -614,6 +644,10 @@ def _criar_e_migrar(conn):
         )
     """)
 
+    # A congregação muda de dia e/ou horário de reunião de tempos em tempos
+    # (a cada dois anos, mais ou menos). A configuração guarda só o vigente, e
+    # com isso os meses antigos eram montados no dia de hoje: 2021 era domingo,
+    # e a Programação daquele ano procurava sábados. Aqui fica a linha do tempo.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS reuniao_historico (
             inicio TEXT PRIMARY KEY,          -- 'AAAA-MM' a partir do qual vale
@@ -1966,12 +2000,17 @@ def excluir_orador(orador_id: int) -> None:
     """
     conn = get_connection()
     try:
+        # `orador_2_id` é a segunda metade de um simpósio: quem só apareceu
+        # ali também tem histórico, e apagá-lo deixaria a designação sem nome.
         tem_historico = conn.execute(
             """
-            SELECT EXISTS(SELECT 1 FROM arranjo_oradores WHERE orador_id = ?)
+            SELECT EXISTS(
+                    SELECT 1 FROM arranjo_oradores
+                    WHERE orador_id = ? OR orador_2_id = ?
+                )
                 OR EXISTS(SELECT 1 FROM designacoes WHERE orador_id = ? OR presidente_id = ?)
             """,
-            (orador_id, orador_id, orador_id),
+            (orador_id, orador_id, orador_id, orador_id),
         ).fetchone()[0]
         conn.execute("DELETE FROM orador_temas WHERE orador_id = ?", (orador_id,))
         if tem_historico:
@@ -2483,13 +2522,30 @@ def arquivar_presidente_cadastro(cadastro_id: int, arquivar: bool = True) -> Non
 
 
 def excluir_presidente_cadastro(cadastro_id: int) -> None:
-    """Remove um presidente do cadastro e as semanas atribuídas a ele.
+    """Remove um presidente do cadastro sem apagar o que ele presidiu.
 
-    Só serve para quem nunca presidiu nada (um cadastro digitado errado). Com
-    histórico, o caminho é ``arquivar_presidente_cadastro``.
+    O nome é gravado nas semanas e nas datas especiais dele antes da exclusão
+    (vira um "avulso", como quem presidiu sem estar no cadastro): o quadro
+    daqueles meses continua com o nome certo, e o registro não fica órfão.
+    Quem nunca presidiu nada simplesmente sai.
     """
     conn = get_connection()
     try:
+        linha = conn.execute(
+            "SELECT nome FROM presidentes_cadastro WHERE id = ?", (cadastro_id,)
+        ).fetchone()
+        nome = (linha[0] if linha else "") or ""
+        if nome:
+            conn.execute(
+                "UPDATE presidentes SET nome_avulso = ?, presidente_id = NULL "
+                "WHERE presidente_id = ?",
+                (nome, cadastro_id),
+            )
+            conn.execute(
+                "UPDATE datas_especiais SET presidente_avulso = ?, presidente_id = NULL "
+                "WHERE presidente_id = ?",
+                (nome, cadastro_id),
+            )
         conn.execute("DELETE FROM presidentes WHERE presidente_id = ?", (cadastro_id,))
         conn.execute("DELETE FROM presidentes_cadastro WHERE id = ?", (cadastro_id,))
         conn.commit()
@@ -2834,6 +2890,9 @@ def tipos_fora_do_rodizio_especiais() -> set[str]:
 
     Pergunta pelo avesso, como ``tipos_evento_sem_presidente``: tipo novo ou
     desconhecido entra no rodízio, que é o caso comum.
+
+    O que foi removido entra aqui também: uma data antiga não pode ressuscitar
+    a fila de um tipo que não existe mais.
     """
     conn = get_connection()
     try:
@@ -2841,6 +2900,7 @@ def tipos_fora_do_rodizio_especiais() -> set[str]:
             nome
             for (nome,) in conn.execute(
                 "SELECT nome FROM tipos_evento_especial WHERE COALESCE(entra_rodizio, 1) = 0"
+                " UNION SELECT nome FROM tipos_evento_removidos"
             )
         }
     finally:
@@ -2877,7 +2937,8 @@ def adicionar_tipo_evento(nome: str) -> None:
     """Adiciona um tipo de evento especial (idempotente).
 
     Nasce com presidente local: a maioria dos eventos tem reunião no salão, e
-    desligar o que não tem é um clique na própria tela.
+    desligar o que não tem é um clique na própria tela. Cadastrar de novo um
+    tipo removido desfaz a remoção.
     """
     conn = get_connection()
     try:
@@ -2886,17 +2947,41 @@ def adicionar_tipo_evento(nome: str) -> None:
             "VALUES (?, 1)",
             (nome.strip(),),
         )
+        conn.execute("DELETE FROM tipos_evento_removidos WHERE nome = ?", (nome.strip(),))
         conn.commit()
     finally:
         conn.close()
 
 
 def excluir_tipo_evento(tipo_id: int) -> None:
-    """Remove um tipo de evento (datas já cadastradas mantêm o texto)."""
+    """Remove um tipo de evento (datas já cadastradas mantêm o texto).
+
+    O nome fica marcado como removido para não ser recriado na abertura
+    seguinte, nem pela lista de tipos padrão nem pelas datas antigas.
+    """
     conn = get_connection()
     try:
+        linha = conn.execute(
+            "SELECT nome FROM tipos_evento_especial WHERE id = ?", (tipo_id,)
+        ).fetchone()
+        if linha:
+            conn.execute(
+                "INSERT OR IGNORE INTO tipos_evento_removidos (nome) VALUES (?)",
+                (linha[0],),
+            )
         conn.execute("DELETE FROM tipos_evento_especial WHERE id = ?", (tipo_id,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def tipos_evento_removidos() -> set[str]:
+    """Nomes de tipos que o usuário removeu — não voltam como opção nem fila."""
+    conn = get_connection()
+    try:
+        return {
+            nome for (nome,) in conn.execute("SELECT nome FROM tipos_evento_removidos")
+        }
     finally:
         conn.close()
 
@@ -3369,6 +3454,7 @@ TABELAS_BACKUP = [
     "tipos_evento_especial",
     "reuniao_historico",
     "anotacoes",
+    "tipos_evento_removidos",
 ]
 
 

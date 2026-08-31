@@ -80,3 +80,68 @@ class TestQuadroSegueALinhaDoTempo:
         assert all(li["data"].weekday() == 5 for li in carregar_dados_mes(2024, 1))
         # Antes do primeiro período, vale a configuração.
         assert all(li["data"].weekday() == 5 for li in carregar_dados_mes(2019, 6))
+
+
+class TestTracoQuandoNaoHaPresidente:
+    """Campo vazio no quadro impresso parece esquecimento, não "a definir"."""
+
+    def _linhas(self):
+        import database
+        import main
+
+        conn = database.get_connection()
+        try:
+            database.create_tables(conn)
+            for tabela in ("presidentes", "datas_especiais", "reuniao_historico"):
+                conn.execute(f"DELETE FROM {tabela}")
+            conn.commit()
+        finally:
+            conn.close()
+        main.salvar_configuracao({
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        })
+        from pdf_quadro import carregar_dados_mes
+
+        return carregar_dados_mes(2026, 9)
+
+    def test_a_semana_sem_presidente_vem_com_traco(self):
+        assert all(linha["presidente"] == "—" for linha in self._linhas())
+
+    def test_a_previa_do_celular_mostra_o_traco(self):
+        import flet
+
+        import main
+
+        dados = self._linhas()
+        controle = main._preview_quadro_mobile(2026, 9, dados, "Minha")
+        textos = []
+
+        def varrer(no):
+            if isinstance(no, flet.Text) and no.value:
+                textos.append(no.value)
+            for atributo in ("content", "controls"):
+                valor = getattr(no, atributo, None)
+                if isinstance(valor, list):
+                    for filho in valor:
+                        varrer(filho)
+                elif valor is not None and not isinstance(valor, str):
+                    varrer(valor)
+
+        varrer(controle)
+        assert any(t.startswith("PRESIDENTE:") and "—" in t for t in textos)
+        assert not any(t.strip() == "PRESIDENTE:" for t in textos)
+
+    def test_o_pdf_sai_com_o_traco(self):
+        import pytest
+
+        pypdf = pytest.importorskip("pypdf")
+        self._linhas()
+        from pdf_quadro import gerar_quadro_anuncios
+
+        caminho, erro = gerar_quadro_anuncios(2026, 9)
+        assert erro is None
+        texto = pypdf.PdfReader(caminho).pages[0].extract_text()
+        assert "PRESIDENTE:" in texto
+        assert "PRESIDENTE: —" in " ".join(texto.split())
