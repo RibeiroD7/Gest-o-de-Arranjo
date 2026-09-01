@@ -9,6 +9,7 @@ Execute com: python src/main.py
 
 from __future__ import annotations
 
+import itertools
 import re
 import sqlite3
 import sys
@@ -5112,13 +5113,15 @@ def _selo_status_designacao(registro: dict, on_status: Callable[[int, str], None
     )
 
 
-def _criar_cabecalho_tabela_oradores() -> ft.Container:
+def _criar_cabecalho_tabela_oradores(com_alca: bool = False) -> ft.Container:
     """Cabeçalho da tabela: Data | Orador | Tema | Ações."""
     return ft.Container(
         bgcolor=ft.Colors.with_opacity(0.06, COR_DESTAQUE),
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
         content=ft.Row(
             [
+                # Vão da alça das linhas, para as colunas baterem com elas.
+                *([ft.Container(width=LARGURA_ALCA + 4)] if com_alca else []),
                 ft.Text(
                     "Data",
                     width=_tema.LARGURA_COL_DATA_MES,
@@ -5162,6 +5165,7 @@ def _criar_linha_orador_arranjo(
     on_whatsapp: Callable[[dict], None] | None = None,
     on_status: Callable[[int, str], None] | None = None,
     on_mover: Callable[[dict], None] | None = None,
+    com_alca: bool = False,
 ) -> ft.Container:
     """Linha da tabela: Data | Orador | Tema | Ações."""
     tema = _rotulo_tema_orador_arranjo(registro)
@@ -5172,6 +5176,7 @@ def _criar_linha_orador_arranjo(
     return ft.Container(
         content=ft.Row(
             [
+                *([_alca_arrastar()] if com_alca else []),
                 ft.Text(
                     data,
                     width=_tema.LARGURA_COL_DATA_MES,
@@ -5365,7 +5370,48 @@ def _altura_linha_orador_mes(registro: dict) -> int:
         len(nome) * por_caractere > _tema.LARGURA_COL_ORADOR_MES
         or len(tema) * por_caractere > largura_tema
     )
-    return fonte(20) * (2 if duas_linhas else 1) + 22
+    # Os 46 são o piso do botão de ícone (o Material não deixa a área de
+    # toque encolher) mais o respiro de cima e de baixo: é o que a linha mede
+    # de verdade, e chutar por baixo escondia a última semana dentro da lista.
+    return fonte(20) * (2 if duas_linhas else 1) + 46
+
+
+LARGURA_ALCA = 26
+
+
+def _alca_arrastar() -> ft.Control:
+    """Puxador da linha: é por aqui que se arrasta.
+
+    A alça automática do Flet é desenhada por cima do fim da linha, em cima
+    dos botões de editar e remover. Esta fica no começo, com lugar próprio.
+    """
+    return ft.ReorderableDragHandle(
+        content=ft.Icon(
+            ft.Icons.DRAG_INDICATOR, size=fonte(18), color=TEXTO_SECUNDARIO
+        ),
+        mouse_cursor=ft.MouseCursor.GRAB,
+        tooltip="Arrastar para mudar a ordem",
+        width=LARGURA_ALCA,
+    )
+
+
+def _linha_com_alca(conteudo: ft.Control, arrastavel: bool = True) -> ft.Control:
+    """A linha com o puxador à esquerda (ou o vão dele, para alinhar)."""
+    return ft.Row(
+        [
+            _alca_arrastar() if arrastavel else ft.Container(width=LARGURA_ALCA),
+            ft.Container(content=conteudo, expand=True),
+        ],
+        spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+# Cada montagem da lista arrastável ganha uma chave nova. Sem isso, depois de
+# uma solta a tela ficava mostrando a ordem que o dedo deixou (com a data
+# antiga junto do nome), e não a que foi gravada: o widget do Flutter guarda a
+# ordem dele, e trocar a lista de controles por baixo não o desfaz.
+_CONTADOR_LISTAS = itertools.count()
 
 
 def _lista_arrastavel(
@@ -5376,13 +5422,17 @@ def _lista_arrastavel(
     """Lista que se reordena arrastando, com altura fechada.
 
     A altura precisa ser finita porque a lista mora dentro de um diálogo que
-    já rola. Arrastar é do próprio Flutter: no computador começa ao puxar a
-    linha, no celular ao segurar e puxar — e a rolagem continua funcionando.
+    já rola. As alças automáticas ficam desligadas: cada linha traz a sua, no
+    começo, para não cair em cima dos botões.
     """
     return ft.ReorderableListView(
         controls=linhas,
         on_reorder=ao_reordenar,
+        # A altura é a soma estimada das linhas: uma folga pequena sobra no
+        # fim, e faltar esconderia uma semana dentro da lista.
         height=altura,
+        show_default_drag_handles=False,
+        key=f"arrastavel-{next(_CONTADOR_LISTAS)}",
     )
 
 
@@ -5412,6 +5462,8 @@ def _montar_tabela_secao(
             )
         ]
 
+    todos_com_data = all((item.get("data") or "").strip() for item in registros)
+    arrastavel = bool(on_reordenar) and todos_com_data and len(registros) > 1
     linhas = [
         _criar_linha_orador_arranjo(
             item,
@@ -5421,11 +5473,17 @@ def _montar_tabela_secao(
             on_whatsapp=on_whatsapp,
             on_status=on_status,
             on_mover=on_mover,
+            com_alca=arrastavel,
         )
         for indice, item in enumerate(registros)
     ]
-    todos_com_data = all((item.get("data") or "").strip() for item in registros)
-    if on_reordenar and todos_com_data and len(registros) > 1:
+    if arrastavel:
+        # Sem chave, o Flutter casa as linhas pela posição: depois de uma
+        # solta, a tela continuava mostrando a ordem que o dedo deixou (com a
+        # data antiga colada no nome) em vez da que foi gravada.
+        for linha, item in zip(linhas, registros):
+            linha.key = f"designacao-{item['id']}"
+
         def ao_reordenar(e):
             ordem = _ordem_apos_arrastar(len(registros), e.old_index, e.new_index)
             on_reordenar([int(registros[i]["id"]) for i in ordem])
@@ -5440,7 +5498,7 @@ def _montar_tabela_secao(
 
     tabela = ft.Container(
         content=ft.Column(
-            [_criar_cabecalho_tabela_oradores(), corpo],
+            [_criar_cabecalho_tabela_oradores(arrastavel), corpo],
             spacing=0,
             tight=True,
         ),
@@ -7852,7 +7910,7 @@ def abrir_dialog_oradores_mes(
             except Exception:  # noqa: BLE001
                 logger.exception("Falha ao reordenar as designações")
                 mostrar_aviso(page, "Erro", "Não foi possível mudar a ordem.")
-            atualizar_listas()
+            recarregar_apos_arrastar()
 
         return aplicar
 
@@ -8180,7 +8238,7 @@ def abrir_dialog_oradores_mes(
         def ao_arrastar(e):
             """Quem preside anda entre as semanas comuns; as datas ficam."""
             if e.old_index not in indices_normais:
-                atualizar_listas()
+                recarregar_apos_arrastar()
                 return
             ordem = _ordem_apos_arrastar(len(linhas), e.old_index, e.new_index)
             por_indice = dict(zip(indices_normais, pessoas_normais))
@@ -8192,12 +8250,33 @@ def abrir_dialog_oradores_mes(
             except Exception:  # noqa: BLE001
                 logger.exception("Falha ao reordenar os presidentes do mês")
                 mostrar_aviso(page, "Erro", "Não foi possível mudar a ordem.")
-            atualizar_listas()
+            recarregar_apos_arrastar()
 
         if len(datas_normais) > 1:
-            altura_linha = fonte(112) if eh_mobile() else fonte(74)
+            # O respiro entra como padding da própria linha: sem ele o
+            # rótulo flutuante do seletor ("Presidente") encosta na caixa da
+            # linha de cima, que era o aperto da tela antes das alças.
+            espaco = 18
+            altura_linha = fonte(92) if eh_mobile() else fonte(52)
+            # A chave é a data: é o que não muda de lugar. Sem ela o Flutter
+            # casa as linhas pela posição e a tela fica com a ordem que o dedo
+            # deixou, e não com a que foi gravada.
+            com_alca = [
+                ft.Container(
+                    content=_linha_com_alca(
+                        linha, arrastavel=indice in indices_normais
+                    ),
+                    padding=ft.Padding.only(
+                        bottom=espaco if indice < len(linhas) - 1 else 0
+                    ),
+                    key=f"semana-{_formatar_data_arranjo(data_ref)}",
+                )
+                for indice, (linha, data_ref) in enumerate(zip(linhas, datas))
+            ]
             lista_presidentes.controls = [
-                _lista_arrastavel(linhas, altura_linha * len(linhas), ao_arrastar)
+                _lista_arrastavel(
+                    com_alca, (altura_linha + espaco) * len(linhas), ao_arrastar
+                )
             ]
         else:
             lista_presidentes.controls = linhas
@@ -8205,6 +8284,20 @@ def abrir_dialog_oradores_mes(
     def atualizar_listas():
         preencher_listas()
         page.update()
+
+    def recarregar_apos_arrastar():
+        """Esvazia as listas antes de remontar.
+
+        A lista arrastável guarda por dentro a ordem em que o dedo largou a
+        linha; trocar os controles por baixo não desfaz isso, e a tela ficava
+        mostrando a data antiga ao lado do nome que mudou de lugar. Zerar e
+        remontar mostra o que foi realmente gravado.
+        """
+        lista_recebidos.controls = []
+        lista_enviados.controls = []
+        lista_presidentes.controls = []
+        page.update()
+        atualizar_listas()
 
     def _abrir_selecao_exportacao_png(tipo: str, titulo_secao: str, prefixo_arquivo: str):
         registros = carregar_oradores_arranjo(arranjo_id)
