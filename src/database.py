@@ -9,6 +9,7 @@ from armazenamento import (
     BACKUPS_DIR,
     DATA_DIR,
 )
+from util import SEPARADOR_SIMPOSIO
 
 DB_PATH = str(DATA_DIR / "gestao_arranjo.db")
 
@@ -1605,8 +1606,12 @@ def listar_anos_arranjos() -> list[int]:
         conn.close()
 
 
-def carregar_arranjos_por_ano(ano: int) -> list[dict]:
-    """Carrega arranjos de um ano com dados da congregação anfitriã."""
+def carregar_arranjos_por_ano(ano: int | None) -> list[dict]:
+    """Carrega arranjos de um ano com dados da congregação anfitriã.
+
+    Sem ``ano``, traz os de todos os anos — é o que a busca da Programação
+    usa para saber quais meses já existem.
+    """
     conn = get_connection()
     try:
         cursor = conn.execute(
@@ -1624,13 +1629,116 @@ def carregar_arranjos_por_ano(ano: int) -> list[dict]:
                    COALESCE(a.horario, '') AS horario
             FROM arranjos a
             LEFT JOIN congregacoes c ON a.congregacao_host_id = c.id
-            WHERE a.ano = ?
-            ORDER BY a.mes_inicio
+            WHERE (? IS NULL OR a.ano = ?)
+            ORDER BY a.ano, a.mes_inicio
             """,
-            (ano,),
+            (ano, ano),
         )
         colunas = [desc[0] for desc in cursor.description]
         return [dict(zip(colunas, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def listar_itens_programacao(ano: int | None = None) -> list[dict]:
+    """Tudo o que está marcado na programação, em uma lista só.
+
+    Serve à busca da tela de Programação: orador recebido, designação
+    enviada, presidente da semana e data especial viram linhas do mesmo
+    formato, para procurar por nome, tema ou congregação sem abrir mês por
+    mês. Sem ``ano``, traz todos.
+    """
+    filtro_ano = "" if ano is None else " AND substr({coluna}, 7, 4) = :ano"
+    parametros = {} if ano is None else {"ano": str(ano)}
+    conn = get_connection()
+    try:
+        itens: list[dict] = []
+        for linha in conn.execute(
+            f"""
+            SELECT ao.data,
+                   ao.tipo,
+                   COALESCE(o.nome, '') AS orador,
+                   COALESCE(o2.nome, '') AS orador_2,
+                   ao.tema_nr,
+                   COALESCE(t.titulo, '') AS tema_titulo,
+                   COALESCE(c.nome, '') AS congregacao
+            FROM arranjo_oradores ao
+            LEFT JOIN oradores o ON ao.orador_id = o.id
+            LEFT JOIN oradores o2 ON ao.orador_2_id = o2.id
+            LEFT JOIN temas t ON ao.tema_nr = t.nr
+            LEFT JOIN congregacoes c ON ao.congregacao_id = c.id
+            WHERE length(COALESCE(ao.data, '')) = 10
+            {filtro_ano.format(coluna="ao.data")}
+            """,  # noqa: S608 — o filtro é fixo, o ano vai por parâmetro
+            parametros,
+        ):
+            nome = linha[2]
+            if linha[3]:
+                nome = f"{nome}{SEPARADOR_SIMPOSIO}{linha[3]}"
+            itens.append(
+                {
+                    "data": linha[0],
+                    "categoria": (
+                        "Orador recebido" if linha[1] == "recebido"
+                        else "Designação enviada"
+                    ),
+                    "pessoa": nome,
+                    "tema_nr": linha[4],
+                    "tema_titulo": linha[5],
+                    "congregacao": linha[6],
+                }
+            )
+
+        for linha in conn.execute(
+            f"""
+            SELECT p.data, COALESCE(pc.nome, p.nome_avulso, '')
+            FROM presidentes p
+            LEFT JOIN presidentes_cadastro pc ON p.presidente_id = pc.id
+            WHERE length(COALESCE(p.data, '')) = 10
+            {filtro_ano.format(coluna="p.data")}
+            """,  # noqa: S608
+            parametros,
+        ):
+            itens.append(
+                {
+                    "data": linha[0],
+                    "categoria": "Presidente",
+                    "pessoa": linha[1],
+                    "tema_nr": None,
+                    "tema_titulo": "",
+                    "congregacao": "",
+                }
+            )
+
+        for linha in conn.execute(
+            f"""
+            SELECT e.data, e.tipo,
+                   COALESCE(e.orador, ''),
+                   COALESCE(e.tema, ''),
+                   COALESCE(e.tema_final, ''),
+                   COALESCE(cong.nome, ''),
+                   COALESCE(pc.nome, e.presidente_avulso, '')
+            FROM datas_especiais e
+            LEFT JOIN congregacoes cong ON e.congregacao_id = cong.id
+            LEFT JOIN presidentes_cadastro pc ON e.presidente_id = pc.id
+            WHERE length(COALESCE(e.data, '')) = 10
+            {filtro_ano.format(coluna="e.data")}
+            """,  # noqa: S608
+            parametros,
+        ):
+            tema = " · ".join(parte for parte in (linha[3], linha[4]) if parte)
+            pessoa = " · ".join(parte for parte in (linha[2], linha[6]) if parte)
+            itens.append(
+                {
+                    "data": linha[0],
+                    "categoria": linha[1],
+                    "pessoa": pessoa,
+                    "tema_nr": None,
+                    "tema_titulo": tema,
+                    "congregacao": linha[5],
+                }
+            )
+        return sorted(itens, key=lambda i: (i["data"][6:10], i["data"][3:5], i["data"][0:2]))
     finally:
         conn.close()
 

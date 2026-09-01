@@ -98,6 +98,7 @@ from database import (
     listar_anos_colunas,
     listar_anos_planejamento,
     listar_datas_especiais_por_ano,
+    listar_itens_programacao,
     listar_presidentes_cadastro,
     listar_reuniao_historico,
     listar_tipos_evento,
@@ -9212,6 +9213,102 @@ def abrir_dialog_buscar_datas_especiais(
     page.update()
 
 
+def _tema_do_item_programacao(item: dict) -> str:
+    """Tema como ele aparece na tela: "132 - Título", ou o texto livre."""
+    titulo = (item.get("tema_titulo") or "").strip()
+    numero = item.get("tema_nr")
+    if titulo and numero and not titulo.startswith(str(numero)):
+        return f"{numero} - {titulo}"
+    return titulo
+
+
+def filtrar_itens_programacao(itens: list[dict], termo: str) -> list[dict]:
+    """O que casa com o que foi digitado: nome, tema, congregação, tipo ou data.
+
+    Cada palavra precisa aparecer em algum campo — "caio fortaleça" acha o
+    discurso do Caio sobre aquele tema, sem depender da ordem.
+    """
+    palavras = _normalizar_texto_busca(termo).split()
+    if not palavras:
+        return []
+
+    def casa(item: dict) -> bool:
+        texto = _normalizar_texto_busca(
+            " ".join(
+                [
+                    item.get("pessoa") or "",
+                    _tema_do_item_programacao(item),
+                    item.get("congregacao") or "",
+                    item.get("categoria") or "",
+                    item.get("data") or "",
+                ]
+            )
+        )
+        return all(palavra in texto for palavra in palavras)
+
+    return [item for item in itens if casa(item)]
+
+
+def _linha_resultado_busca(
+    item: dict,
+    ao_abrir: Callable[[dict], None] | None = None,
+) -> ft.Control:
+    """Uma linha do resultado: quando, o quê, quem e de onde."""
+    tema = _tema_do_item_programacao(item)
+    recebido = item.get("categoria") == "Orador recebido"
+    enviado = item.get("categoria") == "Designação enviada"
+    cor_selo = COR_SUCESSO if recebido else COR_DESTAQUE if enviado else COR_AVISO
+    selo = ft.Container(
+        content=ft.Text(
+            item.get("categoria") or "—",
+            size=fonte(11), weight=ft.FontWeight.W_600, color=cor_selo,
+            no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        bgcolor=ft.Colors.with_opacity(0.13, cor_selo),
+        border_radius=8,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+        width=fonte(140),
+    )
+    data = ft.Text(
+        item.get("data") or "—",
+        size=fonte(13), weight=ft.FontWeight.W_600, color=TEXTO_PRIMARIO,
+        width=fonte(88),
+    )
+    pessoa = ft.Text(
+        item.get("pessoa") or "—",
+        size=fonte(13), color=TEXTO_PRIMARIO,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        width=None if eh_mobile() else fonte(200),
+        expand=eh_mobile() or None,
+    )
+    detalhe = ft.Text(
+        " · ".join(parte for parte in (tema, item.get("congregacao") or "") if parte)
+        or "—",
+        size=fonte(12), color=TEXTO_SECUNDARIO,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        expand=True,
+    )
+    if eh_mobile():
+        conteudo: ft.Control = ft.Column(
+            [ft.Row([data, selo], spacing=8), pessoa, detalhe],
+            spacing=2, tight=True,
+        )
+    else:
+        conteudo = ft.Row(
+            [data, selo, pessoa, detalhe],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    return ft.Container(
+        content=conteudo,
+        padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+        border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+        on_click=(lambda e, i=dict(item): ao_abrir(i)) if ao_abrir else None,
+        tooltip="Abrir o mês" if ao_abrir else "Mês ainda não cadastrado",
+        ink=bool(ao_abrir),
+    )
+
+
 def tela_programacao(
     page: ft.Page,
     recarregar: Callable[[], None],
@@ -9221,6 +9318,20 @@ def tela_programacao(
     estado = {"ano": ANO_PADRAO_ARRANJOS}
     area_blocos = ft.Container(expand=True)
     texto_contagem = ft.Text(size=fonte(13), color=TEXTO_SECUNDARIO)
+    campo_busca = ft.TextField(
+        hint_text="Buscar orador, tema, congregação...",
+        prefix_icon=ft.Icons.SEARCH,
+        dense=True,
+        expand=True,
+        border_color=BORDA_SUAVE,
+        focused_border_color=COR_DESTAQUE,
+    )
+    caixa_todos_anos = ft.Checkbox(
+        label="Todos os anos",
+        value=False,
+        visible=False,
+        tooltip="Procurar também nos outros anos, não só no que está aberto",
+    )
 
     def cadastrar_mes(mes: int):
         abrir_dialog_arranjo(
@@ -9245,7 +9356,65 @@ def tela_programacao(
             file_picker=file_picker,
         )
 
+    def abrir_mes_do_resultado(item: dict):
+        """Do resultado para o mês dele, com o dialog já aberto."""
+        data = item.get("data") or ""
+        arranjos_do_ano = carregar_arranjos_por_ano(int(data[6:10]))
+        for arranjo in arranjos_do_ano:
+            if int(arranjo["mes_inicio"]) == int(data[3:5]):
+                abrir_oradores_mes(arranjo)
+                return
+
+    def montar_resultados(termo: str) -> None:
+        """Lista o que casou com a busca, no lugar da grade de meses."""
+        ano = None if caixa_todos_anos.value else estado["ano"]
+        achados = filtrar_itens_programacao(listar_itens_programacao(ano), termo)
+        meses_cadastrados = {
+            (int(a["ano"]), int(a["mes_inicio"])) for a in carregar_arranjos_por_ano(None)
+        } if ano is None else {
+            (ano, int(a["mes_inicio"])) for a in carregar_arranjos_por_ano(ano)
+        }
+        texto_contagem.value = (
+            f"{len(achados)} resultado(s)"
+            + ("" if caixa_todos_anos.value else f" em {estado['ano']}")
+        )
+        if not achados:
+            area_blocos.content = criar_painel_informativo(
+                "Nada encontrado",
+                "Nenhum orador, tema, congregação ou data especial casa com essa "
+                "busca. Tente parte do nome, ou marque \"Todos os anos\".",
+                ft.Icons.SEARCH_OFF,
+            )
+            return
+        linhas = [
+            _linha_resultado_busca(
+                item,
+                abrir_mes_do_resultado
+                if (int(item["data"][6:10]), int(item["data"][3:5])) in meses_cadastrados
+                else None,
+            )
+            for item in achados
+        ]
+        area_blocos.content = ft.Column(
+            [
+                ft.Container(
+                    content=ft.Column(linhas, spacing=0, tight=True),
+                    border=ft.Border.all(1, BORDA_SUAVE),
+                    border_radius=12,
+                    bgcolor=FUNDO_CARD,
+                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                )
+            ],
+            spacing=0,
+            scroll=ft.ScrollMode.AUTO,
+        )
+
     def montar_blocos():
+        termo = (campo_busca.value or "").strip()
+        caixa_todos_anos.visible = len(termo) >= 2
+        if len(termo) >= 2:
+            montar_resultados(termo)
+            return
         ano = estado["ano"]
         arranjos = carregar_arranjos_por_ano(ano)
         mapa = {int(item["mes_inicio"]): item for item in arranjos}
@@ -9304,6 +9473,13 @@ def tela_programacao(
         focused_border_color=COR_DESTAQUE,
     )
 
+    def ao_buscar(_=None):
+        montar_blocos()
+        page.update()
+
+    campo_busca.on_change = ao_buscar
+    caixa_todos_anos.on_change = ao_buscar
+
     def carregar_ano(_=None):
         try:
             estado["ano"] = int(seletor_ano.value)
@@ -9356,7 +9532,9 @@ def tela_programacao(
                         tooltip="Adicionar ano",
                         on_click=abrir_adicionar_ano,
                     ),
-                    ft.Container(expand=True),
+                    # No celular a busca não cabe nesta linha: vai sozinha
+                    # embaixo, em largura inteira.
+                    ft.Container(expand=True) if eh_mobile() else campo_busca,
                     ft.OutlinedButton(
                         content="Datas especiais" if not eh_mobile() else "Especiais",
                         icon=ft.Icons.EVENT_OUTLINED,
@@ -9368,8 +9546,13 @@ def tela_programacao(
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
+            *([ft.Container(height=12), campo_busca] if eh_mobile() else []),
             ft.Container(height=12),
-            texto_contagem,
+            ft.Row(
+                [texto_contagem, caixa_todos_anos],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
             ft.Container(height=16),
             area_blocos,
         ],
