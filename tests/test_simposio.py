@@ -45,6 +45,29 @@ def _preparar():
     return arranjo, ids, cong
 
 
+def _reuniao_no_sabado():
+    """Sábado como dia de reunião — na configuração e na linha do tempo.
+
+    O quadro pega o dia do período em ``reuniao_historico`` e só cai na
+    configuração quando não há período. Sem limpar a tabela e sem gravar a
+    configuração aqui, o mês saía vazio ou com o dia que outro arquivo de
+    teste tivesse deixado no banco compartilhado.
+    """
+    import main
+
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM reuniao_historico")
+        conn.commit()
+    finally:
+        conn.close()
+    main.salvar_configuracao({
+        "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+        "coordenador_discursos": "", "telefone_coordenador": "",
+        "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+    })
+
+
 class TestGravacao:
     def test_grava_os_dois_oradores_numa_linha_so(self):
         arranjo, ids, _ = _preparar()
@@ -142,15 +165,7 @@ class TestQuadroDeAnuncios:
 
     def _com_simposio(self):
         arranjo, ids, _ = _preparar()
-        conn = get_connection()
-        try:
-            conn.execute(
-                "UPDATE configuracoes SET dia_reuniao = 'Sábado', nome_congregacao = 'Minha' "
-                "WHERE id = 1"
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        _reuniao_no_sabado()
         database.adicionar_orador_arranjo(
             arranjo, "recebido", ids["Eduardo Nunes"], 176, data="02/05/2026",
             orador_2_id=ids["Danilo Reis"],
@@ -171,12 +186,7 @@ class TestQuadroDeAnuncios:
         import pdf_quadro
 
         arranjo, ids, _ = _preparar()
-        conn = get_connection()
-        try:
-            conn.execute("UPDATE configuracoes SET dia_reuniao = 'Sábado' WHERE id = 1")
-            conn.commit()
-        finally:
-            conn.close()
+        _reuniao_no_sabado()
         for nome in ("Eduardo Nunes", "Danilo Reis"):
             database.adicionar_orador_arranjo(
                 arranjo, "recebido", ids[nome], 176, data="02/05/2026"
