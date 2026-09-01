@@ -753,3 +753,113 @@ class TestOradorQueSaiuDaCongregacao:
         finally:
             conn.close()
         assert orador_2 == ids["Danilo Reis"]
+
+
+class TestSegundoOradorQueSumiuDoCadastro:
+    """Versões antigas apagavam de vez quem só era a segunda metade."""
+
+    def _registro_com_id_orfao(self):
+        import main
+
+        arranjo, ids, cong = _preparar()
+        main.salvar_configuracao({
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        })
+        database.adicionar_orador_arranjo(
+            arranjo, "recebido", ids["Eduardo Nunes"], 176, data="03/05/2026",
+            orador_2_id=ids["Danilo Reis"], congregacao_id=cong,
+        )
+        conn = get_connection()
+        try:
+            # Como a versão antiga apagava: sem passar pelo excluir_orador.
+            conn.execute("DELETE FROM oradores WHERE id = ?", (ids["Danilo Reis"],))
+            conn.commit()
+        finally:
+            conn.close()
+        return database.carregar_oradores_arranjo(arranjo)[0], arranjo
+
+    def _campos(self, dialog):
+        campo = next(
+            c for c in _todos_os_controles(dialog)
+            if isinstance(c, flet.Dropdown) and "Segundo orador" in (c.label or "")
+        )
+        nome = next(
+            c for c in _todos_os_controles(dialog)
+            if isinstance(c, flet.TextField) and "Nome do segundo" in (c.label or "")
+        )
+        return campo, nome
+
+    def test_o_cadastro_recriado_nasce_arquivado(self):
+        _preparar()
+        novo = database.garantir_orador_fora_do_cadastro("Quem Saiu", None)
+        conn = get_connection()
+        try:
+            nome, ativo = conn.execute(
+                "SELECT nome, COALESCE(ativo, 1) FROM oradores WHERE id = ?", (novo,)
+            ).fetchone()
+        finally:
+            conn.close()
+        assert nome == "Quem Saiu"
+        assert ativo == 0
+
+    def test_nao_duplica_quem_ja_existe(self):
+        _preparar()
+        conn = get_connection()
+        try:
+            existente = conn.execute(
+                "SELECT id FROM oradores WHERE nome = 'Danilo Reis'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert database.garantir_orador_fora_do_cadastro("Danilo Reis") == existente
+
+    def test_o_formulario_pede_o_nome_de_quem_sumiu(self):
+        import main
+
+        registro, _ = self._registro_com_id_orfao()
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+        campo, nome = self._campos(dialogos[0])
+        assert campo.value == main.CHAVE_ORADOR_FORA
+        assert nome.visible, "o campo do nome precisa estar à vista"
+
+    def test_digitar_o_nome_devolve_ele_ao_registro(self):
+        import main
+
+        registro, arranjo = self._registro_com_id_orfao()
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+        _, nome = self._campos(dialogos[0])
+        nome.value = "Givanildo Gois"
+        salvar = next(
+            c for c in _todos_os_controles(dialogos[0])
+            if isinstance(c, flet.FilledButton) and c.content == "Salvar"
+        )
+        salvar.on_click(None)
+
+        atualizado = database.carregar_oradores_arranjo(arranjo)[0]
+        assert nome_oradores(atualizado) == "Eduardo Nunes/Givanildo Gois"
+
+    def test_ele_nao_volta_para_as_listas(self):
+        import main
+
+        registro, arranjo = self._registro_com_id_orfao()
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+        _, nome = self._campos(dialogos[0])
+        nome.value = "Givanildo Gois"
+        next(
+            c for c in _todos_os_controles(dialogos[0])
+            if isinstance(c, flet.FilledButton) and c.content == "Salvar"
+        ).on_click(None)
+
+        textos = [o.text or "" for o in main.carregar_oradores_com_congregacao_opcoes()]
+        assert not any("Givanildo" in t for t in textos)

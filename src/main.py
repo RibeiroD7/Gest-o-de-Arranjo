@@ -89,6 +89,7 @@ from database import (
     excluir_tipo_evento,
     exportar_backup,
     garantir_configuracao_inicial,
+    garantir_orador_fora_do_cadastro,
     get_connection,
     historico_discursos_do_orador,
     historico_presidencias_da_pessoa,
@@ -5605,28 +5606,56 @@ def abrir_dialog_editar_orador_arranjo(
     # congregação, como o primeiro; ao receber, vem de qualquer uma.
     eh_recebido = tipo == "recebido"
     id_minha = obter_id_minha_congregacao()
+    # O id está gravado, mas o cadastro sumiu: versões antigas apagavam de
+    # vez quem só aparecia como segunda metade de um simpósio. O nome dele
+    # volta digitado, e o cadastro é recriado arquivado.
+    segundo_sumiu = bool(registro.get("orador_2_id")) and not (
+        registro.get("orador_2_nome") or ""
+    ).strip()
     campo_orador_2 = ft.Dropdown(
         label="Segundo orador (simpósio)",
-        options=carregar_oradores_com_congregacao_opcoes(
-            None if eh_recebido or not id_minha else int(id_minha),
-            # Quem discursou aqui e depois saiu da congregação continua nesta
-            # linha: a lista precisa trazê-lo, senão o campo abre vazio.
-            incluir_ids=[registro.get("orador_2_id")],
+        options=[
+            *carregar_oradores_com_congregacao_opcoes(
+                None if eh_recebido or not id_minha else int(id_minha),
+                # Quem discursou aqui e depois saiu da congregação continua
+                # nesta linha: a lista precisa trazê-lo, senão o campo abre
+                # vazio.
+                incluir_ids=[registro.get("orador_2_id")],
+            ),
+            ft.dropdown.Option(key=CHAVE_ORADOR_FORA, text="Outro (fora do cadastro)…"),
+        ],
+        value=(
+            CHAVE_ORADOR_FORA if segundo_sumiu
+            else (str(registro["orador_2_id"]) if registro.get("orador_2_id") else None)
         ),
-        value=str(registro["orador_2_id"]) if registro.get("orador_2_id") else None,
         expand=True,
         visible=bool(registro.get("orador_2_id")),
+    )
+    campo_orador_2_nome = ft.TextField(
+        label="Nome do segundo orador",
+        hint_text="Quem discursou junto e não está mais no cadastro",
+        expand=True,
+        visible=segundo_sumiu,
     )
     campo_simposio = ft.Checkbox(
         label="Simpósio (dois oradores no mesmo discurso)",
         value=bool(registro.get("orador_2_id")),
     )
 
+    def alternar_nome_fora(_=None):
+        campo_orador_2_nome.visible = (
+            campo_orador_2.visible and campo_orador_2.value == CHAVE_ORADOR_FORA
+        )
+        page.update()
+
+    campo_orador_2.on_select = alternar_nome_fora
+
     def alternar_simposio(_=None):
         campo_orador_2.visible = bool(campo_simposio.value)
         if not campo_simposio.value:
             campo_orador_2.value = None
-        page.update()
+            campo_orador_2_nome.value = ""
+        alternar_nome_fora()
 
     campo_simposio.on_change = alternar_simposio
     texto_erro = ft.Text("", color=ft.Colors.ERROR, size=fonte(13), visible=False)
@@ -5653,7 +5682,22 @@ def abrir_dialog_editar_orador_arranjo(
                     texto_erro.visible = True
                     page.update()
                     return
-                orador_2_id = int(campo_orador_2.value)
+                if campo_orador_2.value == CHAVE_ORADOR_FORA:
+                    nome_fora = (campo_orador_2_nome.value or "").strip()
+                    if not nome_fora:
+                        texto_erro.value = "Informe o nome do segundo orador."
+                        texto_erro.visible = True
+                        page.update()
+                        return
+                    # De quem ele era: ao receber, a congregação de origem do
+                    # registro; ao enviar, a minha (o orador é daqui).
+                    de_onde = (
+                        congregacao_id if eh_recebido and congregacao_id
+                        else (int(id_minha) if id_minha else None)
+                    )
+                    orador_2_id = garantir_orador_fora_do_cadastro(nome_fora, de_onde)
+                else:
+                    orador_2_id = int(campo_orador_2.value)
                 if orador_2_id == registro.get("orador_id"):
                     texto_erro.value = "O simpósio precisa de dois oradores diferentes."
                     texto_erro.visible = True
@@ -5683,6 +5727,7 @@ def abrir_dialog_editar_orador_arranjo(
                         campo_congregacao,
                         campo_simposio,
                         campo_orador_2,
+                        campo_orador_2_nome,
                         texto_erro,
                     ],
                     spacing=12,
@@ -6524,6 +6569,8 @@ def abrir_dialog_selecao_exportacao_png(
 
 # Chaves internas do seletor de presidente (não são IDs de cadastro).
 CHAVE_PRESIDENTE_AVULSO = "__avulso__"
+# Segundo orador do simpósio que não está (mais) no cadastro: entra pelo nome.
+CHAVE_ORADOR_FORA = "__orador_fora__"
 CHAVE_PRESIDENTE_AVULSO_ATUAL = "__avulso_atual__"
 
 

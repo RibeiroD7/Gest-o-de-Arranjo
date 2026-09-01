@@ -987,6 +987,45 @@ def contar_convites_sem_resposta(ano: int, dias: int, hoje: date | None = None) 
         conn.close()
 
 
+def garantir_orador_fora_do_cadastro(
+    nome: str, congregacao_id: int | None = None
+) -> int:
+    """Acha (ou recria) o cadastro de um orador que não está mais na escala.
+
+    É o caminho de quem discursou e depois saiu da congregação: o nome
+    precisa voltar ao registro daquele discurso. Nasce arquivado, então não
+    aparece nas listas nem nas filas — só no que ele já fez. Se já houver
+    alguém com esse nome, usa o cadastro existente em vez de duplicar.
+
+    A categoria fica vazia de propósito: não dá para adivinhar, e o campo só
+    é usado nas telas de quem está na escala.
+    """
+    nome = (nome or "").strip()
+    if not nome:
+        raise ValueError("nome vazio")
+    conn = get_connection()
+    try:
+        linha = conn.execute(
+            """
+            SELECT id FROM oradores
+            WHERE nome = ?
+            ORDER BY (congregacao_id IS ?) DESC, COALESCE(ativo, 1) DESC, id
+            LIMIT 1
+            """,
+            (nome, congregacao_id),
+        ).fetchone()
+        if linha:
+            return int(linha[0])
+        cursor = conn.execute(
+            "INSERT INTO oradores (nome, congregacao_id, ativo) VALUES (?, ?, 0)",
+            (nome, congregacao_id),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
 def carregar_oradores_arranjo(arranjo_id: int) -> list[dict]:
     """Lista oradores vinculados a um arranjo (recebidos ou enviados)."""
     conn = get_connection()
