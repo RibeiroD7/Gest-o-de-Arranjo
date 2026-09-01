@@ -1281,6 +1281,33 @@ def atualizar_data_designacao(registro_id: int, data: str | None) -> None:
         conn.close()
 
 
+def redistribuir_datas_designacoes(pares: list[tuple[int, str]]) -> None:
+    """Regrava de uma vez a data de várias designações.
+
+    Passa todas por NULL antes de gravar: com o mesmo orador em duas datas do
+    mês, uma troca esbarraria no índice único (arranjo, tipo, orador, data) no
+    meio do caminho, mesmo que o resultado final seja válido.
+    """
+    if not pares:
+        return
+    conn = get_connection()
+    try:
+        ids = [int(registro_id) for registro_id, _ in pares]
+        marcadores = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE arranjo_oradores SET data = NULL WHERE id IN ({marcadores})",  # noqa: S608
+            ids,
+        )
+        for registro_id, data in pares:
+            conn.execute(
+                "UPDATE arranjo_oradores SET data = ? WHERE id = ?",
+                (data, int(registro_id)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 STATUS_DESIGNACAO = ("pendente", "confirmado", "recusado")
 
 

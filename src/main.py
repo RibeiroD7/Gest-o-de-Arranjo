@@ -104,6 +104,7 @@ from database import (
     oradores_com_temas_da_congregacao,
     presidente_tem_historico,
     realocar_uso_para_ano_da_data,
+    redistribuir_datas_designacoes,
     registrar_convite_enviado,
     relatorio_frequencia_oradores,
     relatorio_presidencias,
@@ -5334,6 +5335,57 @@ def _criar_rodape_dialog_mes(
     )
 
 
+def _ordem_apos_arrastar(total: int, origem: int, destino: int) -> list[int]:
+    """Índices originais na ordem em que ficaram depois de arrastar um item.
+
+    O ``on_reorder`` do Flet entrega o destino já contando a saída do item
+    (é o índice para inserir DEPOIS de tirar), como no exemplo da própria
+    biblioteca: por isso o remove/insere aqui é direto.
+    """
+    indices = list(range(total))
+    if not 0 <= origem < total:
+        return indices
+    indices.insert(max(0, min(destino, total - 1)), indices.pop(origem))
+    return indices
+
+
+def _altura_linha_orador_mes(registro: dict) -> int:
+    """Altura estimada de uma linha da tabela do mês.
+
+    A lista arrastável precisa de uma altura fechada, e a linha cresce quando
+    o nome ou o tema quebram em duas (é o caso de "Tevaldo Antônio da Costa").
+    Chutar por baixo faria a lista rolar por dentro; por cima, abriria um vão
+    depois da última linha.
+    """
+    por_caractere = max(6.0, fonte(13) * 0.55)
+    nome = nome_oradores(registro)
+    tema = _rotulo_tema_orador_arranjo(registro)
+    largura_tema = _tema.LARGURA_COL_TEMA_MES if eh_mobile() else 340
+    duas_linhas = (
+        len(nome) * por_caractere > _tema.LARGURA_COL_ORADOR_MES
+        or len(tema) * por_caractere > largura_tema
+    )
+    return fonte(20) * (2 if duas_linhas else 1) + 22
+
+
+def _lista_arrastavel(
+    linhas: list[ft.Control],
+    altura: int,
+    ao_reordenar: Callable,
+) -> ft.Control:
+    """Lista que se reordena arrastando, com altura fechada.
+
+    A altura precisa ser finita porque a lista mora dentro de um diálogo que
+    já rola. Arrastar é do próprio Flutter: no computador começa ao puxar a
+    linha, no celular ao segurar e puxar — e a rolagem continua funcionando.
+    """
+    return ft.ReorderableListView(
+        controls=linhas,
+        on_reorder=ao_reordenar,
+        height=altura,
+    )
+
+
 def _montar_tabela_secao(
     registros: list[dict],
     mensagem_vazia: str,
@@ -5342,8 +5394,14 @@ def _montar_tabela_secao(
     on_whatsapp: Callable[[dict], None] | None = None,
     on_status: Callable[[int, str], None] | None = None,
     on_mover: Callable[[dict], None] | None = None,
+    on_reordenar: Callable[[list[int]], None] | None = None,
 ) -> list[ft.Control]:
-    """Monta tabela simples com cabeçalho e linhas."""
+    """Monta tabela simples com cabeçalho e linhas.
+
+    Com ``on_reordenar``, as linhas podem ser arrastadas: as datas ficam
+    paradas e quem anda entre elas são os oradores. Só vale quando todos já
+    têm data — sem data não há o que trocar.
+    """
     if not registros:
         return [
             ft.Text(
@@ -5366,9 +5424,23 @@ def _montar_tabela_secao(
         )
         for indice, item in enumerate(registros)
     ]
+    todos_com_data = all((item.get("data") or "").strip() for item in registros)
+    if on_reordenar and todos_com_data and len(registros) > 1:
+        def ao_reordenar(e):
+            ordem = _ordem_apos_arrastar(len(registros), e.old_index, e.new_index)
+            on_reordenar([int(registros[i]["id"]) for i in ordem])
+
+        corpo: ft.Control = _lista_arrastavel(
+            linhas,
+            sum(_altura_linha_orador_mes(item) for item in registros),
+            ao_reordenar,
+        )
+    else:
+        corpo = ft.Column(linhas, spacing=0, tight=True)
+
     tabela = ft.Container(
         content=ft.Column(
-            [_criar_cabecalho_tabela_oradores(), *linhas],
+            [_criar_cabecalho_tabela_oradores(), corpo],
             spacing=0,
             tight=True,
         ),
@@ -5381,6 +5453,41 @@ def _montar_tabela_secao(
         # para o texto não ser espremido.
         return [ft.Row([tabela], scroll=ft.ScrollMode.AUTO, tight=True)]
     return [tabela]
+
+
+def aplicar_ordem_designacoes(registros: list[dict], ids_em_ordem: list[int]) -> None:
+    """Redistribui as datas do mês entre as designações, na ordem pedida.
+
+    As datas do mês não mudam — o que muda é quem fica em cada uma. É o que
+    arrastar uma linha quer dizer: este orador passa para esta semana, e os
+    outros correm uma casa.
+    """
+    por_id = {int(item["id"]): item for item in registros}
+    datas = sorted(
+        (item["data"] for item in registros if (item.get("data") or "").strip()),
+        key=lambda d: (d[6:10], d[3:5], d[0:2]),
+    )
+    pares = [
+        (registro_id, data)
+        for registro_id, data in zip(ids_em_ordem, datas)
+        if registro_id in por_id and (por_id[registro_id].get("data") or "") != data
+    ]
+    redistribuir_datas_designacoes(pares)
+
+
+def aplicar_ordem_presidentes(datas: list[str], pessoas: list[dict | None]) -> None:
+    """Grava quem preside cada data, na ordem dada.
+
+    ``pessoas[i]`` passa a valer em ``datas[i]``: do cadastro (com
+    ``presidente_id``), avulso (só ``nome``) ou ninguém (``None``).
+    """
+    for data, pessoa in zip(datas, pessoas):
+        if not pessoa:
+            excluir_presidente(data)
+        elif pessoa.get("presidente_id"):
+            salvar_presidente(data, int(pessoa["presidente_id"]))
+        else:
+            salvar_presidente_avulso(data, pessoa.get("nome") or "")
 
 
 def abrir_dialog_editar_orador_arranjo(
@@ -7737,6 +7844,18 @@ def abrir_dialog_oradores_mes(
     def mover_data(item: dict):
         abrir_dialog_trocar_data(page, item, arranjo, arranjo_id, atualizar_listas)
 
+    def reordenar(registros: list[dict]):
+        """Arrastou uma linha: as datas ficam, os oradores é que andam."""
+        def aplicar(ids_em_ordem: list[int]):
+            try:
+                aplicar_ordem_designacoes(registros, ids_em_ordem)
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao reordenar as designações")
+                mostrar_aviso(page, "Erro", "Não foi possível mudar a ordem.")
+            atualizar_listas()
+
+        return aplicar
+
     def preencher_listas():
         registros = carregar_oradores_arranjo(arranjo_id)
         recebidos = [r for r in registros if r["tipo"] == "recebido"]
@@ -7750,6 +7869,7 @@ def abrir_dialog_oradores_mes(
             on_whatsapp=whatsapp_recebido,
             on_status=alterar_status,
             on_mover=mover_data,
+            on_reordenar=reordenar(recebidos),
         )
         lista_enviados.controls = _montar_tabela_secao(
             enviados,
@@ -7759,6 +7879,7 @@ def abrir_dialog_oradores_mes(
             on_whatsapp=whatsapp_designacao,
             on_status=alterar_status,
             on_mover=mover_data,
+            on_reordenar=reordenar(enviados),
         )
         preencher_presidentes()
         preencher_especiais()
@@ -7941,6 +8062,12 @@ def abrir_dialog_oradores_mes(
             ft.dropdown.Option(key=CHAVE_PRESIDENTE_AVULSO, text="✏️  Digitar outro nome…")
         )
         linhas: list[ft.Control] = []
+        # Semanas comuns: são as que podem trocar de presidente entre si. A
+        # data especial fica onde está — quem preside ali sai da fila do tipo
+        # do evento, não do rodízio da semana.
+        datas_normais: list[str] = []
+        pessoas_normais: list[dict | None] = []
+        indices_normais: list[int] = []
         for data_ref in datas:
             data_str = _formatar_data_arranjo(data_ref)
             atual = presidentes.get(data_str)
@@ -7957,6 +8084,9 @@ def abrir_dialog_oradores_mes(
                     )
                 )
                 continue
+            datas_normais.append(data_str)
+            pessoas_normais.append(dict(atual) if atual else None)
+            indices_normais.append(len(linhas))
             eh_avulso = bool(atual and atual.get("avulso"))
             nome_avulso = atual["nome"] if eh_avulso else ""
             opcoes_data = opcoes
@@ -8047,7 +8177,30 @@ def abrir_dialog_oradores_mes(
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     )
                 )
-        lista_presidentes.controls = linhas
+        def ao_arrastar(e):
+            """Quem preside anda entre as semanas comuns; as datas ficam."""
+            if e.old_index not in indices_normais:
+                atualizar_listas()
+                return
+            ordem = _ordem_apos_arrastar(len(linhas), e.old_index, e.new_index)
+            por_indice = dict(zip(indices_normais, pessoas_normais))
+            try:
+                aplicar_ordem_presidentes(
+                    datas_normais,
+                    [por_indice[i] for i in ordem if i in por_indice],
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Falha ao reordenar os presidentes do mês")
+                mostrar_aviso(page, "Erro", "Não foi possível mudar a ordem.")
+            atualizar_listas()
+
+        if len(datas_normais) > 1:
+            altura_linha = fonte(112) if eh_mobile() else fonte(74)
+            lista_presidentes.controls = [
+                _lista_arrastavel(linhas, altura_linha * len(linhas), ao_arrastar)
+            ]
+        else:
+            lista_presidentes.controls = linhas
 
     def atualizar_listas():
         preencher_listas()
@@ -11944,105 +12097,6 @@ def _lista_presidentes(
     )
 
 
-def abrir_dialog_reordenar_presidentes(
-    page: ft.Page,
-    cadastro: list[dict],
-    ao_concluir: Callable[[], None],
-) -> None:
-    """Arrastar para mudar a ordem do rodízio.
-
-    As setas da lista movem uma casa por clique: tirar alguém do fim do
-    cadastro e pôr em segundo eram catorze cliques, cada um recarregando a
-    tela. Aqui a lista inteira fica à vista e cada solta já grava.
-    """
-    ordem = [dict(item) for item in cadastro]
-    lista = ft.ReorderableListView(controls=[], expand=True)
-
-    def linha(indice: int, item: dict) -> ft.Control:
-        eh_anciao = item["categoria"] == "Ancião"
-        return ft.Container(
-            content=ft.Row(
-                [
-                    ft.Text(
-                        f"{indice + 1}", size=fonte(12), width=fonte(24),
-                        weight=ft.FontWeight.W_700, color=TEXTO_SECUNDARIO,
-                    ),
-                    ft.Text(
-                        item["nome"], size=fonte(14), expand=True,
-                        color=TEXTO_PRIMARIO, max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                    ft.Text(
-                        "Ancião" if eh_anciao else "Servo",
-                        size=fonte(11),
-                        color=COR_DESTAQUE_SUAVE if eh_anciao else COR_AVISO,
-                        no_wrap=True,
-                    ),
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-            border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
-        )
-
-    def montar():
-        lista.controls = [linha(i, item) for i, item in enumerate(ordem)]
-
-    def ao_reordenar(e):
-        movido = ordem.pop(e.old_index)
-        ordem.insert(e.new_index, movido)
-        try:
-            salvar_ordem_presidentes([item["id"] for item in ordem])
-        except Exception:  # noqa: BLE001
-            logger.exception("Falha ao salvar a ordem do rodízio")
-            mostrar_aviso(page, "Erro", "Não foi possível salvar a nova ordem.")
-        montar()
-        page.update()
-
-    lista.on_reorder = ao_reordenar
-    montar()
-
-    def fechar(_=None):
-        page.pop_dialog()
-        ao_concluir()
-
-    page.show_dialog(
-        ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Ordem do rodízio"),
-            content=ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Text(
-                            "Arraste para mudar a ordem — no celular, segure e "
-                            "arraste. É a sequência que o rodízio segue nas "
-                            "semanas, e cada mudança já fica salva.",
-                            size=fonte(12), color=TEXTO_SECUNDARIO,
-                        ),
-                        ft.Container(height=8),
-                        ft.Container(
-                            content=lista,
-                            expand=True,
-                            border=ft.Border.all(1, BORDA_SUAVE),
-                            border_radius=12,
-                            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                        ),
-                    ],
-                    spacing=0,
-                    expand=True,
-                    width=_largura_dialog(page, 460),
-                ),
-                height=_altura_dialog_lista(page),
-                padding=ft.Padding.only(top=4),
-            ),
-            actions=[ft.TextButton("Fechar", on_click=fechar)],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-    )
-    page.update()
-
-
 def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Control:
     """Lista dos presidentes com a ordem do rodízio; edição em diálogo."""
     cadastro = listar_presidentes_cadastro()
@@ -12275,12 +12329,6 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
     botao_adicionar = ft.FilledButton(
         "Adicionar", icon=ft.Icons.PERSON_ADD_ALT, on_click=adicionar
     )
-    botao_reordenar = ft.OutlinedButton(
-        content="Reordenar",
-        icon=ft.Icons.SWAP_VERT,
-        tooltip="Arrastar para mudar a ordem do rodízio",
-        on_click=lambda _: abrir_dialog_reordenar_presidentes(page, cadastro, ao_mudar),
-    )
 
     def exportar_relatorio(_=None):
         from relatorios import secoes_presidentes
@@ -12304,10 +12352,7 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         tight=True,
         expand=True,
     )
-    botoes = [botao_relatorio_tela(exportar_relatorio)]
-    if len(cadastro) > 1:
-        botoes.append(botao_reordenar)
-    botoes.append(botao_adicionar)
+    botoes = [botao_relatorio_tela(exportar_relatorio), botao_adicionar]
     if eh_mobile():
         # `wrap=True` numa Row com filho `expand=True` não resolve a largura no
         # Flet e a seção inteira vira um retângulo vazio: no celular, empilha.

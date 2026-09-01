@@ -129,74 +129,195 @@ class TestAprovadoParaDiscursarFora:
         assert self._caixa(self._dialog(congs["Vila Andrade"])).visible
 
 
-class TestOrdemDoRodizio:
-    def _cadastro(self):
-        for nome in ("Primeiro", "Segundo", "Terceiro"):
-            database.salvar_presidente_cadastro(nome, "Ancião")
-        return database.listar_presidentes_cadastro()
+class TestArrastarNoMes:
+    """Arrastar uma linha do mês: as datas ficam paradas, as pessoas andam."""
 
-    def _dialog(self, cadastro):
-        page = _page()
-        capturado = {}
-        page.show_dialog = lambda dialog: capturado.setdefault("dialog", dialog)
-        main.abrir_dialog_reordenar_presidentes(page, cadastro, lambda: None)
-        return capturado["dialog"]
+    def _arranjo_com_oradores(self, datas=("07/11/2026", "14/11/2026", "21/11/2026")):
+        conn = database.get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Alfa')")
+            cong = conn.execute("SELECT id FROM congregacoes WHERE nome = 'Alfa'").fetchone()[0]
+            for nome in ("Um", "Dois", "Três"):
+                conn.execute(
+                    "INSERT INTO oradores (nome, categoria, congregacao_id) "
+                    "VALUES (?, 'Ancião', ?)",
+                    (nome, cong),
+                )
+            conn.execute(
+                "INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026, 11, 11)"
+            )
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            ids = {nome: oid for oid, nome in conn.execute("SELECT id, nome FROM oradores")}
+            for nome, data in zip(("Um", "Dois", "Três"), datas):
+                conn.execute(
+                    "INSERT INTO arranjo_oradores (arranjo_id, tipo, orador_id, data) "
+                    "VALUES (?, 'recebido', ?, ?)",
+                    (arranjo, ids[nome], data),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return arranjo
 
-    def _lista(self, dialog):
-        return next(
-            c for c in _controles(dialog) if isinstance(c, flet.ReorderableListView)
+    def _por_data(self, arranjo_id):
+        return {
+            r["data"]: r["orador_nome"]
+            for r in database.carregar_oradores_arranjo(arranjo_id)
+        }
+
+    def test_a_conta_de_para_onde_cada_um_vai(self):
+        assert main._ordem_apos_arrastar(4, 3, 0) == [3, 0, 1, 2]
+        assert main._ordem_apos_arrastar(4, 0, 3) == [1, 2, 3, 0]
+        assert main._ordem_apos_arrastar(4, 1, 2) == [0, 2, 1, 3]
+
+    def test_indice_fora_da_lista_nao_bagunca(self):
+        assert main._ordem_apos_arrastar(3, 9, 0) == [0, 1, 2]
+        assert main._ordem_apos_arrastar(3, 0, 9) == [1, 2, 0]
+
+    def test_o_ultimo_arrastado_para_cima_assume_a_primeira_data(self):
+        arranjo = self._arranjo_com_oradores()
+        registros = database.carregar_oradores_arranjo(arranjo)
+        ordem = main._ordem_apos_arrastar(3, 2, 0)
+
+        main.aplicar_ordem_designacoes(
+            registros, [int(registros[i]["id"]) for i in ordem]
         )
 
-    def _nomes(self):
-        return [item["nome"] for item in database.listar_presidentes_cadastro()]
+        assert self._por_data(arranjo) == {
+            "07/11/2026": "Três", "14/11/2026": "Um", "21/11/2026": "Dois",
+        }
 
-    def test_a_lista_abre_na_ordem_do_rodizio(self):
-        cadastro = self._cadastro()
-        textos = [
-            c.value for c in _controles(self._lista(self._dialog(cadastro)))
-            if isinstance(c, flet.Text)
-        ]
-        assert [t for t in textos if t in ("Primeiro", "Segundo", "Terceiro")] == [
-            "Primeiro", "Segundo", "Terceiro"
+    def test_as_datas_do_mes_continuam_as_mesmas(self):
+        arranjo = self._arranjo_com_oradores()
+        registros = database.carregar_oradores_arranjo(arranjo)
+        ordem = main._ordem_apos_arrastar(3, 0, 2)
+
+        main.aplicar_ordem_designacoes(
+            registros, [int(registros[i]["id"]) for i in ordem]
+        )
+
+        assert sorted(self._por_data(arranjo)) == [
+            "07/11/2026", "14/11/2026", "21/11/2026"
         ]
 
-    def test_arrastar_para_cima_grava_na_hora(self):
-        cadastro = self._cadastro()
-        lista = self._lista(self._dialog(cadastro))
+    def test_o_mesmo_orador_em_duas_datas_nao_quebra_a_troca(self):
+        """O índice único (arranjo, tipo, orador, data) barrava o meio do caminho."""
+        arranjo = self._arranjo_com_oradores()
+        conn = database.get_connection()
+        try:
+            um = conn.execute("SELECT id FROM oradores WHERE nome = 'Um'").fetchone()[0]
+            conn.execute(
+                "UPDATE arranjo_oradores SET orador_id = ? WHERE data = '21/11/2026'",
+                (um,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        registros = database.carregar_oradores_arranjo(arranjo)
+        ordem = main._ordem_apos_arrastar(3, 2, 0)
+
+        main.aplicar_ordem_designacoes(
+            registros, [int(registros[i]["id"]) for i in ordem]
+        )
+
+        assert sorted(self._por_data(arranjo)) == [
+            "07/11/2026", "14/11/2026", "21/11/2026"
+        ]
+
+    def test_a_tabela_do_mes_vira_lista_arrastavel(self):
+        arranjo = self._arranjo_com_oradores()
+        registros = database.carregar_oradores_arranjo(arranjo)
+        controles = main._montar_tabela_secao(
+            registros, "vazio", lambda i: None, lambda i: None,
+            on_reordenar=lambda ids: None,
+        )
+        assert any(
+            isinstance(c, flet.ReorderableListView)
+            for c in _controles(controles[0])
+        )
+
+    def test_sem_data_a_tabela_fica_como_era(self):
+        """Sem data não há o que trocar: arrastar não faria sentido."""
+        arranjo = self._arranjo_com_oradores(datas=("07/11/2026", "14/11/2026", None))
+        registros = database.carregar_oradores_arranjo(arranjo)
+        controles = main._montar_tabela_secao(
+            registros, "vazio", lambda i: None, lambda i: None,
+            on_reordenar=lambda ids: None,
+        )
+        assert not any(
+            isinstance(c, flet.ReorderableListView)
+            for c in _controles(controles[0])
+        )
+
+    def test_arrastar_na_tabela_avisa_a_nova_ordem(self):
+        arranjo = self._arranjo_com_oradores()
+        registros = database.carregar_oradores_arranjo(arranjo)
+        recebido = {}
+        controles = main._montar_tabela_secao(
+            registros, "vazio", lambda i: None, lambda i: None,
+            on_reordenar=lambda ids: recebido.setdefault("ids", ids),
+        )
+        lista = next(
+            c for c in _controles(controles[0])
+            if isinstance(c, flet.ReorderableListView)
+        )
 
         lista.on_reorder(types.SimpleNamespace(old_index=2, new_index=0))
 
-        assert self._nomes() == ["Terceiro", "Primeiro", "Segundo"]
+        esperado = [int(registros[i]["id"]) for i in (2, 0, 1)]
+        assert recebido["ids"] == esperado
 
-    def test_arrastar_para_baixo_grava_na_hora(self):
-        cadastro = self._cadastro()
-        lista = self._lista(self._dialog(cadastro))
 
-        lista.on_reorder(types.SimpleNamespace(old_index=0, new_index=2))
+class TestOrdemDosPresidentesDoMes:
+    def test_cada_um_assume_a_data_da_vez(self):
+        primeiro = database.salvar_presidente_cadastro("Primeiro", "Ancião")
+        segundo = database.salvar_presidente_cadastro("Segundo", "Ancião")
+        datas = ["07/11/2026", "14/11/2026"]
+        database.salvar_presidente(datas[0], primeiro)
+        database.salvar_presidente(datas[1], segundo)
 
-        assert self._nomes() == ["Segundo", "Terceiro", "Primeiro"]
+        main.aplicar_ordem_presidentes(
+            datas, [{"presidente_id": segundo}, {"presidente_id": primeiro}]
+        )
 
-    def test_a_numeracao_acompanha(self):
-        cadastro = self._cadastro()
-        lista = self._lista(self._dialog(cadastro))
-        lista.on_reorder(types.SimpleNamespace(old_index=2, new_index=0))
+        por_data = database.carregar_presidentes_por_ano(2026)
+        assert por_data[datas[0]]["nome"] == "Segundo"
+        assert por_data[datas[1]]["nome"] == "Primeiro"
 
-        primeira_linha = lista.controls[0]
-        textos = [c.value for c in _controles(primeira_linha) if isinstance(c, flet.Text)]
-        assert textos[0] == "1" and "Terceiro" in textos
+    def test_o_nome_avulso_anda_junto(self):
+        """Quem presidiu sem estar no cadastro não pode virar cadastro na troca."""
+        cadastrado = database.salvar_presidente_cadastro("Cadastrado", "Ancião")
+        datas = ["07/11/2026", "14/11/2026"]
+        database.salvar_presidente(datas[0], cadastrado)
+        database.salvar_presidente_avulso(datas[1], "Visitante")
 
-    def test_o_botao_aparece_quando_ha_quem_reordenar(self):
-        self._cadastro()
-        rotulos = [
-            c.content for c in _controles(main._secao_presidentes(_page(), lambda: None))
-            if isinstance(c, flet.OutlinedButton)
-        ]
-        assert "Reordenar" in rotulos
+        main.aplicar_ordem_presidentes(
+            datas,
+            [{"nome": "Visitante", "avulso": True}, {"presidente_id": cadastrado}],
+        )
 
-    def test_com_um_presidente_so_nao_ha_o_que_reordenar(self):
-        database.salvar_presidente_cadastro("Único", "Ancião")
-        rotulos = [
-            c.content for c in _controles(main._secao_presidentes(_page(), lambda: None))
-            if isinstance(c, flet.OutlinedButton)
-        ]
-        assert "Reordenar" not in rotulos
+        por_data = database.carregar_presidentes_por_ano(2026)
+        assert por_data[datas[0]]["nome"] == "Visitante"
+        assert por_data[datas[0]]["avulso"] is True
+        assert por_data[datas[1]]["nome"] == "Cadastrado"
+
+    def test_semana_que_ficou_sem_ninguem_fica_vazia(self):
+        cadastrado = database.salvar_presidente_cadastro("Cadastrado", "Ancião")
+        datas = ["07/11/2026", "14/11/2026"]
+        database.salvar_presidente(datas[0], cadastrado)
+
+        main.aplicar_ordem_presidentes(datas, [None, {"presidente_id": cadastrado}])
+
+        por_data = database.carregar_presidentes_por_ano(2026)
+        assert datas[0] not in por_data
+        assert por_data[datas[1]]["nome"] == "Cadastrado"
+
+    def test_a_altura_da_linha_conta_o_nome_que_quebra(self):
+        """A lista arrastável precisa de altura fechada; o chute é por linha."""
+        curta = main._altura_linha_orador_mes(
+            {"orador_nome": "Carlos Soares", "tema_titulo": "46 - Fortaleça sua confiança"}
+        )
+        comprida = main._altura_linha_orador_mes(
+            {"orador_nome": "Tevaldo Antônio da Costa", "tema_titulo": "191 - Como o amor vence"}
+        )
+        assert comprida > curta
