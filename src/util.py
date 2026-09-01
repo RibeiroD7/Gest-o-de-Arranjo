@@ -193,11 +193,22 @@ def formatar_data_hora_local(iso: str | None) -> str:
     ``datetime.now()`` grava; lá significa UTC, que é o que o Drive devolve.
     Trocar um pelo outro tira três horas do relógio, e foi o que aconteceu com
     o "último envio" da tela de Ajustes.
+
+    Sem fuso o carimbo JÁ ESTÁ no relógio do aparelho, então sai como está —
+    converter para São Paulo mudaria a hora de quem não vive nesse fuso
+    (Manaus é -04, Rio Branco -05). Com fuso explícito, aí sim converte: o
+    carimbo veio de outro relógio e precisa virar horário daqui.
     """
-    momento = _momento(iso)
-    if momento is None:
-        return (iso or "").strip() or "—"
-    return momento.astimezone(FUSO_SAO_PAULO).strftime("%d/%m/%Y %H:%M")
+    texto = (iso or "").strip()
+    if not texto:
+        return "—"
+    try:
+        momento = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except ValueError:
+        return texto
+    if momento.tzinfo is not None:
+        momento = momento.astimezone(FUSO_SAO_PAULO)
+    return momento.strftime("%d/%m/%Y %H:%M")
 
 
 def aviso_backup_antigo(
