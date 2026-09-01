@@ -5588,22 +5588,22 @@ def abrir_dialog_editar_orador_arranjo(
         enable_search=True,
     )
     # Simpósio: dá para transformar um discurso comum em simpósio (e voltar)
-    # sem apagar e recadastrar — o segundo orador vem da minha congregação.
+    # sem apagar e recadastrar. Ao ENVIAR, o segundo orador sai da minha
+    # congregação, como o primeiro; ao receber, vem de qualquer uma.
     eh_recebido = tipo == "recebido"
     id_minha = obter_id_minha_congregacao()
     campo_orador_2 = ft.Dropdown(
         label="Segundo orador (simpósio)",
         options=carregar_oradores_com_congregacao_opcoes(
-            int(id_minha) if id_minha else None
+            None if eh_recebido or not id_minha else int(id_minha)
         ),
         value=str(registro["orador_2_id"]) if registro.get("orador_2_id") else None,
         expand=True,
-        visible=eh_recebido and bool(registro.get("orador_2_id")),
+        visible=bool(registro.get("orador_2_id")),
     )
     campo_simposio = ft.Checkbox(
         label="Simpósio (dois oradores no mesmo discurso)",
         value=bool(registro.get("orador_2_id")),
-        visible=eh_recebido,
     )
 
     def alternar_simposio(_=None):
@@ -5631,7 +5631,7 @@ def abrir_dialog_editar_orador_arranjo(
                 int(campo_congregacao.value) if campo_congregacao.value else None
             )
             orador_2_id = None
-            if eh_recebido and campo_simposio.value:
+            if campo_simposio.value:
                 if not campo_orador_2.value:
                     texto_erro.value = "Selecione o segundo orador do simpósio."
                     texto_erro.visible = True
@@ -5771,20 +5771,19 @@ def abrir_seletor_oradores(
         expand=True,
         visible=False,
     )
-    # Simpósio: o mesmo discurso dividido entre dois oradores DA MINHA
-    # congregação. Só faz sentido em "Oradores recebidos" (quem discursa aqui).
+    # Simpósio: um discurso dividido entre dois oradores. Vale nos dois
+    # lados — dois daqui indo juntos a outra congregação, ou dois visitantes
+    # vindo. A lista do segundo é a mesma do primeiro: ao enviar, só os da
+    # minha congregação.
     campo_orador_2 = ft.Dropdown(
         label="Segundo orador (simpósio)",
-        options=carregar_oradores_com_congregacao_opcoes(
-            int(id_minha_congregacao) if id_minha_congregacao else None
-        ),
+        options=carregar_oradores_com_congregacao_opcoes(congregacao_filtro),
         expand=True,
         visible=False,
     )
     campo_simposio = ft.Checkbox(
         label="Simpósio (dois oradores no mesmo discurso)",
         value=False,
-        visible=eh_oradores,
     )
 
     def alternar_simposio(_=None):
@@ -6228,7 +6227,8 @@ def abrir_seletor_oradores(
                 orador_id = int(campo_orador.value)
 
             orador_2_id = None
-            if eh_oradores and campo_simposio.value:
+            # No modo "novo orador" o bloco do simpósio nem está na tela.
+            if estado["modo"] == "existente" and campo_simposio.value:
                 if not campo_orador_2.value:
                     texto_erro.value = "Selecione o segundo orador do simpósio."
                     texto_erro.visible = True

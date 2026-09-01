@@ -589,3 +589,71 @@ class TestTemasPreparados:
             conn.close()
         oid = database.salvar_orador("Sem Temas", "", "Ancião", cong, "", set())
         assert database.carregar_temas_com_titulo_de_orador(oid) == []
+
+
+class TestSimposioAoEnviar:
+    """Dois daqui indo juntos a outra congregação também é simpósio."""
+
+    def _dialog(self, tipo: str):
+        import main
+
+        arranjo, ids, cong = _preparar()
+        main.salvar_configuracao({
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        })
+        dialogos = []
+        main.abrir_seletor_oradores(
+            _page_falsa(dialogos), arranjo, tipo, lambda: None
+        )
+        return dialogos[0], ids
+
+    def _caixa_simposio(self, dialog):
+        return next(
+            c for c in _todos_os_controles(dialog)
+            if isinstance(c, flet.Checkbox) and "Simpósio" in (c.label or "")
+        )
+
+    def _campo_segundo(self, dialog):
+        return next(
+            c for c in _todos_os_controles(dialog)
+            if isinstance(c, flet.Dropdown) and "Segundo orador" in (c.label or "")
+        )
+
+    def test_a_opcao_aparece_ao_adicionar_designacao(self):
+        dialog, _ = self._dialog("enviado")
+        assert self._caixa_simposio(dialog).visible is not False
+
+    def test_a_opcao_continua_ao_adicionar_orador_recebido(self):
+        dialog, _ = self._dialog("recebido")
+        assert self._caixa_simposio(dialog).visible is not False
+
+    def test_o_segundo_orador_do_envio_e_da_minha_congregacao(self):
+        dialog, ids = self._dialog("enviado")
+        opcoes = {o.key for o in self._campo_segundo(dialog).options}
+        assert opcoes == {str(oid) for oid in ids.values()}
+
+    def test_marcar_a_caixa_mostra_o_campo(self):
+        dialog, _ = self._dialog("enviado")
+        caixa = self._caixa_simposio(dialog)
+        campo = self._campo_segundo(dialog)
+        assert not campo.visible
+        caixa.value = True
+        caixa.on_change(None)
+        assert campo.visible
+
+    def test_editar_uma_designacao_enviada_oferece_o_simposio(self):
+        import main
+
+        arranjo, ids, _ = _preparar()
+        database.adicionar_orador_arranjo(
+            arranjo, "enviado", ids["Eduardo Nunes"], 176, data="03/05/2026"
+        )
+        registro = database.carregar_oradores_arranjo(arranjo)[0]
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+
+        assert self._caixa_simposio(dialogos[0]).visible is not False
