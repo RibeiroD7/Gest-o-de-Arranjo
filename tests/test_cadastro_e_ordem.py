@@ -321,3 +321,87 @@ class TestOrdemDosPresidentesDoMes:
             {"orador_nome": "Tevaldo Antônio da Costa", "tema_titulo": "191 - Como o amor vence"}
         )
         assert comprida > curta
+
+
+class TestNoCelular:
+    """Duas telas que sumiram no celular por causa de medida sem limite."""
+
+    @pytest.fixture
+    def no_celular(self):
+        import armazenamento
+
+        armazenamento.definir_layout_mobile(True)
+        yield
+        armazenamento.definir_layout_mobile(False)
+
+    def _tabela_do_mes(self):
+        """A tabela de oradores de um mês com três datas."""
+        conn = database.get_connection()
+        try:
+            conn.execute("INSERT INTO congregacoes (nome) VALUES ('Alfa')")
+            cong = conn.execute("SELECT id FROM congregacoes").fetchone()[0]
+            for nome in ("Um", "Dois", "Três"):
+                conn.execute(
+                    "INSERT INTO oradores (nome, categoria, congregacao_id) "
+                    "VALUES (?, 'Ancião', ?)",
+                    (nome, cong),
+                )
+            conn.execute(
+                "INSERT INTO arranjos (ano, mes_inicio, mes_fim) VALUES (2026, 11, 11)"
+            )
+            arranjo = conn.execute("SELECT id FROM arranjos").fetchone()[0]
+            ids = {nome: oid for oid, nome in conn.execute("SELECT id, nome FROM oradores")}
+            for nome, data in zip(
+                ("Um", "Dois", "Três"), ("07/11/2026", "14/11/2026", "21/11/2026")
+            ):
+                conn.execute(
+                    "INSERT INTO arranjo_oradores (arranjo_id, tipo, orador_id, data) "
+                    "VALUES (?, 'recebido', ?, ?)",
+                    (arranjo, ids[nome], data),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return main._montar_tabela_secao(
+            database.carregar_oradores_arranjo(arranjo),
+            "vazio", lambda i: None, lambda i: None,
+            on_reordenar=lambda ids: None,
+        )
+
+    def _lista(self, controles):
+        return next(
+            (c for c in _controles(controles[0])
+             if isinstance(c, flet.ReorderableListView)),
+            None,
+        )
+
+    def test_a_lista_arrastavel_tem_largura_no_celular(self, no_celular):
+        """Dentro da tabela que rola de lado, sem largura ela não se desenha —
+        e a tabela inteira sumia da tela."""
+        lista = self._lista(self._tabela_do_mes())
+        assert lista is not None
+        assert lista.width and lista.width > 0
+
+    def test_no_computador_a_largura_vem_do_pai(self):
+        lista = self._lista(self._tabela_do_mes())
+        assert lista is not None
+        assert lista.width is None
+
+    def test_a_busca_da_programacao_nao_estica_na_vertical(self, no_celular):
+        """Solto na coluna, o campo com `expand` empurrava a lista de meses
+        para o fim da tela."""
+        tela = main.tela_programacao(_page(), lambda: None, None)
+
+        def pai_do_campo(no):
+            for filho in getattr(no, "controls", None) or []:
+                if isinstance(filho, flet.TextField) and "Buscar orador" in (
+                    filho.hint_text or ""
+                ):
+                    return no
+                achado = pai_do_campo(filho)
+                if achado is not None:
+                    return achado
+            return None
+
+        pai = pai_do_campo(tela)
+        assert isinstance(pai, flet.Row), "o campo precisa estar dentro de uma Row"

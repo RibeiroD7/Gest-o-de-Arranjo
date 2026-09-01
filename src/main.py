@@ -5269,10 +5269,7 @@ def _criar_linha_orador_arranjo(
                         ),
                     ],
                     spacing=0,
-                    width=_tema.LARGURA_COL_ACOES_MES
-                    + (34 if on_whatsapp else 0)
-                    + (34 if on_status else 0)
-                    + (34 if on_mover else 0),
+                    width=_largura_acoes_mes(on_whatsapp, on_status, on_mover),
                 ),
             ],
             spacing=ESPACO_COLUNAS_MES,
@@ -5369,6 +5366,35 @@ def _ordem_apos_arrastar(total: int, origem: int, destino: int) -> list[int]:
     return indices
 
 
+def _largura_acoes_mes(
+    on_whatsapp: object | None, on_status: object | None, on_mover: object | None
+) -> int:
+    """Largura da coluna de ações, que cresce com os botões que ela mostra."""
+    return (
+        _tema.LARGURA_COL_ACOES_MES
+        + (34 if on_whatsapp else 0)
+        + (34 if on_status else 0)
+        + (34 if on_mover else 0)
+    )
+
+
+def _largura_tabela_mes(com_alca: bool, largura_acoes: int) -> int:
+    """Largura total da linha da tabela do mês, somando coluna a coluna.
+
+    No celular as colunas têm largura fixa e a tabela rola na horizontal —
+    então dá para somar. É o que fecha a largura da lista arrastável.
+    """
+    colunas = [
+        _tema.LARGURA_COL_DATA_MES,
+        _tema.LARGURA_COL_ORADOR_MES,
+        _tema.LARGURA_COL_TEMA_MES,
+        largura_acoes,
+    ]
+    if com_alca:
+        colunas.insert(0, LARGURA_ALCA)
+    return sum(colunas) + ESPACO_COLUNAS_MES * (len(colunas) - 1) + 24
+
+
 def _altura_linha_orador_mes(registro: dict) -> int:
     """Altura estimada de uma linha da tabela do mês.
 
@@ -5433,12 +5459,17 @@ def _lista_arrastavel(
     linhas: list[ft.Control],
     altura: int,
     ao_reordenar: Callable,
+    largura: int | None = None,
 ) -> ft.Control:
     """Lista que se reordena arrastando, com altura fechada.
 
     A altura precisa ser finita porque a lista mora dentro de um diálogo que
     já rola. As alças automáticas ficam desligadas: cada linha traz a sua, no
     começo, para não cair em cima dos botões.
+
+    ``largura`` é obrigatória quando a lista fica dentro de algo que rola na
+    horizontal (a tabela do mês no celular): sem largura fechada dos dois
+    lados a lista não tem como se desenhar, e a tabela inteira some da tela.
     """
     return ft.ReorderableListView(
         controls=linhas,
@@ -5446,6 +5477,7 @@ def _lista_arrastavel(
         # A altura é a soma estimada das linhas: uma folga pequena sobra no
         # fim, e faltar esconderia uma semana dentro da lista.
         height=altura,
+        width=largura,
         show_default_drag_handles=False,
         key=f"arrastavel-{next(_CONTADOR_LISTAS)}",
     )
@@ -5507,6 +5539,14 @@ def _montar_tabela_secao(
             linhas,
             sum(_altura_linha_orador_mes(item) for item in registros),
             ao_reordenar,
+            # No celular a tabela mora dentro de uma Row que rola de lado.
+            largura=(
+                _largura_tabela_mes(
+                    True, _largura_acoes_mes(on_whatsapp, on_status, on_mover)
+                )
+                if eh_mobile()
+                else None
+            ),
         )
     else:
         corpo = ft.Column(linhas, spacing=0, tight=True)
@@ -9609,7 +9649,10 @@ def tela_programacao(
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.END,
             ),
-            *([ft.Container(height=12), campo_busca] if eh_mobile() else []),
+            # Dentro de uma Row o `expand` do campo vale na horizontal; solto
+            # na coluna, ele esticaria na vertical e empurraria a lista de
+            # meses para o fim da tela.
+            *([ft.Container(height=12), ft.Row([campo_busca])] if eh_mobile() else []),
             ft.Container(height=12),
             ft.Row(
                 [texto_contagem, caixa_todos_anos],
