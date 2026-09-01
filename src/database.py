@@ -1346,20 +1346,52 @@ def contar_designacoes_por_status(ano: int) -> dict[str, int]:
         conn.close()
 
 
-def ultima_data_discurso_por_orador() -> dict[int, str]:
-    """Última data (DD/MM/AAAA) em que cada orador foi enviado para discursar.
+def _id_minha_congregacao(conn) -> int | None:
+    """O id da congregação da casa, pelo nome gravado na configuração."""
+    linha = conn.execute(
+        """
+        SELECT c.id
+        FROM congregacoes c
+        JOIN configuracoes cfg ON cfg.id = 1
+        WHERE c.nome = cfg.nome_congregacao
+        """
+    ).fetchone()
+    return int(linha[0]) if linha else None
 
-    Considera os registros do tipo 'enviado' (oradores da minha congregação
-    mandados a outra). Usado para sugerir quem está há mais tempo sem discursar.
+
+# Um discurso conta para o orador em dois casos: ele foi ENVIADO a outra
+# congregação, ou é da casa e discursou aqui (o arranjo local entra na lista
+# de recebidos, com o orador daqui). O segundo nome do simpósio conta igual
+# ao primeiro: os dois fizeram o discurso.
+#
+# `:minha` é o id da congregação da casa; sem ela definida, nenhum recebido
+# entra (a comparação com NULL é falsa), que é o comportamento antigo.
+_DISCURSOS_FEITOS = """
+    SELECT ao.orador_id AS orador_id, ao.data AS data
+    FROM arranjo_oradores ao
+    JOIN oradores o ON o.id = ao.orador_id
+    WHERE ao.data IS NOT NULL AND ao.data <> ''
+      AND (ao.tipo = 'enviado' OR o.congregacao_id = :minha)
+    UNION ALL
+    SELECT ao.orador_2_id AS orador_id, ao.data AS data
+    FROM arranjo_oradores ao
+    JOIN oradores o ON o.id = ao.orador_2_id
+    WHERE ao.data IS NOT NULL AND ao.data <> ''
+      AND (ao.tipo = 'enviado' OR o.congregacao_id = :minha)
+"""
+
+
+def ultima_data_discurso_por_orador() -> dict[int, str]:
+    """Última data (DD/MM/AAAA) em que cada orador discursou.
+
+    Conta o que foi enviado a outra congregação e o que o orador da casa fez
+    aqui, sozinho ou em simpósio. É o que ordena a fila de quem está há mais
+    tempo sem discursar.
     """
     conn = get_connection()
     try:
         cursor = conn.execute(
-            """
-            SELECT orador_id, data
-            FROM arranjo_oradores
-            WHERE tipo = 'enviado' AND data IS NOT NULL AND data <> ''
-            """
+            _DISCURSOS_FEITOS, {"minha": _id_minha_congregacao(conn)}
         )
         ultima: dict[int, str] = {}
         for orador_id, data in cursor.fetchall():
@@ -1373,31 +1405,32 @@ def ultima_data_discurso_por_orador() -> dict[int, str]:
 
 
 def relatorio_frequencia_oradores(congregacao_id: int | None = None) -> list[dict]:
-    """Frequência de discursos (enviados) por orador ativo.
+    """Quantos discursos cada orador ativo já fez.
 
-    Retorna [{nome, quantidade, ultima_data}] ordenado de quem discursou menos
-    (e há mais tempo) para o que mais discursou. Se ``congregacao_id`` for dado,
-    limita aos oradores daquela congregação (ex.: a minha).
+    Conta o mesmo que a fila (ver ``_DISCURSOS_FEITOS``): enviado a outra
+    congregação ou feito aqui por orador da casa, sozinho ou em simpósio.
+    Retorna [{nome, quantidade, ultima_data}] de quem discursou menos (e há
+    mais tempo) para quem mais discursou. Com ``congregacao_id``, limita aos
+    oradores daquela congregação (ex.: a minha).
     """
     conn = get_connection()
     try:
-        query = """
+        query = f"""
+            WITH discursos AS ({_DISCURSOS_FEITOS})
             SELECT o.id, o.nome,
-                   COUNT(ao.id) AS quantidade,
+                   COUNT(d.data) AS quantidade,
                    MAX(
-                       substr(ao.data, 7, 4) || substr(ao.data, 4, 2)
-                       || substr(ao.data, 1, 2)
+                       substr(d.data, 7, 4) || substr(d.data, 4, 2)
+                       || substr(d.data, 1, 2)
                    ) AS ultima_chave
             FROM oradores o
-            LEFT JOIN arranjo_oradores ao
-                ON ao.orador_id = o.id AND ao.tipo = 'enviado'
-                   AND ao.data IS NOT NULL AND ao.data <> ''
+            LEFT JOIN discursos d ON d.orador_id = o.id
             WHERE COALESCE(o.ativo, 1) = 1
-        """
-        params: list = []
+        """  # noqa: S608 — o trecho é uma constante do módulo
+        params: dict = {"minha": _id_minha_congregacao(conn)}
         if congregacao_id is not None:
-            query += " AND o.congregacao_id = ?"
-            params.append(congregacao_id)
+            query += " AND o.congregacao_id = :congregacao"
+            params["congregacao"] = congregacao_id
         query += " GROUP BY o.id, o.nome"
         linhas = conn.execute(query, params).fetchall()
     finally:

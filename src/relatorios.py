@@ -406,7 +406,8 @@ def secoes_resumo_ano(
         ),
         _secao(
             "ORADORES DA MINHA CONGREGAÇÃO",
-            "Discursos enviados, de quem discursou menos (e há mais tempo) para quem mais discursou.",
+            "Discursos feitos (enviados e os daqui), de quem discursou menos "
+            "(e há mais tempo) para quem mais discursou.",
             ["Orador", "Discursos", "Último"],
             [313, 100, 110],
             [
