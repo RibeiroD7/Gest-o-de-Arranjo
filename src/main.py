@@ -815,6 +815,7 @@ def _rotulo_tema_orador_arranjo(registro: dict) -> str:
 def carregar_oradores_com_congregacao_opcoes(
     congregacao_id: int | None = None,
     por_fila: bool = False,
+    incluir_ids: list[int] | None = None,
 ) -> list[ft.dropdown.Option]:
     """Lista oradores com congregação para seletores de arranjo.
 
@@ -825,20 +826,30 @@ def carregar_oradores_com_congregacao_opcoes(
     ``por_fila`` ordena de quem está há mais tempo sem ser designado para quem
     discursou mais recentemente, em vez de alfabético: é a ordem em que a
     escolha costuma ser feita.
+
+    ``incluir_ids`` traz de volta quem já saiu do cadastro (mudou de
+    congregação) mas está NESTE registro: sem isso o campo abria vazio e
+    salvar apagava o nome dele do discurso que ele fez.
     """
-    query = """
-        SELECT o.id, o.nome, COALESCE(c.nome, '') AS congregacao
-        FROM oradores o
-        LEFT JOIN congregacoes c ON o.congregacao_id = c.id
-        WHERE COALESCE(o.ativo, 1) = 1
-    """
+    condicoes = ["COALESCE(o.ativo, 1) = 1"]
     params: list = []
     if congregacao_id is not None:
-        query += " AND o.congregacao_id = ?"
+        condicoes.append("o.congregacao_id = ?")
         params.append(congregacao_id)
-    # Agrupado por congregação: procurar "quem é da Vila Nova" fica direto,
-    # em vez de uma lista alfabética com todas as congregações misturadas.
-    query += " ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome"
+    onde = " AND ".join(condicoes)
+    ids_extras = [int(i) for i in (incluir_ids or []) if i]
+    if ids_extras:
+        marcadores = ",".join("?" * len(ids_extras))
+        onde = f"({onde}) OR o.id IN ({marcadores})"
+        params += ids_extras
+    query = f"""
+        SELECT o.id, o.nome, COALESCE(c.nome, '') AS congregacao,
+               COALESCE(o.ativo, 1) AS ativo
+        FROM oradores o
+        LEFT JOIN congregacoes c ON o.congregacao_id = c.id
+        WHERE {onde}
+        ORDER BY COALESCE(c.nome, 'ZZZ'), o.nome
+    """  # noqa: S608 — as condições são fixas; os valores vão por parâmetro
     conn = get_connection()
     try:
         df = Tabela.de_consulta(conn, query, params or None)
@@ -876,6 +887,8 @@ def carregar_oradores_com_congregacao_opcoes(
         texto = row.nome
         if row.congregacao:
             texto = f"{row.nome} — {row.congregacao}"
+        if not row.ativo:
+            texto = f"{texto} (fora do cadastro)"
         opcoes.append(ft.dropdown.Option(key=str(row.id), text=texto))
     return opcoes
 
@@ -5595,7 +5608,10 @@ def abrir_dialog_editar_orador_arranjo(
     campo_orador_2 = ft.Dropdown(
         label="Segundo orador (simpósio)",
         options=carregar_oradores_com_congregacao_opcoes(
-            None if eh_recebido or not id_minha else int(id_minha)
+            None if eh_recebido or not id_minha else int(id_minha),
+            # Quem discursou aqui e depois saiu da congregação continua nesta
+            # linha: a lista precisa trazê-lo, senão o campo abre vazio.
+            incluir_ids=[registro.get("orador_2_id")],
         ),
         value=str(registro["orador_2_id"]) if registro.get("orador_2_id") else None,
         expand=True,

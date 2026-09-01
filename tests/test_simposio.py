@@ -667,3 +667,89 @@ class TestSimposioAoEnviar:
         )
 
         assert self._caixa_simposio(dialogos[0]).visible is not False
+
+
+class TestOradorQueSaiuDaCongregacao:
+    """Quem se mudou continua no registro do discurso que fez."""
+
+    def _com_simposio_arquivado(self):
+        import main
+
+        arranjo, ids, _ = _preparar()
+        main.salvar_configuracao({
+            "nome_congregacao": "Minha", "endereco": "", "cidade": "", "cep": "",
+            "coordenador_discursos": "", "telefone_coordenador": "",
+            "dia_reuniao": "sábado", "horario_reuniao": "19:00", "circuito": "",
+        })
+        database.adicionar_orador_arranjo(
+            arranjo, "recebido", ids["Eduardo Nunes"], 176, data="03/05/2026",
+            orador_2_id=ids["Danilo Reis"],
+        )
+        database.excluir_orador(ids["Danilo Reis"])  # mudou de congregação
+        registro = database.carregar_oradores_arranjo(arranjo)[0]
+        return registro, ids
+
+    def test_arquivado_sai_da_lista_comum(self):
+        import main
+
+        _, ids = self._com_simposio_arquivado()
+        chaves = {
+            o.key for o in main.carregar_oradores_com_congregacao_opcoes()
+        }
+        assert str(ids["Danilo Reis"]) not in chaves
+
+    def test_mas_volta_quando_esta_no_registro(self):
+        import main
+
+        _, ids = self._com_simposio_arquivado()
+        opcoes = main.carregar_oradores_com_congregacao_opcoes(
+            incluir_ids=[ids["Danilo Reis"]]
+        )
+        dele = next(o for o in opcoes if o.key == str(ids["Danilo Reis"]))
+        assert "Danilo Reis" in dele.text
+        assert "fora do cadastro" in dele.text
+
+    def test_o_nome_continua_na_linha_do_mes(self):
+        registro, _ = self._com_simposio_arquivado()
+        assert nome_oradores(registro) == "Eduardo Nunes/Danilo Reis"
+
+    def test_o_dialogo_de_edicao_mostra_o_segundo_orador(self):
+        import main
+
+        registro, ids = self._com_simposio_arquivado()
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+        campo = next(
+            c for c in _todos_os_controles(dialogos[0])
+            if isinstance(c, flet.Dropdown) and "Segundo orador" in (c.label or "")
+        )
+        assert campo.value == str(ids["Danilo Reis"])
+        assert any(o.key == campo.value for o in campo.options), (
+            "sem a opção dele o campo abre vazio"
+        )
+
+    def test_salvar_nao_apaga_quem_saiu(self):
+        import main
+
+        registro, ids = self._com_simposio_arquivado()
+        dialogos = []
+        main.abrir_dialog_editar_orador_arranjo(
+            _page_falsa(dialogos), registro, lambda: None
+        )
+        salvar = next(
+            c for c in _todos_os_controles(dialogos[0])
+            if isinstance(c, flet.FilledButton) and c.content == "Salvar"
+        )
+        salvar.on_click(None)
+
+        conn = get_connection()
+        try:
+            (orador_2,) = conn.execute(
+                "SELECT orador_2_id FROM arranjo_oradores WHERE id = ?",
+                (registro["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert orador_2 == ids["Danilo Reis"]
