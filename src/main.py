@@ -1721,6 +1721,20 @@ def abrir_dialog_orador(
             "arranjo do mês ele continua disponível normalmente."
         ),
     )
+    # A marca é sobre a lista que EU mando para fora: só faz sentido para
+    # orador da minha congregação. De outra congregação, quem decide isso é
+    # o coordenador de lá — a pergunta aqui não teria resposta.
+    minha_congregacao = obter_id_minha_congregacao()
+
+    def ajustar_aprovado_fora(_=None):
+        campo_aprovado_fora.visible = (
+            not minha_congregacao
+            or str(campo_congregacao.value or "") == str(minha_congregacao)
+        )
+        page.update()
+
+    campo_congregacao.on_select = ajustar_aprovado_fora
+    ajustar_aprovado_fora()
     obs_inicial = dados["observacoes"] if dados else ""
     faz_qualquer_tema = obs_tem_qualquer_tema(obs_inicial)
     campo_observacoes = ft.TextField(
@@ -1848,7 +1862,12 @@ def abrir_dialog_orador(
                 temas_selecionados,
                 orador_id=orador_id if editando else None,
                 contato_id=vinculo_orador["contato_id"],
-                aprovado_fora=bool(campo_aprovado_fora.value),
+                # Orador de outra congregação entra como aprovado: a
+                # restrição é da lista daqui, e ele não está nela.
+                aprovado_fora=(
+                    bool(campo_aprovado_fora.value)
+                    if campo_aprovado_fora.visible else True
+                ),
             )
         except sqlite3.IntegrityError:
             # O banco não aceita dois oradores com o mesmo nome na mesma
@@ -11925,6 +11944,105 @@ def _lista_presidentes(
     )
 
 
+def abrir_dialog_reordenar_presidentes(
+    page: ft.Page,
+    cadastro: list[dict],
+    ao_concluir: Callable[[], None],
+) -> None:
+    """Arrastar para mudar a ordem do rodízio.
+
+    As setas da lista movem uma casa por clique: tirar alguém do fim do
+    cadastro e pôr em segundo eram catorze cliques, cada um recarregando a
+    tela. Aqui a lista inteira fica à vista e cada solta já grava.
+    """
+    ordem = [dict(item) for item in cadastro]
+    lista = ft.ReorderableListView(controls=[], expand=True)
+
+    def linha(indice: int, item: dict) -> ft.Control:
+        eh_anciao = item["categoria"] == "Ancião"
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text(
+                        f"{indice + 1}", size=fonte(12), width=fonte(24),
+                        weight=ft.FontWeight.W_700, color=TEXTO_SECUNDARIO,
+                    ),
+                    ft.Text(
+                        item["nome"], size=fonte(14), expand=True,
+                        color=TEXTO_PRIMARIO, max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Text(
+                        "Ancião" if eh_anciao else "Servo",
+                        size=fonte(11),
+                        color=COR_DESTAQUE_SUAVE if eh_anciao else COR_AVISO,
+                        no_wrap=True,
+                    ),
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border=ft.Border(bottom=ft.BorderSide(1, BORDA_SUAVE)),
+        )
+
+    def montar():
+        lista.controls = [linha(i, item) for i, item in enumerate(ordem)]
+
+    def ao_reordenar(e):
+        movido = ordem.pop(e.old_index)
+        ordem.insert(e.new_index, movido)
+        try:
+            salvar_ordem_presidentes([item["id"] for item in ordem])
+        except Exception:  # noqa: BLE001
+            logger.exception("Falha ao salvar a ordem do rodízio")
+            mostrar_aviso(page, "Erro", "Não foi possível salvar a nova ordem.")
+        montar()
+        page.update()
+
+    lista.on_reorder = ao_reordenar
+    montar()
+
+    def fechar(_=None):
+        page.pop_dialog()
+        ao_concluir()
+
+    page.show_dialog(
+        ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Ordem do rodízio"),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Arraste para mudar a ordem — no celular, segure e "
+                            "arraste. É a sequência que o rodízio segue nas "
+                            "semanas, e cada mudança já fica salva.",
+                            size=fonte(12), color=TEXTO_SECUNDARIO,
+                        ),
+                        ft.Container(height=8),
+                        ft.Container(
+                            content=lista,
+                            expand=True,
+                            border=ft.Border.all(1, BORDA_SUAVE),
+                            border_radius=12,
+                            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                        ),
+                    ],
+                    spacing=0,
+                    expand=True,
+                    width=_largura_dialog(page, 460),
+                ),
+                height=_altura_dialog_lista(page),
+                padding=ft.Padding.only(top=4),
+            ),
+            actions=[ft.TextButton("Fechar", on_click=fechar)],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+    )
+    page.update()
+
+
 def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Control:
     """Lista dos presidentes com a ordem do rodízio; edição em diálogo."""
     cadastro = listar_presidentes_cadastro()
@@ -12157,6 +12275,12 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
     botao_adicionar = ft.FilledButton(
         "Adicionar", icon=ft.Icons.PERSON_ADD_ALT, on_click=adicionar
     )
+    botao_reordenar = ft.OutlinedButton(
+        content="Reordenar",
+        icon=ft.Icons.SWAP_VERT,
+        tooltip="Arrastar para mudar a ordem do rodízio",
+        on_click=lambda _: abrir_dialog_reordenar_presidentes(page, cadastro, ao_mudar),
+    )
 
     def exportar_relatorio(_=None):
         from relatorios import secoes_presidentes
@@ -12180,7 +12304,10 @@ def _secao_presidentes(page: ft.Page, ao_mudar: Callable[[], None]) -> ft.Contro
         tight=True,
         expand=True,
     )
-    botoes = [botao_relatorio_tela(exportar_relatorio), botao_adicionar]
+    botoes = [botao_relatorio_tela(exportar_relatorio)]
+    if len(cadastro) > 1:
+        botoes.append(botao_reordenar)
+    botoes.append(botao_adicionar)
     if eh_mobile():
         # `wrap=True` numa Row com filho `expand=True` não resolve a largura no
         # Flet e a seção inteira vira um retângulo vazio: no celular, empilha.
