@@ -8,6 +8,7 @@ extração.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
@@ -421,3 +422,72 @@ def nome_oradores(registro) -> str:
     if primeiro and segundo:
         return f"{primeiro}{SEPARADOR_SIMPOSIO}{segundo}"
     return primeiro or segundo
+
+
+def _data_de_limite(texto: str) -> date | None:
+    """Lê a data de um limite de uso: AAAA-MM-DD, DD/MM/AAAA, AAAA-MM ou MM/AAAA.
+
+    Só com mês e ano, vale o dia 1º: "09/2026" é "a partir de setembro".
+    """
+    texto = (texto or "").strip()
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m", "%m/%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+_MESES_POR_NOME = {
+    _normalizar_texto_busca(nome): numero
+    for numero, nome in enumerate(NOMES_MESES)
+    if nome
+}
+
+
+def limite_uso_tema(data_limite: str | None, *textos: str | None) -> date | None:
+    """Primeiro dia em que o tema NÃO pode mais ser feito (ou None).
+
+    O campo próprio (``data_limite_uso``) manda. Sem ele, vale o que estiver
+    escrito no título ou nas observações — "Não use a partir de setembro de
+    2026" —, que é como o aviso costuma chegar: sem isso o tema 109 passou
+    de setembro sem o app reclamar.
+    """
+    limite = _data_de_limite(data_limite or "")
+    if limite:
+        return limite
+    for texto in textos:
+        norma = _normalizar_texto_busca(texto or "")
+        posicao = norma.find("a partir d")
+        if posicao < 0:
+            continue
+        trecho = norma[posicao:]
+        numerica = re.search(r"(\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{4})", trecho)
+        por_nome = re.search(
+            r"(" + "|".join(_MESES_POR_NOME) + r")\s*(?:de|/)?\s*(\d{4})", trecho
+        )
+        # O que aparecer primeiro depois do "a partir de" é o limite.
+        candidatos = [m for m in (numerica, por_nome) if m]
+        if not candidatos:
+            continue
+        primeiro = min(candidatos, key=lambda m: m.start())
+        if primeiro is numerica:
+            limite = _data_de_limite(primeiro.group(1))
+        else:
+            limite = date(int(primeiro.group(2)), _MESES_POR_NOME[primeiro.group(1)], 1)
+        if limite:
+            return limite
+    return None
+
+
+def aviso_tema_fora_do_prazo(
+    tema_nr: int | None, limite: date | None, data_ref: date | None
+) -> str | None:
+    """Mensagem de bloqueio quando a data cai no período proibido do tema."""
+    if not tema_nr or not limite or not data_ref or data_ref < limite:
+        return None
+    return (
+        f"O tema {tema_nr} não pode ser usado a partir de "
+        f"{limite.strftime('%d/%m/%Y')} (data escolhida: "
+        f"{data_ref.strftime('%d/%m/%Y')})."
+    )

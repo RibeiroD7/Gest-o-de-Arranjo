@@ -78,6 +78,7 @@ from database import (
     definir_tipo_evento_entra_rodizio,
     definir_tipo_evento_tem_presidente,
     definir_visibilidade_ano_coluna,
+    designacoes_com_tema_fora_do_prazo,
     excluir_ano_coluna,
     excluir_arranjo,
     excluir_data_especial,
@@ -95,6 +96,7 @@ from database import (
     historico_presidencias_da_pessoa,
     historico_presidentes_por_tipo_de_evento,
     importar_temas_pdf,
+    limites_uso_temas,
     listar_anos_arranjos,
     listar_anos_colunas,
     listar_anos_planejamento,
@@ -228,6 +230,7 @@ from util import (
     _rotulo_weekday,
     _weekday_mais_usado,
     aviso_backup_antigo,
+    aviso_tema_fora_do_prazo,
     descrever_ultimo_envio,
     eh_visita_superintendente,
     espera_de_resposta,
@@ -3236,6 +3239,16 @@ def tela_inicio(
             f"Anotação: {_resumir_texto_tabela(anotacao['texto'], 60)}",
         ))
 
+    # Tema marcado depois do prazo dele ("não use a partir de setembro"):
+    # pega o que já estava agendado antes do bloqueio no formulário.
+    for fora in designacoes_com_tema_fora_do_prazo(hoje):
+        nome = nome_oradores(fora) or "Orador"
+        pendencias.append((
+            fora["data_ref"],
+            f"Tema {fora['tema_nr']} fora do prazo ({nome}, {fora['data']}): "
+            f"não usar desde {fora['limite'].strftime('%d/%m/%Y')}",
+        ))
+
     # Ordem por proximidade: o que acontece antes cobra antes. Sem data (as
     # que esperam resposta) fica no fim do bloco datado.
     pendencias.sort(key=lambda item: item[0] or date.max)
@@ -4081,7 +4094,7 @@ def abrir_dialog_tema(
     )
     campo_data_limite = ft.TextField(
         label="Data limite de uso",
-        hint_text="Ex: 2026-09-01 (opcional)",
+        hint_text="Não usar a partir de — ex: 01/09/2026",
         value=dados["data_limite_uso"],
         width=200,
     )
@@ -5128,7 +5141,9 @@ def _selo_status_designacao(registro: dict, on_status: Callable[[int, str], None
     )
 
 
-def _criar_cabecalho_tabela_oradores(com_alca: bool = False) -> ft.Container:
+def _criar_cabecalho_tabela_oradores(
+    com_alca: bool = False, largura_acoes: int | None = None
+) -> ft.Container:
     """Cabeçalho da tabela: Data | Orador | Tema | Ações."""
     return ft.Container(
         bgcolor=ft.Colors.with_opacity(0.06, COR_DESTAQUE),
@@ -5161,7 +5176,7 @@ def _criar_cabecalho_tabela_oradores(com_alca: bool = False) -> ft.Container:
                 ),
                 ft.Text(
                     "Ações",
-                    width=_tema.LARGURA_COL_ACOES_MES,
+                    width=largura_acoes or _tema.LARGURA_COL_ACOES_MES,
                     size=fonte(12),
                     weight=ft.FontWeight.W_700,
                     color=TEXTO_SECUNDARIO,
@@ -5366,16 +5381,21 @@ def _ordem_apos_arrastar(total: int, origem: int, destino: int) -> list[int]:
     return indices
 
 
+# No celular o Material não deixa a área de toque do botão de ícone ficar
+# abaixo de 48 px. Contando 34 por botão, a coluna ficava curta e a lixeira
+# (o último botão) era cortada fora da linha.
+LARGURA_BOTAO_ACAO_MOBILE = 48
+
+
 def _largura_acoes_mes(
     on_whatsapp: object | None, on_status: object | None, on_mover: object | None
 ) -> int:
     """Largura da coluna de ações, que cresce com os botões que ela mostra."""
-    return (
-        _tema.LARGURA_COL_ACOES_MES
-        + (34 if on_whatsapp else 0)
-        + (34 if on_status else 0)
-        + (34 if on_mover else 0)
-    )
+    extras = sum(1 for botao in (on_whatsapp, on_status, on_mover) if botao)
+    if eh_mobile():
+        # Editar e remover sempre aparecem; os outros, conforme a seção.
+        return LARGURA_BOTAO_ACAO_MOBILE * (2 + extras)
+    return _tema.LARGURA_COL_ACOES_MES + 34 * extras
 
 
 def _largura_tabela_mes(com_alca: bool, largura_acoes: int) -> int:
@@ -5553,7 +5573,12 @@ def _montar_tabela_secao(
 
     tabela = ft.Container(
         content=ft.Column(
-            [_criar_cabecalho_tabela_oradores(arrastavel), corpo],
+            [
+                _criar_cabecalho_tabela_oradores(
+                    arrastavel, _largura_acoes_mes(on_whatsapp, on_status, on_mover)
+                ),
+                corpo,
+            ],
             spacing=0,
             tight=True,
         ),
@@ -5603,30 +5628,52 @@ def aplicar_ordem_presidentes(datas: list[str], pessoas: list[dict | None]) -> N
             salvar_presidente_avulso(data, pessoa.get("nome") or "")
 
 
+def _caixa_simposio(marcada: bool) -> ft.Checkbox:
+    """Caixa "Simpósio" dos formulários de designação.
+
+    O rótulo do Checkbox não quebra linha: o texto longo de antes ("dois
+    oradores no mesmo discurso") passava da borda do diálogo no celular.
+    """
+    return ft.Checkbox(
+        label="Simpósio (dois oradores)",
+        value=marcada,
+        tooltip="Um discurso só, dividido entre dois oradores",
+    )
+
+
 def abrir_dialog_editar_orador_arranjo(
     page: ft.Page,
     registro: dict,
     atualizar_listas: Callable[[], None],
+    on_excluir: Callable[[int], None] | None = None,
 ) -> None:
-    """Abre formulário para editar tema e congregação de uma designação."""
+    """Abre formulário para editar tema e congregação de uma designação.
+
+    Com ``on_excluir``, o formulário também tira o discurso da data — no
+    celular a lixeira da linha fica longe, no fim da tabela que rola de lado.
+    """
     registro_id = int(registro["id"])
     tipo = registro["tipo"]
     rotulo_cong = "Origem" if tipo == "recebido" else "Destino"
     tema_atual = str(registro["tema_nr"]) if registro.get("tema_nr") else ""
     data_atual = registro.get("data") or ""
+    # Os campos ficam com a largura do formulário, e não com ``expand``: numa
+    # coluna, ``expand`` estica na vertical e abria vãos enormes entre os
+    # campos no celular.
+    largura = _largura_dialog(page, 460)
 
     campo_data = ft.TextField(
         label="Data",
         hint_text="DD/MM/AAAA",
         value=data_atual,
-        expand=True,
+        width=largura,
     )
     campo_tema = ft.Dropdown(
         label="Tema",
         hint_text="Digite o número ou parte do título",
         options=carregar_temas_opcoes(incluir_sem_tema=True),
         value=tema_atual,
-        expand=True,
+        width=largura,
         editable=True,
         enable_filter=True,
         enable_search=True,
@@ -5636,7 +5683,7 @@ def abrir_dialog_editar_orador_arranjo(
         label=f"Congregação ({rotulo_cong.lower()})",
         options=carregar_congregacoes_opcoes(),
         value=str(registro["congregacao_id"]) if registro.get("congregacao_id") else None,
-        expand=True,
+        width=largura,
         editable=True,
         enable_filter=True,
         enable_search=True,
@@ -5668,19 +5715,16 @@ def abrir_dialog_editar_orador_arranjo(
             CHAVE_ORADOR_FORA if segundo_sumiu
             else (str(registro["orador_2_id"]) if registro.get("orador_2_id") else None)
         ),
-        expand=True,
+        width=largura,
         visible=bool(registro.get("orador_2_id")),
     )
     campo_orador_2_nome = ft.TextField(
         label="Nome do segundo orador",
         hint_text="Quem discursou junto e não está mais no cadastro",
-        expand=True,
+        width=largura,
         visible=segundo_sumiu,
     )
-    campo_simposio = ft.Checkbox(
-        label="Simpósio (dois oradores no mesmo discurso)",
-        value=bool(registro.get("orador_2_id")),
-    )
+    campo_simposio = _caixa_simposio(bool(registro.get("orador_2_id")))
 
     def alternar_nome_fora(_=None):
         campo_orador_2_nome.visible = (
@@ -5712,6 +5756,16 @@ def abrir_dialog_editar_orador_arranjo(
             return
         try:
             tema_nr = int(campo_tema.value) if campo_tema.value else None
+            aviso_prazo = aviso_tema_fora_do_prazo(
+                tema_nr,
+                limites_uso_temas().get(tema_nr) if tema_nr else None,
+                _parse_data_arranjo(data_norm),
+            )
+            if aviso_prazo:
+                texto_erro.value = aviso_prazo
+                texto_erro.visible = True
+                page.update()
+                return
             congregacao_id = (
                 int(campo_congregacao.value) if campo_congregacao.value else None
             )
@@ -5755,6 +5809,25 @@ def abrir_dialog_editar_orador_arranjo(
         fechar()
         atualizar_listas()
 
+    # Excluir pede um segundo toque: o botão vira "Confirmar exclusão" antes
+    # de apagar, para um toque sem querer não tirar o orador da data.
+    botao_excluir = ft.TextButton(
+        "Excluir",
+        icon=ft.Icons.DELETE_OUTLINE,
+        style=ft.ButtonStyle(color=COR_ERRO),
+        visible=on_excluir is not None,
+    )
+
+    def excluir(_=None):
+        if botao_excluir.content != "Confirmar exclusão":
+            botao_excluir.content = "Confirmar exclusão"
+            page.update()
+            return
+        fechar()
+        on_excluir(registro_id)
+
+    botao_excluir.on_click = excluir
+
     page.show_dialog(
         ft.AlertDialog(
             modal=True,
@@ -5772,12 +5845,14 @@ def abrir_dialog_editar_orador_arranjo(
                     ],
                     spacing=12,
                     tight=True,
-                    width=460,
+                    width=largura,
+                    scroll=ft.ScrollMode.AUTO,
                 ),
                 padding=ft.Padding.only(top=8),
             ),
             content_padding=ft.Padding.symmetric(horizontal=24, vertical=16),
             actions=[
+                botao_excluir,
                 ft.TextButton("Cancelar", on_click=fechar),
                 ft.FilledButton(
                     content="Salvar",
@@ -5882,10 +5957,7 @@ def abrir_seletor_oradores(
         expand=True,
         visible=False,
     )
-    campo_simposio = ft.Checkbox(
-        label="Simpósio (dois oradores no mesmo discurso)",
-        value=False,
-    )
+    campo_simposio = _caixa_simposio(False)
 
     def alternar_simposio(_=None):
         campo_orador_2.visible = bool(campo_simposio.value)
@@ -6296,6 +6368,24 @@ def abrir_seletor_oradores(
             return
         if not eh_oradores and not campo_tema.value:
             texto_erro.value = "Selecione um tema."
+            texto_erro.visible = True
+            page.update()
+            return
+        # Tema com prazo vencido ("não use a partir de setembro") não entra.
+        tema_escolhido = int(campo_tema.value) if campo_tema.value else None
+        limite_tema = limites_uso_temas().get(tema_escolhido) if tema_escolhido else None
+        aviso_prazo = next(
+            (
+                aviso
+                for d in datas_selecionadas
+                if (aviso := aviso_tema_fora_do_prazo(
+                    tema_escolhido, limite_tema, _parse_data_arranjo(d)
+                ))
+            ),
+            None,
+        )
+        if aviso_prazo:
+            texto_erro.value = aviso_prazo
             texto_erro.visible = True
             page.update()
             return
@@ -7986,7 +8076,9 @@ def abrir_dialog_oradores_mes(
             mostrar_aviso(page, "Erro", "Não foi possível remover o orador.")
 
     def editar_orador(item: dict):
-        abrir_dialog_editar_orador_arranjo(page, item, atualizar_listas)
+        abrir_dialog_editar_orador_arranjo(
+            page, item, atualizar_listas, on_excluir=remover_orador
+        )
 
     def whatsapp_designacao(item: dict):
         def marcar_convite():
