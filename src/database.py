@@ -9,7 +9,7 @@ from armazenamento import (
     BACKUPS_DIR,
     DATA_DIR,
 )
-from util import SEPARADOR_SIMPOSIO
+from util import SEPARADOR_SIMPOSIO, _parse_data_arranjo, limite_uso_tema
 
 DB_PATH = str(DATA_DIR / "gestao_arranjo.db")
 
@@ -1664,6 +1664,65 @@ def carregar_designacoes_ano(ano: int) -> list[dict]:
         return [dict(zip(colunas, row)) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+
+def limites_uso_temas() -> dict[int, date]:
+    """Tema -> primeiro dia em que ele não pode mais ser feito.
+
+    Só entram os temas com limite: no campo próprio ou escrito no título ou
+    nas observações ("Não use a partir de setembro de 2026").
+    """
+    conn = get_connection()
+    try:
+        linhas = conn.execute(
+            "SELECT nr, data_limite_uso, titulo, notas FROM temas"
+        ).fetchall()
+    finally:
+        conn.close()
+    limites: dict[int, date] = {}
+    for nr, data_limite, titulo, notas in linhas:
+        limite = limite_uso_tema(data_limite, titulo, notas)
+        if limite:
+            limites[int(nr)] = limite
+    return limites
+
+
+def designacoes_com_tema_fora_do_prazo(desde: date) -> list[dict]:
+    """Discursos marcados de ``desde`` em diante com tema já fora do prazo.
+
+    É a rede de segurança do bloqueio no formulário: pega o que foi marcado
+    antes da regra existir, ou que mudou de data arrastando.
+    """
+    limites = limites_uso_temas()
+    if not limites:
+        return []
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            f"""
+            SELECT ao.data, ao.tipo, ao.tema_nr,
+                   COALESCE(o.nome, '') AS orador_nome,
+                   COALESCE(o2.nome, '') AS orador_2_nome
+            FROM arranjo_oradores ao
+            LEFT JOIN oradores o ON ao.orador_id = o.id
+            LEFT JOIN oradores o2 ON ao.orador_2_id = o2.id
+            WHERE ao.tema_nr IN ({",".join("?" * len(limites))})
+              AND ao.data IS NOT NULL AND ao.data <> ''
+            """,
+            list(limites),
+        )
+        colunas = [desc[0] for desc in cursor.description]
+        registros = [dict(zip(colunas, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+    fora: list[dict] = []
+    for registro in registros:
+        data_ref = _parse_data_arranjo(registro["data"])
+        limite = limites[int(registro["tema_nr"])]
+        if data_ref and data_ref >= desde and data_ref >= limite:
+            fora.append({**registro, "data_ref": data_ref, "limite": limite})
+    fora.sort(key=lambda item: item["data_ref"])
+    return fora
 
 
 def listar_anos_arranjos() -> list[int]:
